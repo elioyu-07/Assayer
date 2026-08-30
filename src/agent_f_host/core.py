@@ -65,6 +65,8 @@ class HostCore:
         self._evidence_validator = entity_validator("evidence.schema.json")
         self._screenshot_validator = entity_validator("screenshot.schema.json")
         self._pending_decision_validator = entity_validator("pending-decision.schema.json")
+        self._assessment_validator = entity_validator("rule-assessment.schema.json")
+        self._issue_validator = entity_validator("issue.schema.json")
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
@@ -127,10 +129,11 @@ class HostCore:
                 if tool == "begin_case": return self._begin_case(request, scan, existing)
                 if tool == "capture_evidence": return self._capture_evidence(request, scan, existing)
                 if tool == "prepare_decision": return self._prepare_decision(request, scan, existing)
+                if tool == "commit_decision": return self._commit_decision(request, scan, existing)
             return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"}:
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision"}
+        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
@@ -143,6 +146,8 @@ class HostCore:
                 return self._capture_evidence(request, scan, operation)
             if operation["status"] == "running" and tool == "prepare_decision":
                 return self._prepare_decision(request, scan, operation)
+            if operation["status"] == "running" and tool == "commit_decision":
+                return self._commit_decision(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
@@ -158,6 +163,8 @@ class HostCore:
             return self._capture_evidence(request, scan, operation)
         if tool == "prepare_decision":
             return self._prepare_decision(request, scan, operation)
+        if tool == "commit_decision":
+            return self._commit_decision(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -791,6 +798,128 @@ class HostCore:
             return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "PendingDecision 或问题截图持久化失败")
         return self._response(request, scan, "ok", result=result, operation=operation, evidence_refs=data["evidenceRefs"])
 
+    def _commit_decision(self, request: dict, scan: dict, operation: dict) -> dict:
+        pending = self._store.get_pending_decision(request["input"]["pendingDecisionId"])
+        if not pending or pending.get("scanId") != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "PendingDecision 不存在于当前 Scan")
+        if pending.get("status") != "pending":
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "PendingDecision 已提交或失效")
+        if scan.get("ruleRegistryDigest") != self._rule_registry_digest or pending.get("preparedAtRevision", scan["runRevision"]) > scan["runRevision"]:
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "规则注册表或 PendingDecision revision 已失效")
+        try:
+            self._validate_entity(self._pending_decision_validator, pending, "PendingDecision")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        preparation = self._store.get_operation(pending["preparationOperationRef"])
+        if not preparation or preparation.get("scan_id") != scan["scanId"] or preparation.get("tool") != "prepare_decision" or preparation.get("status") != "succeeded":
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "PendingDecision 的准备 Operation 引用失效")
+        target = self._store.get_audit_object(pending["objectRef"])
+        rule_ref = pending["rule"]
+        rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+        if not target or target.get("scanId") != scan["scanId"] or target.get("pageStateRef") != scan.get("currentPageStateId") or target.get("rebindStatus") != "matched":
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "提交时对象身份或页面状态已失效")
+        if target.get("status") not in {"eligible", "investigating"} or not rule or rule_ref not in target.get("potentialRules", []):
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "提交时对象或规则不再有效")
+        try:
+            self._validate_entity(self._audit_object_validator, target, "AuditObject")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        if self._store.get_assessment_for_object_rule(scan["scanId"], target["objectId"], rule_ref):
+            return self._finish_operation_failure(request, scan, operation, "ALREADY_COMMITTED", "同一对象和规则已经存在正式判定")
+        covered_dimensions = set()
+        for case_ref in pending["caseRefs"]:
+            case = self._store.get_case(case_ref)
+            if not case or case.get("scanId") != scan["scanId"] or case.get("objectRef") != target["objectId"] or case.get("rule") != rule_ref:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "提交时 Case 引用不闭合")
+            if case.get("status") != "completed" or case.get("recovery", {}).get("finalStatus") != "restored":
+                pending["status"] = "invalidated"
+                with self._store.transaction():
+                    self._store.update_pending_decision(pending)
+                return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "提交时 Case 未越过恢复屏障")
+            try:
+                self._validate_entity(self._case_validator, case, "ReverseCase")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            covered_dimensions.update(case.get("plannedCoverageDimensions", []))
+        required_dimensions = list(rule.get("coverageDimensions", []))
+        coverage = {"requiredDimensions": required_dimensions, "coveredDimensions": [d for d in required_dimensions if d in covered_dimensions], "complete": set(required_dimensions).issubset(covered_dimensions)}
+        if coverage != pending.get("coverage"):
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "提交时覆盖证明已变化")
+        if pending["result"] == "scanned_no_issue" and not coverage["complete"]:
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INCOMPLETE", "提交时覆盖不足")
+        evidence_refs = list(pending["evidenceRefs"])
+        for evidence_ref in evidence_refs:
+            evidence = self._store.get_evidence(evidence_ref)
+            if not evidence or evidence.get("scanId") != scan["scanId"] or evidence.get("objectRef") != target["objectId"] or evidence.get("pageStateRef") != target["pageStateRef"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "提交时 Evidence 引用失效")
+            if evidence.get("caseRef") and evidence["caseRef"] not in pending["caseRefs"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "提交时 Evidence 的 Case 引用不闭合")
+            digest_material = {key: value for key, value in evidence.items() if key not in {"evidenceId", "capturedAt", "integrityDigest"}}
+            if evidence.get("integrityDigest") != self._digest(digest_material):
+                return self._finish_operation_failure(request, scan, operation, "EVIDENCE_INTEGRITY_FAILED", "提交时 Evidence 完整性校验失败")
+            try:
+                self._validate_entity(self._evidence_validator, evidence, "Evidence")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        assessment_id = self._new_id("assessment")
+        revision = scan["runRevision"] + 1
+        assessment = {"assessmentId": assessment_id, "scanId": scan["scanId"], "preparationOperationRef": pending["preparationOperationRef"], "commitOperationRef": operation.get("operation_id") or operation["operationId"], "objectRef": target["objectId"], "rule": rule_ref, "applicable": pending["applicable"], "result": pending["result"], "coverage": coverage, "evidenceRefs": evidence_refs, "caseRefs": list(pending["caseRefs"]), "reasonText": pending["reasonText"], "conclusionValidity": "valid", "decidedAt": self._now(), "committedAtRevision": revision}
+        if pending.get("screenshotRef"):
+            screenshot = self._store.get_screenshot(pending["screenshotRef"])
+            raw = self._store.get_screenshot(pending.get("rawVisualRef"))
+            if not screenshot or screenshot.get("kind") != "issue" or screenshot.get("status") != "captured" or screenshot.get("scanId") != scan["scanId"] or screenshot.get("objectRef") != target["objectId"] or screenshot.get("pageStateRef") != target["pageStateRef"]:
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_NOT_CAPTURED", "提交时问题截图无效")
+            if not raw or raw.get("kind") != "raw_visual" or raw.get("status") != "captured" or screenshot.get("rawVisualRef") != raw.get("screenshotId") or screenshot.get("digest") != raw.get("digest"):
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_NOT_CAPTURED", "问题截图与 Raw Visual 来源链失效")
+            if screenshot.get("caseRef") and screenshot["caseRef"] not in pending["caseRefs"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "问题截图的 Case 引用不闭合")
+            try:
+                self._validate_entity(self._screenshot_validator, screenshot, "Screenshot")
+                self._read_screenshot(scan["outputDir"], screenshot)
+            except (OSError, ValueError, HostError) as error:
+                message = error.message if isinstance(error, HostError) else str(error)
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_NOT_CAPTURED", message)
+            assessment["screenshotRef"] = pending["screenshotRef"]
+        for field in ("severity", "title", "impact", "recommendation"):
+            if field in pending:
+                assessment[field] = pending[field]
+        if pending.get("blocker"):
+            assessment["blocker"] = pending["blocker"]
+        try:
+            self._validate_entity(self._assessment_validator, assessment, "RuleAssessment")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        issue = None
+        if pending["result"] == "issue_found":
+            issue = {"issueId": self._new_id("issue"), "scanId": scan["scanId"], "assessmentRef": assessment_id, "objectRef": target["objectId"], "rule": rule_ref, "result": "issue_found", "evidenceRefs": evidence_refs, "screenshotRef": pending["screenshotRef"], "severity": pending["severity"], "title": pending["title"], "message": pending["message"], "impact": pending["impact"], "recommendation": pending["recommendation"], "conclusionValidity": "valid", "createdAt": self._now(), "createdAtRevision": revision}
+            try:
+                self._validate_entity(self._issue_validator, issue, "Issue")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        target.setdefault("assessmentRefs", []).append(assessment_id)
+        target["status"] = "decided" if len(target["assessmentRefs"]) >= len(target.get("potentialRules", [])) else "eligible"
+        self._validate_entity(self._audit_object_validator, target, "AuditObject")
+        pending["status"] = "committed"
+        operation_result = {"assessmentId": assessment_id, "runRevision": revision}
+        if issue:
+            operation_result["issueId"] = issue["issueId"]
+        operation.update({"status": "succeeded", "resultJson": json.dumps(operation_result, ensure_ascii=False, separators=(",", ":"))})
+        scan["runRevision"] = revision
+        try:
+            with self._store.transaction():
+                self._store.insert_assessment(assessment)
+                if issue:
+                    self._store.insert_issue(issue)
+                self._store.update_audit_object(target)
+                self._store.update_pending_decision(pending)
+                self._store.update_scan(scan)
+                self._store.update_operation(operation)
+        except Exception:
+            operation.pop("resultJson", None)
+            scan = self._scan_from_row(self._store.get_scan(scan["scanId"]))
+            return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "正式判定原子持久化失败")
+        return self._response(request, scan, "ok", result=operation_result, operation=operation, evidence_refs=evidence_refs)
+
     def _materialize_issue_screenshot(self, scan: dict, raw: dict, operation_id: str, revision: int) -> dict:
         screenshot_id = self._stable_id("screenshot", operation_id, "issue")
         extension = "jpg" if raw["imageType"] == "jpeg" else raw["imageType"]
@@ -978,6 +1107,12 @@ class HostCore:
         if status == "succeeded" and operation.get("result_json"):
             saved = json.loads(operation["result_json"])
             evidence_refs = [saved["evidenceId"]] if tool == "capture_evidence" and saved.get("evidenceId") else []
+            if tool == "prepare_decision" and saved.get("pendingDecisionId"):
+                pending = self._store.get_pending_decision(saved["pendingDecisionId"])
+                evidence_refs = list(pending.get("evidenceRefs", [])) if pending else []
+            if tool == "commit_decision" and saved.get("assessmentId"):
+                assessment = self._store.get_assessment(saved["assessmentId"])
+                evidence_refs = list(assessment.get("evidenceRefs", [])) if assessment else []
             return self._response(request, scan, "ok", result=saved, operation=operation, evidence_refs=evidence_refs)
         code = operation.get("error_code") or operation.get("errorCode") or ("OPERATION_IN_PROGRESS" if status == "running" else "OPERATION_RESULT_UNKNOWN")
         message = operation.get("error_message") or operation.get("errorMessage") or "Operation 尚未产生确定结果"

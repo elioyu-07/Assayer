@@ -88,6 +88,16 @@ class SQLiteStore:
               rule_id TEXT NOT NULL, rule_version TEXT NOT NULL, status TEXT NOT NULL,
               entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS assessments (
+              assessment_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
+              rule_id TEXT NOT NULL, rule_version TEXT NOT NULL, entity_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS issues (
+              issue_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              assessment_id TEXT NOT NULL REFERENCES assessments(assessment_id),
+              object_id TEXT NOT NULL REFERENCES audit_objects(object_id), entity_json TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -112,6 +122,7 @@ class SQLiteStore:
             if name not in case_columns:
                 self._conn.execute(f"ALTER TABLE reverse_cases ADD COLUMN {name} {definition}")
         self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_case_per_object_rule ON reverse_cases(scan_id,object_id,rule_id,rule_version) WHERE status IN ('planned','safety_check','executing','evidence_captured','decision_prepared','restoring')")
+        self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_assessment_per_object_rule ON assessments(scan_id,object_id,rule_id,rule_version)")
         self._conn.commit()
 
     @contextmanager
@@ -301,6 +312,30 @@ class SQLiteStore:
             "UPDATE pending_decisions SET status=?, entity_json=? WHERE pending_decision_id=?",
             (decision["status"], json.dumps(decision, ensure_ascii=False, separators=(",", ":")), decision["pendingDecisionId"]),
         )
+
+    def insert_assessment(self, assessment: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO assessments(assessment_id,scan_id,object_id,rule_id,rule_version,entity_json) VALUES(?,?,?,?,?,?)",
+            (assessment["assessmentId"], assessment["scanId"], assessment["objectRef"], assessment["rule"]["ruleId"], assessment["rule"]["version"], json.dumps(assessment, ensure_ascii=False, separators=(",", ":"))),
+        )
+
+    def get_assessment(self, assessment_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM assessments WHERE assessment_id=?", (assessment_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def get_assessment_for_object_rule(self, scan_id: str, object_id: str, rule: dict) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM assessments WHERE scan_id=? AND object_id=? AND rule_id=? AND rule_version=?", (scan_id, object_id, rule["ruleId"], rule["version"])).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def insert_issue(self, issue: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO issues(issue_id,scan_id,assessment_id,object_id,entity_json) VALUES(?,?,?,?,?)",
+            (issue["issueId"], issue["scanId"], issue["assessmentRef"], issue["objectRef"], json.dumps(issue, ensure_ascii=False, separators=(",", ":"))),
+        )
+
+    def get_issue(self, issue_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM issues WHERE issue_id=?", (issue_id,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
         self._conn.execute("INSERT INTO bootstrap_idempotency(idempotency_key,operation_id,request_digest) VALUES(?,?,?)", (key, operation_id, digest))

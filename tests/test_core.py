@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,11 @@ class ExplodingIdentityAdapter:
 
     def rebind_object(self, audit_object, page_state):
         raise RuntimeError("identity adapter crash")
+
+
+class FailingIssueStore(SQLiteStore):
+    def insert_issue(self, issue):
+        raise RuntimeError("injected issue persistence failure")
 
 
 def bootstrap(core, key="boot-001"):
@@ -588,9 +594,8 @@ class HostCoreTest(unittest.TestCase):
             pending = core._store.get_pending_decision(result["result"]["pendingDecisionId"])
             self.assertEqual(pending["status"], "pending")
             self.assertTrue(pending["coverage"]["complete"])
-            tables = {row[0] for row in core._store._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            self.assertNotIn("rule_assessments", tables)
-            self.assertNotIn("issues", tables)
+            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])
 
@@ -665,6 +670,106 @@ class HostCoreTest(unittest.TestCase):
             second = core.handle(session(started, tool="prepare_decision", key="multi-prepare-two", revision=8,
                                          input=self.prepare_input(object_id, second_id, second_ev["result"]["evidenceId"], raw_visual_ref=second_ev["result"]["screenshotRef"])))
             self.assertNotEqual(first["result"]["screenshotRef"], second["result"]["screenshotRef"])
+
+    def test_commit_no_issue_writes_assessment_atomically_and_marks_object(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        prepared = core.handle(session(started, tool="prepare_decision", key="commit-prepare", revision=4,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        committed = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=5,
+                                        input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+        self.assertEqual(committed["runRevision"], 6)
+        assessment = core._store.get_assessment(committed["result"]["assessmentId"])
+        self.assertEqual(assessment["result"], "scanned_no_issue")
+        self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "committed")
+        self.assertEqual(core._store.get_audit_object(object_id)["status"], "decided")
+        self.assertIsNone(committed["result"].get("issueId"))
+        retry = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=5,
+                                    input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+        self.assertEqual(retry["result"], committed["result"])
+
+    def test_commit_issue_derives_one_issue_from_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            case_id = case_result["result"]["caseId"]
+            evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+            self.restore_case(core, started, object_id, case_id, revision=3)
+            prepared = core.handle(session(started, tool="prepare_decision", key="issue-prepare", revision=4,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
+            committed = core.handle(session(started, tool="commit_decision", key="issue-commit", revision=5,
+                                            input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+            issue = core._store.get_issue(committed["result"]["issueId"])
+            self.assertEqual(issue["assessmentRef"], committed["result"]["assessmentId"])
+            self.assertEqual(issue["screenshotRef"], prepared["result"]["screenshotRef"])
+
+    def test_commit_rejects_pending_if_case_becomes_unrestored(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        prepared = core.handle(session(started, tool="prepare_decision", key="stale-prepare", revision=4,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        with core._store.transaction() as connection:
+            case = core._store.get_case(case_id)
+            case["status"] = "restore_failed"
+            case["recovery"]["finalStatus"] = "failed"
+            case["endedAt"] = core._now()
+            case["restoreReason"] = {"code":"TEST_INVALIDATION","message":"测试使恢复屏障失效"}
+            core._store.update_case(case)
+        result = core.handle(session(started, tool="commit_decision", key="stale-commit", revision=5,
+                                     input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+        self.assertEqual(result["error"]["code"], "CASE_NOT_RESTORED")
+        self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "invalidated")
+        self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+
+    def test_commit_rechecks_evidence_integrity(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        prepared = core.handle(session(started, tool="prepare_decision", key="integrity-prepare", revision=4,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        tampered = core._store.get_evidence(evidence["result"]["evidenceId"])
+        tampered["payload"]["content"] = {"tampered": True}
+        with core._store.transaction() as connection:
+            connection.execute("UPDATE evidence SET entity_json=? WHERE evidence_id=?", (json.dumps(tampered), tampered["evidenceId"]))
+        result = core.handle(session(started, tool="commit_decision", key="integrity-commit", revision=5,
+                                     input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+        self.assertEqual(result["error"]["code"], "EVIDENCE_INTEGRITY_FAILED")
+        self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+
+    def test_commit_rolls_back_assessment_when_issue_insert_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = FailingIssueStore()
+            core = self.make_core(store=store, evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            case_id = case_result["result"]["caseId"]
+            evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+            self.restore_case(core, started, object_id, case_id, revision=3)
+            prepared = core.handle(session(started, tool="prepare_decision", key="rollback-prepare", revision=4,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
+            result = core.handle(session(started, tool="commit_decision", key="rollback-commit", revision=5,
+                                         input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+            self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
+            self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "pending")
+            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 5)
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))

@@ -11,4 +11,4 @@
 
 ## 切片边界
 
-本切片不实现 `commit_decision`，也不写入 `RuleAssessment` 或 `Issue`。正式判定提交、对象处理状态更新和提交时的最终 revision 校验属于后续切片。
+本切片不实现 `commit_decision`，也不写入 `RuleAssessment` 或 `Issue`。正式判定提交、对象处理状态更新和提交时的最终 revision 校验属于垂直切片 008。

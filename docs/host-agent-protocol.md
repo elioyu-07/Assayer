@@ -425,12 +425,8 @@ inspect_page
   → perform_action / inspect_source
   → capture_evidence
   → 判断证据是否足够
-       ├─ 不足：补证或 prepare_decision(needs_review)
-       ├─ 噪声：prepare_decision(noise)
-       ├─ 不适用：prepare_decision(not_applicable)
-       ├─ 无问题：prepare_decision(scanned_no_issue)
-       └─ 有问题：prepare_decision(issue_found)
   → restore_case（定向恢复并验证，必要时刷新兜底）
+  → prepare_decision(result + 已恢复 Case)
   → commit_decision
   → 继续下一个对象
 ```

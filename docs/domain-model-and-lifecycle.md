@@ -139,7 +139,7 @@ prepared → commit_ready → committed
 | `rejected` | 字段、覆盖、引用、规则状态或截图门禁不满足，可修正后重新准备。 |
 | `invalidated` | Case 恢复失败、运行 revision 越界、对象身份失效或 Scan 失败。 |
 
-PendingDecision 不跨进程恢复，不进入最终账本；诊断日志只记录其 ID、状态和非敏感原因。
+PendingDecision 可在 Host 重启后从 SQLite 恢复读取，但不进入最终账本；诊断日志只记录其 ID、状态和非敏感原因。
 
 ## 8. RuleAssessment 与 Issue
 
