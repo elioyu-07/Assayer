@@ -2,12 +2,27 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import CredentialVault, DeterministicLoginAdapter, HostCore, HostError, SQLiteStore
+from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, HostError, SQLiteStore
 
 
 class ExplodingLoginAdapter:
     def authenticate(self, url, secret):
         raise RuntimeError("adapter crash")
+
+
+class CountingPageAdapter(DeterministicPageAdapter):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def observe(self, page_state_id):
+        self.calls += 1
+        return super().observe(page_state_id)
+
+
+class ExplodingPageAdapter:
+    def observe(self, page_state_id):
+        raise RuntimeError("page adapter crash")
 
 
 def bootstrap(core, key="boot-001"):
@@ -29,10 +44,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", "secret")
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed))
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter)
         self.cores.append(core)
         return core
 
@@ -60,7 +75,7 @@ class HostCoreTest(unittest.TestCase):
     def test_idempotent_retry_wins_over_later_revision(self):
         core = self.make_core()
         started = bootstrap(core)
-        request = session(started["result"])
+        request = session(started["result"], tool="inspect_object", input={"candidateId":"candidate-001"})
         first = core.handle(request)
         with core._store.transaction() as connection:
             connection.execute("UPDATE scans SET run_revision=2 WHERE scan_id=?", (started["result"]["scanId"],))
@@ -115,6 +130,14 @@ class HostCoreTest(unittest.TestCase):
             core.handle(request)
         self.assertEqual(caught.exception.code, "INVALID_REQUEST")
 
+    def test_default_login_adapter_fails_closed(self):
+        vault = CredentialVault()
+        vault.put("cred-001", "secret")
+        core = HostCore(credential_vault=vault)
+        self.cores.append(core)
+        result = bootstrap(core)
+        self.assertEqual(result["error"]["code"], "LOGIN_FAILED")
+
     def test_operation_cannot_be_read_from_another_scan(self):
         core = self.make_core()
         first = bootstrap(core)
@@ -138,6 +161,59 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(retry["result"]["scanId"], started["result"]["scanId"])
             self.assertEqual(retry["result"]["operationId"], started["result"]["operationId"])
             second_store.close()
+
+    def test_inspect_page_persists_read_only_facts_without_revision_change(self):
+        adapter = CountingPageAdapter()
+        core = self.make_core(page_adapter=adapter)
+        started = bootstrap(core)["result"]
+        result = core.handle(session(started, input={"pageStateId":started["currentPageStateId"],"include":["route","visibleText","objects","safeEntrypoints","networkSummary"]}))
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["runRevision"], 1)
+        self.assertEqual(len(result["result"]["candidateRefs"]), 1)
+        self.assertEqual(len(result["result"]["entrypointRefs"]), 1)
+        self.assertEqual(adapter.calls, 1)
+        candidate = core._store.get_candidates(started["currentPageStateId"])[0]
+        self.assertEqual(candidate["potentialRules"], [{"ruleId":"FUA-10","version":"1.0.0"}])
+
+    def test_inspect_page_reuses_immutable_snapshot_for_new_read(self):
+        adapter = CountingPageAdapter()
+        core = self.make_core(page_adapter=adapter)
+        started = bootstrap(core)["result"]
+        first = session(started, key="inspect-1", input={"pageStateId":started["currentPageStateId"],"include":["objects"]})
+        second = session(started, key="inspect-2", input={"pageStateId":started["currentPageStateId"],"include":["objects"]})
+        core.handle(first)
+        core.handle(second)
+        self.assertEqual(adapter.calls, 1)
+
+    def test_inspect_page_idempotency_survives_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "host.sqlite"
+            first_store = SQLiteStore(path)
+            first = self.make_core(store=first_store)
+            started = bootstrap(first)["result"]
+            request = session(started, input={"pageStateId":started["currentPageStateId"],"include":["objects"]})
+            response = first.handle(request)
+            first_store.close()
+            self.cores.remove(first)
+            second_store = SQLiteStore(path)
+            second = self.make_core(store=second_store, page_adapter=ExplodingPageAdapter())
+            retry = second.handle(request)
+            self.assertEqual(retry["result"], response["result"])
+            second_store.close()
+            self.cores.remove(second)
+
+    def test_inspect_page_adapter_failure_is_fail_closed(self):
+        core = self.make_core(page_adapter=ExplodingPageAdapter())
+        started = bootstrap(core)["result"]
+        result = core.handle(session(started, input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_inspect_page_rejects_non_current_state(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        result = core.handle(session(started, input={"pageStateId":"page-foreign","include":["objects"]}))
+        self.assertEqual(result["error"]["code"], "UNKNOWN_REFERENCE")
 
 
 if __name__ == "__main__":

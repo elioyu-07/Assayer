@@ -40,6 +40,13 @@ class LoginAdapter(Protocol):
     def authenticate(self, url: str, secret: str) -> LoginResult: ...
 
 
+class UnavailableLoginAdapter:
+    """Default adapter; prevents accidental success before browser integration."""
+
+    def authenticate(self, url: str, secret: str) -> LoginResult:
+        return LoginResult("failed", "浏览器登录适配器未配置")
+
+
 class DeterministicLoginAdapter:
     """Test adapter; production code must provide a browser-backed adapter."""
 

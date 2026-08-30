@@ -204,19 +204,19 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 结果至少包含：
 
 - 当前 URL、route、标题和页面状态 ID；
-- 可见候选对象摘要；
+- 可见候选对象摘要及 `candidateId`；Candidate 不是正式 AuditObject，不能直接用于 Case、证据判定或 Issue；
 - Host 推断的对象类型和可能适用规范；
 - 可安全尝试的入口；
 - 已发现但未处理的入口；
 - 页面 DOM/状态快照引用。
 
-Host 不把候选对象直接当作正式待检查对象。
+Host 不把候选对象直接当作正式待检查对象。Candidate 只保存在运行存储中；只有后续 `inspect_object(candidateId)` 唯一验证成功后才能生成 AuditObject。
 
 ### 6.3 `inspect_object`
 
 读取一个已验证对象的局部上下文。
 
-输入必须引用 Host 已返回的 `objectId` 或 Agent 提交、Host 尚未验证的新对象候选；新候选只能得到验证结果，不能直接用于判定。
+输入必须引用 Host 已返回的 `objectId` 或 `candidateId`；Candidate 只能得到验证结果，不能直接用于判定。
 
 结果至少包含：
 

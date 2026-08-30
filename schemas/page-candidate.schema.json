@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/page-candidate.schema.json",
+  "title": "PageCandidate",
+  "description": "inspect_page 发现、尚未升级为 AuditObject 的运行态候选。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidateId", "scanId", "pageStateRef", "kind", "label", "role", "locatorDigest", "potentialRules", "observedAtRevision"],
+  "properties": {
+    "candidateId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "kind": { "enum": ["button", "field", "form", "table", "table_column", "filter_region", "import_region", "error_region", "attachment_region", "business_region", "unknown"] },
+    "label": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "role": { "type": "string" },
+    "locatorDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "potentialRules": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/ruleRef" } },
+    "observedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" }
+  }
+}

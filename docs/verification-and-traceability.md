@@ -28,6 +28,8 @@
 | 唯一事实源 | evidence-integrity | complete_audit | Ledger 事件重放 | 派生报告不能改写账本 |
 | 工具参数契约 | host-agent-protocol | 全部工具 | tool-contracts.schema.json | 缺参、未知枚举和结果字段被拒绝 |
 | Coverage Universe 闭合 | lifecycle | inspect_page/complete_audit | Entrypoint 引用校验 | processed/skipped/unprocessed 均能回指账本实体 |
+| Candidate 不得越权 | lifecycle, identity-recovery | inspect_page/inspect_object | PageCandidate Schema 与升级校验 | Candidate 不能直接创建 Case 或 Assessment |
+| 只读快照幂等 | lifecycle, host-agent-protocol | inspect_page | PageState/Operation | 同一快照重复读取不调用浏览器且不增 revision |
 
 状态：`accepted`、`needs_closure`、`blocked`。只有全部安全和结论完整性条款为 `accepted` 才允许编码。
 

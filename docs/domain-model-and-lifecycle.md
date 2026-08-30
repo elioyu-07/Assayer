@@ -9,7 +9,7 @@
 
 ## 1. 目的
 
-本文档是 Scan、PageState、AuditObject、Operation、ReverseCase、PendingDecision、RuleAssessment 和 Issue 生命周期的唯一语义来源。字段结构由 JSON Schema 拥有，消息由 Host–Agent 协议拥有。
+本文档是 Scan、PageState、Entrypoint、PageCandidate、AuditObject、Operation、ReverseCase、PendingDecision、RuleAssessment 和 Issue 生命周期的唯一语义来源。字段结构由 JSON Schema 拥有，消息由 Host–Agent 协议拥有。
 
 ## 2. 聚合与所有权
 
