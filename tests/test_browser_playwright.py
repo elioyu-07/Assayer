@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from agent_f_host import (BrowserProfile, BrowserSession, CredentialVault,
                           HostCore, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
-                          create_readonly_browser_adapters)
+                          create_readonly_browser_adapters,
+                          create_safe_browser_adapter_bundle)
 
 
 PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
@@ -17,13 +18,49 @@ PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
 </form></main></body></html>"""
 
 
+def action_page(path):
+    if "action-cross" in path:
+        method = "GET"
+        endpoint = f"http://localhost:{SiteHandler.server_port}/action-cross"
+    else:
+        method = "POST" if "action-post" in path else "GET"
+        endpoint = "/action-post" if method == "POST" else "/action-get"
+    return f"""<!doctype html><html><head><title>Action Orders</title></head>
+<body><main><form role='search' aria-label='Order filters'>
+<button type='button' aria-expanded='false' onclick=\"fetch('{endpoint}', {{method:'{method}'}}).catch(() => {{}}); this.setAttribute('aria-expanded','true')\">Run action</button>
+</form></main></body></html>""".encode()
+
+
 class SiteHandler(BaseHTTPRequestHandler):
+    get_actions = 0
+    post_actions = 0
+    cross_actions = 0
+    server_port = 0
+
     def do_GET(self):
+        if self.path in {"/action-get-page", "/action-post-page", "/action-cross-page"}:
+            body = action_page(self.path)
+        elif self.path == "/action-get":
+            type(self).get_actions += 1
+            body = b"ok"
+        elif self.path == "/action-cross":
+            type(self).cross_actions += 1
+            body = b"cross"
+        else:
+            body = PAGE
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(PAGE)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(PAGE)
+        self.wfile.write(body)
+
+    def do_POST(self):
+        if self.path == "/action-post":
+            type(self).post_actions += 1
+        self.send_response(200)
+        self.send_header("Content-Length", "2")
+        self.end_headers()
+        self.wfile.write(b"ok")
 
     def log_message(self, format, *args):
         return None
@@ -48,6 +85,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         except ImportError:
             raise unittest.SkipTest("Playwright optional dependency is not installed")
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), SiteHandler)
+        SiteHandler.server_port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
 
@@ -102,6 +140,87 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     core.close()
         finally:
             session.close()
+
+    def _run_action(self, page_name, action_type="expand"):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        session = BrowserSession(f"scan-{page_name}", BrowserProfile(), backend=PlaywrightBrowserBackend())
+        try:
+            try:
+                session.open()
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            bundle = create_safe_browser_adapter_bundle(session, allowed_origin=origin)
+            vault = CredentialVault()
+            vault.put(f"credential-{page_name}", LoginSecret("local-user", "local-password"))
+            with tempfile.TemporaryDirectory() as output:
+                core = HostCore(
+                    credential_vault=vault,
+                    login_adapter=LocalNavigationLoginAdapter(bundle.page, f"{origin}/{page_name}-page"),
+                    page_adapter=bundle.page, object_identity_adapter=bundle.identity,
+                    action_adapter=bundle.action,
+                )
+                try:
+                    started = core.handle({
+                        "protocolVersion": "1.0", "requestId": f"{page_name}-start", "agentTurnId": "turn-action-1",
+                        "tool": "start_audit", "idempotencyKey": f"{page_name}-start",
+                        "input": {"url": f"{origin}/{page_name}-page", "ruleRegistryVersion": "1.0.0",
+                                  "outputDir": output, "browserProfile": "default",
+                                  "credentialHandle": f"credential-{page_name}"},
+                    })["result"]
+                    page = core.handle({
+                        "protocolVersion": "1.0", "requestId": f"{page_name}-page", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-action-2", "tool": "inspect_page",
+                        "idempotencyKey": f"{page_name}-inspect", "expectedRunRevision": 1,
+                        "input": {"pageStateId": started["currentPageStateId"], "include": ["objects"]},
+                    })["result"]
+                    object_id = core.handle({
+                        "protocolVersion": "1.0", "requestId": f"{page_name}-object", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-action-3", "tool": "inspect_object",
+                        "idempotencyKey": f"{page_name}-object", "expectedRunRevision": 1,
+                        "input": {"candidateId": page["candidateRefs"][0]},
+                    })["result"]["objectId"]
+                    case = core.handle({
+                        "protocolVersion": "1.0", "requestId": f"{page_name}-case", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-action-4", "tool": "begin_case",
+                        "idempotencyKey": f"{page_name}-case", "expectedRunRevision": 1,
+                        "input": {"objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.0.0"},
+                                  "kind": "observation", "purpose": "验证筛选动作",
+                                  "plannedCoverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"]},
+                    })["result"]
+                    result = core.handle({
+                        "protocolVersion": "1.0", "requestId": f"{page_name}-action", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-action-5", "tool": "perform_action",
+                        "idempotencyKey": f"{page_name}-action", "expectedRunRevision": 2,
+                        "input": {"pageStateId": started["currentPageStateId"], "caseId": case["caseId"],
+                                  "objectId": object_id, "type": action_type, "intent": "观察筛选区", "parameters": {}},
+                    })
+                    return result
+                finally:
+                    core.close()
+        finally:
+            session.close()
+
+    def test_real_chromium_same_origin_get_action_succeeds_and_rebinds(self):
+        SiteHandler.get_actions = 0
+        result = self._run_action("action-get")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["resultStatus"], "succeeded")
+        self.assertGreaterEqual(SiteHandler.get_actions, 1)
+        self.assertEqual(len(result["result"]["requestObservationRefs"]), 1)
+
+    def test_real_chromium_post_action_is_blocked_before_server(self):
+        SiteHandler.post_actions = 0
+        result = self._run_action("action-post")
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "REQUEST_BLOCKED")
+        self.assertEqual(SiteHandler.post_actions, 0)
+
+    def test_real_chromium_cross_origin_get_is_blocked_before_server(self):
+        SiteHandler.cross_actions = 0
+        result = self._run_action("action-cross")
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "REQUEST_BLOCKED")
+        self.assertEqual(SiteHandler.cross_actions, 0)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 |---|---|
 | 文档版本 | 1.0.0-draft |
 | 日期 | 2026-08-30 |
-| 状态 | implementation-ready |
+| 状态 | implementation-ready；当前完成 B05/9 |
 | Owner | Host Core / Security Owner |
 
 ## 1. 目标与完成定义
@@ -54,7 +54,7 @@
 | B02 | BrowserSession 与配置契约 | Session registry、adapter bundle、受限配置、生命周期/并发测试 | 每 Scan 独占、同 Scan 串行、终态可靠释放；无浏览器依赖也可做契约测试 |
 | B03 | 安全凭据通道与登录状态机 | 类型化内存秘密、本地无回显输入、登录阶段策略、清除证明 | 明文不进入参数/环境/日志/SQLite；失败与超时均清除 |
 | B04 | Playwright 只读垂直切片 | Context 启动、同源导航、PageObservation、对象候选与唯一绑定 | 本地测试站点可完成 bootstrap/inspect；歧义稳定拒绝；无 fixture 回退 |
-| B05 | 发送前拦截与安全动作 | Context route、请求归因、白名单动作、RequestObservation | 写/跨源/未知请求发送前阻断；竞态或已发送事实使结果 unknown/failed |
+| B05 | 发送前拦截与安全动作 | Context route、请求归因、白名单动作、RequestObservation | 写/跨源/未知请求发送前阻断；竞态或已发送事实使结果 unknown/failed；已完成（垂直切片 015） |
 | B06 | 真实恢复屏障 | inverse、刷新重放、九维检查、对象重新绑定 | 定向成功、兜底成功、uncertain、污染失败均有可复算记录 |
 | B07 | 真实 Evidence 与截图脱敏 | DOM 最小证据、对象截图、敏感区域像素遮挡 | 问题截图与对象/Case 对位；脱敏不确定时不落盘、不升级 Issue |
 | B08 | 通用 CLI 与 MCP 传输 | JSON invoke、MCP tools、Scan/Core 路由、协议一致性测试 | 同一请求两种传输产生等价响应；凭据值不经过 MCP/命令参数 |

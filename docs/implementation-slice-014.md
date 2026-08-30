@@ -6,7 +6,7 @@
 - Chromium 启动只使用 B02 的受限 `BrowserProfile`，不接受 executable、代理、扩展或任意启动参数。
 - 新增 `BrowserReadOnlyPageAdapter`，通过固定、版本化的 Host 探针读取 URL、route、标题、DOM 摘要材料、可见文本、安全入口和 `filter_region` 候选。
 - 导航仅允许冻结 origin；跨 origin 请求或跳转会被阻断。持久化 PageState 会移除 URL query/fragment，避免 ticket/token 类值进入账本。
-- B05 发送前网络拦截尚未实现，因此 B04 的 `networkSummary.status` 明确为 `unavailable_until_B05`，不能伪造 pending/write 数量为零。
+- B04 首次实现时 `networkSummary.status` 为 `unavailable_until_B05`；B05 通过共享 `BrowserNetworkGuard` 覆盖该摘要，未安装安全动作 bundle 时仍保持 fail-closed。
 - 新增仅驻留 Session 内存的 `BrowserLocatorRegistry`。原始 locator material 只用于计算 Core 已有的 `locatorDigest`；selector、ElementHandle 和 locator material 不进入 SQLite、协议或报告。
 - `BrowserObjectIdentityAdapter` 在每次对象验证前重新运行固定探针；零个候选返回 `not_found`，多个候选返回 `ambiguous`，只在恰好一个候选时返回 `matched`。
 - `create_readonly_browser_adapters` 保证页面和对象适配器共享同一 Session 与 locator registry。
@@ -25,7 +25,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_browser_
 
 - 固定探针代码来自 Host，不接受页面或 Agent 提供的 JavaScript；页面内容只作为不可信审计数据处理。
 - 当前通用识别器只发现可见的 search/form/filter 区域并映射为 `filter_region`。扩大对象种类必须增加 Host 固定识别器和回归样本，不能接受用户 selector。
-- B04 只证明真实页面读取和初始对象唯一绑定。发送前网络拦截、安全动作、动作后的强重新绑定属于 B05，完整恢复证明属于 B06。
+- B04 只证明真实页面读取和初始对象唯一绑定；B05 增加发送前网络拦截、安全动作和动作后的强重新绑定，完整恢复证明属于 B06。
 - B07 完成截图脱敏前，不得由这条真实浏览器路径生成正式 `issue_found`。
 - 本切片没有通用真实站点登录适配器；测试使用本地无认证站点。类型化凭据仍被消费和清除，真实登录由站点配置支持后才能运行。
 

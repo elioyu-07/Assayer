@@ -26,7 +26,7 @@ class ReadonlyBrowserPage(Protocol):
     def url(self) -> str: ...
     def title(self) -> str: ...
     def content(self) -> str: ...
-    def evaluate(self, expression: str) -> object: ...
+    def evaluate(self, expression: str, arg: object = None) -> object: ...
 
 
 class ReadonlyBrowserContext(Protocol):
@@ -55,6 +55,7 @@ class PlaywrightBrowserBackend:
                 viewport={"width": profile.viewport_width, "height": profile.viewport_height},
                 locale=profile.locale,
                 timezone_id=profile.timezone_id,
+                service_workers="block",
             )
         except Exception:
             if self._browser is not None:
@@ -186,11 +187,15 @@ class BrowserReadOnlyPageAdapter:
     PROBE = READONLY_PROBE_V1
 
     def __init__(self, session: BrowserSession, *, page_factory: Callable[[object], ReadonlyBrowserPage] | None = None,
-                 allowed_origin: str | None = None, locator_registry: BrowserLocatorRegistry | None = None):
+                 allowed_origin: str | None = None, locator_registry: BrowserLocatorRegistry | None = None,
+                 context_initializer: Callable[[object], None] | None = None,
+                 network_summary_provider: Callable[[], dict] | None = None):
         self._session = session
         self._page_factory = page_factory or self._default_page_factory
         self._allowed_origin = self._normalize_origin(allowed_origin) if allowed_origin else None
         self.locator_registry = locator_registry or BrowserLocatorRegistry()
+        self._context_initializer = context_initializer
+        self._network_summary_provider = network_summary_provider
         self._page: ReadonlyBrowserPage | None = None
 
     @staticmethod
@@ -268,8 +273,14 @@ class BrowserReadOnlyPageAdapter:
 
     def _get_page(self, context: object) -> ReadonlyBrowserPage:
         if self._page is None:
+            if self._context_initializer is not None:
+                self._context_initializer(context)
             self._page = self._page_factory(context)
         return self._page
+
+    def page_for_context(self, context: object) -> ReadonlyBrowserPage:
+        """Return the managed Page; callers must already hold BrowserSession serialization."""
+        return self._get_page(context)
 
     def _probe(self, page: ReadonlyBrowserPage) -> BrowserSnapshot:
         try:
@@ -285,13 +296,20 @@ class BrowserReadOnlyPageAdapter:
         candidates = value.get("candidates", [])
         if not isinstance(entrypoints, list) or not isinstance(candidates, list):
             raise HostError("INTERNAL_FAILURE", "只读探针候选集合格式无效")
-        return BrowserSnapshot(
+        snapshot = BrowserSnapshot(
             visible_text=text[: self.MAX_TEXT_CHARS],
             entrypoints=tuple(entrypoints), candidates=tuple(candidates),
             network_summary=value.get("networkSummary") if isinstance(value.get("networkSummary"), dict) else {},
             route=value.get("route") if isinstance(value.get("route"), str) else None,
             state_kind=value.get("stateKind") if isinstance(value.get("stateKind"), str) else "page",
         )
+        if self._network_summary_provider is not None:
+            snapshot = BrowserSnapshot(
+                visible_text=snapshot.visible_text, entrypoints=snapshot.entrypoints,
+                candidates=snapshot.candidates, network_summary=self._network_summary_provider(),
+                route=snapshot.route, state_kind=snapshot.state_kind,
+            )
+        return snapshot
 
     def _materialize(self, page_state_id: str, url: str, origin: str, route: str, title: str, dom: str,
                      snapshot: BrowserSnapshot) -> PageObservation:
@@ -390,10 +408,13 @@ class BrowserObjectIdentityAdapter:
 
 
 def create_readonly_browser_adapters(session: BrowserSession, *, allowed_origin: str,
-                                     page_factory: Callable[[object], ReadonlyBrowserPage] | None = None) -> tuple[BrowserReadOnlyPageAdapter, BrowserObjectIdentityAdapter]:
+                                     page_factory: Callable[[object], ReadonlyBrowserPage] | None = None,
+                                     context_initializer: Callable[[object], None] | None = None,
+                                     network_summary_provider: Callable[[], dict] | None = None) -> tuple[BrowserReadOnlyPageAdapter, BrowserObjectIdentityAdapter]:
     """Create page and identity adapters sharing one Host-only locator registry."""
     registry = BrowserLocatorRegistry()
     page = BrowserReadOnlyPageAdapter(session, allowed_origin=allowed_origin, locator_registry=registry,
-                                      page_factory=page_factory)
+                                      page_factory=page_factory, context_initializer=context_initializer,
+                                      network_summary_provider=network_summary_provider)
     identity = BrowserObjectIdentityAdapter(session, locator_registry=registry, refresh=page.refresh_locators)
     return page, identity

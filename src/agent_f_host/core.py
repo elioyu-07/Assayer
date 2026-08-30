@@ -440,7 +440,9 @@ class HostCore:
         if not page:
             return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "PageState 不存在")
         try:
-            execution = self._action_adapter.execute(data, obj, page, lambda req: self._action_policy.classify_request(req, page.get("origin", "")))
+            action_for_adapter = dict(data)
+            action_for_adapter["operationId"] = operation.get("operation_id") or operation["operationId"]
+            execution = self._action_adapter.execute(action_for_adapter, obj, page, lambda req: self._action_policy.classify_request(req, page.get("origin", "")))
         except Exception:
             execution = ActionExecution(status="result_unknown", diagnostic="动作适配器执行异常")
         if execution.status not in {"succeeded", "request_blocked", "result_unknown", "persistent_write_observed", "unavailable"}:
