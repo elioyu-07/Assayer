@@ -6,6 +6,7 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 from agent_f_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
                           HostCore, HostError, LoginResult, LoginSecret,
@@ -17,19 +18,20 @@ PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
 <body><main><h1>Orders</h1><form role='search' aria-label='Order filters'>
 <label>Order number <input name='order-number'></label>
 <button type='button'>Query</button><button type='reset'>Reset</button>
-</form></main></body></html>"""
+</form><table><tbody><tr><td>Order result</td></tr></tbody></table></main></body></html>"""
 
 WEBSOCKET_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>WebSocket Orders</title></head>
 <body><main><form role='search' aria-label='Order filters'><button type='button'>Query</button></form></main>
 <script>window.auditSocket = new WebSocket(`ws://${location.host}/hmr`);</script></body></html>"""
 
 HASH_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Hash Orders</title></head>
-<body><main><form role='search' aria-label='Hash filters'><button type='button'>Query</button></form></main></body></html>"""
+<body><main><form role='search' aria-label='Hash filters'><input><button type='button'>Query</button><button type='reset'>Reset</button></form>
+<table><tbody><tr><td>Hash result</td></tr></tbody></table></main></body></html>"""
 
 TAB_PAGE = b"""<!doctype html><html><head><title>Tab App</title></head><body>
-<nav><a class='lease-tabs__item active' onclick='show(0)'>Overview</a><a class='lease-tabs__item' onclick='show(1)'>Details</a></nav>
+<nav><a class='workspace-tabs__item active' onclick='show(0)'>Overview</a><a class='workspace-tabs__item' onclick='show(1)'>Details</a></nav>
 <main id='content'>Loading</main><script>
-const tabs=[...document.querySelectorAll('.lease-tabs__item')];
+const tabs=[...document.querySelectorAll('.workspace-tabs__item')];
 function show(index){tabs.forEach((tab,i)=>tab.classList.toggle('active',i===index));if(index===1){fetch('/tab-data').then(r=>r.text()).then(v=>content.innerHTML=`<form role="search" aria-label="Detail filters"><label>${v}<input></label><button type="button">Query</button></form>`);}}
 fetch('/startup-data').then(r=>r.text()).then(v=>content.textContent=v);
 </script></body></html>"""
@@ -274,7 +276,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
 
     def test_real_url_runtime_reports_hash_route_without_hash_query(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"
-        url = f"{origin}/hash-app#/lease-mock?token=secret"
+        url = f"{origin}/hash-app#/workspace?token=secret"
         with tempfile.TemporaryDirectory() as output:
             try:
                 runtime = BrowserHostRuntime(url, output)
@@ -283,7 +285,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
             try:
                 result = runtime.probe(url)
                 self.assertEqual(result["status"], "ok")
-                self.assertEqual(result["result"]["route"], "/lease-mock")
+                self.assertEqual(result["result"]["route"], "/workspace")
                 stored = runtime.core._store.get_page_state(result["result"]["pageStateId"])
                 self.assertNotIn("token", json.dumps(stored))
                 self.assertNotIn("secret", json.dumps(stored))
@@ -312,6 +314,50 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 self.assertEqual(SiteHandler.tab_reads, 1)
                 self.assertEqual(result["result"]["summary"]["observedWrites"], 0)
                 self.assertEqual(result["result"]["summary"]["unknownRequests"], 0)
+            finally:
+                runtime.close()
+
+    def test_real_url_runtime_completes_rule_driven_lifecycle_without_site_adapter(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(f"{origin}/orders", output)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            try:
+                response = runtime.audit(f"{origin}/orders")
+                self.assertEqual(response["status"], "ok")
+                self.assertEqual(response["result"]["completion"]["scanStatus"], "completed")
+                self.assertEqual(response["result"]["assessmentCount"], 1)
+                self.assertEqual(response["result"]["pages"][0]["decisions"][0]["result"], "scanned_no_issue")
+                ledger = json.loads((Path(output) / "audit-ledger.json").read_text())
+                self.assertEqual(ledger["assessments"][0]["result"], "scanned_no_issue")
+                tools = [item["tool"] for item in ledger["operations"]]
+                for expected in ("begin_case", "perform_action", "capture_evidence", "restore_case",
+                                 "prepare_decision", "commit_decision", "complete_audit"):
+                    self.assertIn(expected, tools)
+                self.assertEqual(len(ledger["screenshots"]), 1)
+                self.assertEqual(ledger["screenshots"][0]["sanitizationStatus"], "not_performed")
+                self.assertFalse(any(path.suffix == ".html" for path in Path(output).rglob("*")))
+            finally:
+                runtime.close()
+
+    def test_real_url_runtime_restores_generic_hash_spa_case(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        url = f"{origin}/hash-app#/workspace?token=secret"
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(url, output)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            try:
+                response = runtime.audit(url)
+                self.assertEqual(response["status"], "ok")
+                self.assertEqual(response["result"]["completion"]["scanStatus"], "completed")
+                ledger = json.loads((Path(output) / "audit-ledger.json").read_text())
+                self.assertEqual(ledger["cases"][0]["recovery"]["finalStatus"], "restored")
+                self.assertNotIn("token", json.dumps(ledger))
+                self.assertNotIn("secret", json.dumps(ledger))
             finally:
                 runtime.close()
 

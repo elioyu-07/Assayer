@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from .browser_runtime import BrowserHostRuntime
+from .errors import HostError
 from .transport import JsonLineTransport
 
 
@@ -23,7 +24,15 @@ def main(argv: list[str] | None = None) -> int:
     runtime = BrowserHostRuntime(args.url, Path(args.output_dir))
     try:
         if args.command == "audit":
-            response = runtime.probe(args.url)
+            try:
+                response = runtime.audit(args.url)
+            except HostError as error:
+                response = {
+                    "protocolVersion": "1.0", "requestId": "runtime-audit",
+                    "status": "failed",
+                    "error": {"code": error.code, "message": error.message},
+                    "evidenceRefs": [], "diagnosticRefs": [],
+                }
             print(json.dumps(response, ensure_ascii=False, indent=2, sort_keys=True))
             return 0 if response.get("status") == "ok" else 1
         JsonLineTransport(runtime).serve()

@@ -8,14 +8,16 @@ agent-f 是面向测试/预发布 Web 站点的前端质量审计垂直智能体
 - Host Core 已实现 Scan/Operation、凭据消费、页面发现、对象身份、Case、安全动作、恢复屏障、证据、判定事务、审计收束、账本导出和 JSON/Markdown 派生报告；
 - 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
 - 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
-- Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定首个 `filter_region`；
-- 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09、B10 已完成；B11 页面探索与真实数据审计已接入；B07c 自动敏感区域识别与像素脱敏暂缓。
+- Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定每个可判定的 `filter_region`；
+- 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09、B10、B11、B12 已完成；B12 已把真实 URL 接入通用 Case/Evidence/恢复/判定/账本全链路；B07c 自动敏感区域识别与像素脱敏暂缓。
 
 公开页面可直接执行真实只读试跑：
 
 ```bash
 agent-f audit 'http://localhost:8081/#/lease-mock' --output-dir ./agent-f-output
 ```
+
+`audit` 会把该 URL 当作黑盒验收样本，运行通用规则驱动的完整 Host 生命周期；它不会为该系统做专属适配。
 
 真实浏览器路径可以在受控测试数据环境生成对象级 PNG Raw Visual，并明确记录 `sanitizationStatus=not_performed`；它不能伪装成已脱敏图片，仍禁止据此提交正式 `issue_found`。自动敏感区域识别与像素脱敏属于后续 B07c。确定性 Harness 中的截图只用于契约与回归测试。
 
@@ -84,6 +86,7 @@ PYTHONPATH=src python3 -m agent_f_host --output-dir ./audit-issue-output --resul
 32. [垂直切片 020](docs/implementation-slice-020.md)
 33. [垂直切片 021](docs/implementation-slice-021.md)
 34. [垂直切片 022](docs/implementation-slice-022.md)
+35. [垂直切片 023](docs/implementation-slice-023.md)
 35. [数据 Schema](schemas/README.md)
 
 ## 规范性来源

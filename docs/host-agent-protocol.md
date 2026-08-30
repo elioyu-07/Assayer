@@ -187,6 +187,7 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 - `loginStatus`；
 - `currentPageStateId`；
 - `ruleRegistryDigest`；
+- 冻结规则引用、对象类型和最低覆盖维度组成的 `frozenRules`；
 - `capabilities`；
 - `runRevision`；
 - 身份、恢复、脱敏和摘要算法版本。
@@ -211,7 +212,7 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 - 当前 URL、route、标题和页面状态 ID；
 - 可见候选对象摘要及 `candidateId`；Candidate 不是正式 AuditObject，不能直接用于 Case、证据判定或 Issue；
 - Host 推断的对象类型和可能适用规范；
-- 可安全尝试的入口；
+- 可安全尝试的入口及其 `entrypointId/kind/label/status` 摘要；
 - 已发现但未处理的入口；
 - 页面 DOM/状态快照引用。
 
@@ -232,6 +233,7 @@ Host 不把候选对象直接当作正式待检查对象。Candidate 只保存�
 结果至少包含：
 
 - 对象身份、类型、页面状态和定位信息；
+- 对象类型和 Host 冻结的 `potentialRules`，使 Agent 不必读取 Host 内部存储；
 - 可见文本、ARIA、结构上下文和关联对象；
 - Host 推荐的适用规范；
 - 已有运行态、请求、源码和截图证据引用；
@@ -341,6 +343,7 @@ Host 必须建立页面 → route → 组件 → handler/API 的归属链。无�
 结果至少包含：
 
 - `evidenceId`；
+- 已经过结构化脱敏的 Evidence kind、payload 和 source binding 摘要，供 Agent 按规则契约判定；
 - 可选 Raw Visual `screenshotRef`；
 - 当前对象定位和 bounding box；
 - 截图是否成功、截图方法和失败原因；

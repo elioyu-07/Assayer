@@ -110,6 +110,20 @@ class HostCore:
     def credential_vault(self) -> CredentialVault:
         return self._credential_vault
 
+    @property
+    def rule_registry_version(self) -> str:
+        return self._rule_registry_version
+
+    @property
+    def frozen_rules(self) -> tuple[dict, ...]:
+        return tuple(
+            {"ruleId": rule["ruleId"], "version": rule["version"],
+             "objectKinds": tuple(rule.get("objectKinds", ())),
+             "coverageDimensions": tuple(rule.get("coverageDimensions", ()))}
+            for rule in self._rule_registry.get("rules", ())
+            if rule.get("status") == "enabled"
+        )
+
     def _recover_interrupted_operations(self):
         interrupted = self._store.get_interrupted_operations()
         for row in interrupted:
@@ -196,6 +210,7 @@ class HostCore:
     def _start_audit(self, request: dict) -> dict:
         if request["input"]["ruleRegistryVersion"] != self._rule_registry_version:
             raise HostError("INVALID_REQUEST", "请求的规则注册表版本与 Host 当前版本不一致", next_step="refresh_rule_registry")
+        entry_url = self._safe_entry_url(request["input"]["url"])
         digest = self._request_digest(request)
         with self._store.transaction():
             existing = self._store.get_bootstrap(request["idempotencyKey"])
@@ -207,7 +222,7 @@ class HostCore:
                 "scanId": self._scan_id_factory(), "runId": self._new_id("run"), "runRevision": 0,
                 "status": "authenticating", "loginStatus": "pending", "createdAt": self._now(),
                 "ruleRegistryDigest": self._rule_registry_digest, "currentPageStateId": None, "capabilitiesJson": "[]",
-                "outputDir": request["input"]["outputDir"], "entryUrl": request["input"]["url"],
+                "outputDir": request["input"]["outputDir"], "entryUrl": entry_url,
             }
             operation = self._new_operation(request, scan["scanId"], "bootstrap", digest, "running", 0)
             self._store.insert_scan(scan)
@@ -243,10 +258,29 @@ class HostCore:
             self._store.update_operation(operation)
         return self._response(request, scan, "failed", error=HostError(code, message), operation=operation)
 
+    @staticmethod
+    def _safe_entry_url(value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            raise HostError("INVALID_REQUEST", "入口 URL 必须是不含凭据的 HTTP(S) URL")
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        try:
+            port = parsed.port
+        except ValueError as error:
+            raise HostError("INVALID_REQUEST", "入口 URL 端口无效") from error
+        netloc = f"{host}:{port}" if port is not None else host
+        base = f"{parsed.scheme}://{netloc}{parsed.path or '/'}"
+        fragment_path = urlparse(parsed.fragment).path if parsed.fragment.startswith("/") else ""
+        return f"{base}#{fragment_path}" if fragment_path else base
+
     def _start_result(self, scan: dict) -> dict:
         result = {"scanId":scan["scanId"],"runId":scan["runId"],"loginStatus":scan["loginStatus"],
                   "ruleRegistryDigest":scan["ruleRegistryDigest"],"capabilities":json.loads(scan["capabilitiesJson"]),
-                  "runRevision":scan["runRevision"]}
+                  "runRevision":scan["runRevision"],
+                  "frozenRules":[{"ruleId":rule["ruleId"],"version":rule["version"],
+                                  "objectKinds":list(rule.get("objectKinds", [])),
+                                  "coverageDimensions":list(rule.get("coverageDimensions", []))}
+                                 for rule in self._rule_registry.get("rules", []) if rule.get("status") == "enabled"]}
         if scan.get("currentPageStateId"):
             result["currentPageStateId"] = scan["currentPageStateId"]
         return result
@@ -327,7 +361,9 @@ class HostCore:
         include = set(request["input"]["include"])
         result = {"operationId":operation.get("operation_id") or operation["operationId"],"runRevision":scan["runRevision"],
                   "pageStateId":page["pageStateId"],"candidateRefs":[x["candidateId"] for x in candidates],
-                  "entrypointRefs":[x["entrypointId"] for x in entrypoints]}
+                  "entrypointRefs":[x["entrypointId"] for x in entrypoints],
+                  "entrypoints":[{"entrypointId":x["entrypointId"],"kind":x["kind"],"label":x["label"],"status":x["status"]}
+                                 for x in entrypoints]}
         if "route" in include:
             result.update({"route":page.get("route", ""),"title":page.get("title", "")})
         if "visibleText" in include:
@@ -390,7 +426,9 @@ class HostCore:
         result = {"operationId":operation_id,"runRevision":scan["runRevision"],"entrypointId":entrypoint["entrypointId"],
                   "previousPageStateId":previous_id,"pageStateId":next_id,
                   "candidateRefs":[item["candidateId"] for item in candidates],
-                  "entrypointRefs":[item["entrypointId"] for item in entrypoints],"route":page.get("route", ""),
+                  "entrypointRefs":[item["entrypointId"] for item in entrypoints],
+                  "entrypoints":[{"entrypointId":item["entrypointId"],"kind":item["kind"],"label":item["label"],"status":item["status"]}
+                                 for item in entrypoints],"route":page.get("route", ""),
                   "title":page.get("title", ""),"structureSummary":inspection.get("structureSummary", {}),
                   "networkSummary":inspection.get("networkSummary", {}),"visibleText":inspection.get("visibleText", "")}
         if inspection.get("activeTab"):
@@ -434,6 +472,8 @@ class HostCore:
                   "changedDimensions":verification["changedDimensions"],"evidenceRefs":[]}
         if verification.get("objectRef"):
             result["objectId"] = verification["objectRef"]
+            result["objectKind"] = audit_object["kind"]
+            result["potentialRules"] = audit_object["potentialRules"]
         if replacement:
             result["replacementCandidateRef"] = replacement["candidateId"]
         operation.update({"status":"succeeded","resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
@@ -754,9 +794,16 @@ class HostCore:
             case.setdefault("evidenceRefs", []).append(evidence_id)
             case["operationRefs"].append(operation_id)
             self._validate_entity(self._case_validator, case, "ReverseCase")
-        result = {"evidenceId": evidence_id, "runRevision": revision}
+        result = {"evidenceId": evidence_id, "runRevision": revision,
+                  "evidence": {"kind": evidence["kind"], "payload": evidence["payload"]}}
+        if evidence.get("sourceBinding"):
+            result["evidence"]["sourceBinding"] = evidence["sourceBinding"]
         if screenshot:
             result["screenshotRef"] = screenshot["screenshotId"]
+            result["evidence"]["visual"] = {
+                "status": screenshot["status"],
+                "sanitizationStatus": screenshot["sanitizationStatus"],
+            }
         operation.update({"caseRef": case["caseId"] if case else operation.get("caseRef"), "status": "succeeded",
                           "resultJson": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
         created_file = False

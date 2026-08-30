@@ -19,3 +19,5 @@
 | `complete_audit` | `completeAuditInput` | `completeAuditOutput` | `lifecycle` |
 
 语义校验仍由 Host Core 负责：引用闭合、`runRevision`、对象重绑定、规则适用性、覆盖门槛、恢复屏障和 Issue 派生不能仅依赖 JSON Schema。
+
+B12 增加的只读输出不会暴露 selector 或未脱敏 DOM：`start_audit` 返回冻结规则与覆盖维度，页面输出返回安全入口摘要，`inspect_object` 返回对象类型与 `potentialRules`，`capture_evidence` 返回与持久化记录一致的结构化脱敏 payload。通用运行器据此完成规则选择和判定，不读取 Host 内部 SQLite。

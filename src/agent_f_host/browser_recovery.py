@@ -133,11 +133,18 @@ class BrowserRecoveryAdapter:
         url = baseline.get("url")
         if not isinstance(url, str) or not url:
             raise RuntimeError("恢复基线缺少安全 URL")
+        parsed = urlparse(url)
+        route = baseline.get("route")
+        if isinstance(route, str) and route.startswith("/") and route != (parsed.path or "/"):
+            # Rebuild only the sanitized SPA path. Raw fragment query material
+            # is never persisted or replayed.
+            url = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}#{route}"
         with self._guard.operation(
             operation_id,
             lambda request: self._policy.classify_request(request, page_state.get("origin", "")),
         ):
             self._page.navigate(url)
+            self._page.settle_readonly()
 
     def _attempt(self, method: str, baseline: dict, target: dict, page_state: dict | None,
                  outcome: str, reason: str | None) -> RecoveryAttempt:
@@ -164,7 +171,8 @@ class BrowserRecoveryAdapter:
                 current_url = str(page.url)
                 parsed = urlparse(current_url)
                 current_origin = self._page._origin(parsed)
-                current_route = parsed.path or "/"
+                fragment_route = urlparse(parsed.fragment).path if parsed.fragment.startswith("/") else ""
+                current_route = fragment_route or parsed.path or "/"
                 expected_url = str(baseline.get("url") or "")
                 expected = urlparse(expected_url)
                 expected_origin = baseline.get("origin") or (self._page._origin(expected) if expected.netloc else "")

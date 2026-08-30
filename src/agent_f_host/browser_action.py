@@ -255,7 +255,13 @@ class BrowserSafeActionAdapter:
     @staticmethod
     def _execute_locator_action(page: object, locator: object, action_type: str) -> None:
         if action_type == "focus":
-            locator.focus()
+            focusable = locator.locator(
+                'input, select, textarea, button, a[href], [tabindex]:not([tabindex="-1"])'
+            )
+            if focusable.count():
+                focusable.first.focus()
+            else:
+                locator.scroll_into_view_if_needed()
         elif action_type == "scroll":
             locator.scroll_into_view_if_needed()
         elif action_type == "expand":

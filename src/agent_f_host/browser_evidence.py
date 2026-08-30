@@ -23,7 +23,9 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
   };
   const clean = (value, limit = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
   const safeRoute = location.hash.startsWith('#/') ? location.hash.slice(1).split('?')[0] : location.pathname;
-  const semanticAction = (value) => {
+  const semanticAction = (value, element = null) => {
+    const type = String(element?.getAttribute('type') || '').toLowerCase();
+    if (type === 'reset') return 'reset';
     const label = clean(value, 80).toLowerCase();
     if (/(reset|clear|重置|清空|恢复默认)/.test(label)) return 'reset';
     if (/(query|search|filter|查询|搜索|筛选)/.test(label)) return 'query';
@@ -36,13 +38,20 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
   const role = clean(target.getAttribute('role') || (target.tagName === 'FORM' ? 'form' : 'region'), 64);
   const label = clean(target.getAttribute('aria-label') || target.querySelector('legend')?.textContent || target.textContent, 200);
   const controls = [...target.querySelectorAll('input, select, textarea, button, [aria-expanded], [role="tab"]')].slice(0, 128);
+  const listNodes = [...document.querySelectorAll('table, [role="grid"], [role="list"], ul, ol')].filter(visible);
+  const targetList = target.closest('section, main, article, [role="region"]')?.querySelector('table, [role="grid"], [role="list"], ul, ol');
+  const bindingSignals = {
+    pageListCount: listNodes.length,
+    sameContainerList: Boolean(targetList),
+    formOwner: target.tagName === 'FORM' ? Boolean(target.querySelector('input, select, textarea')) : false
+  };
   return {
     status: 'matched', route: safeRoute,
     stateKind: document.querySelector('[role="dialog"]') ? 'dialog' : 'page',
     identityMaterial: ['filter_region', role, clean(label), safeRoute, targetIndex].join('|'),
     object: {role, accessibleNamePresent: Boolean(label), accessibleNameLength: label.length, visibleTextLength: clean(target.innerText, 1000).length},
     controls: controls.map((item) => ({
-      semanticAction: semanticAction(item.getAttribute('aria-label') || item.innerText || ''),
+      semanticAction: semanticAction(item.getAttribute('aria-label') || item.innerText || item.getAttribute('title') || item.getAttribute('name') || item.getAttribute('id') || '', item),
       tag: item.tagName.toLowerCase(), role: clean(item.getAttribute('role') || '', 32),
       type: clean(item.getAttribute('type') || '', 32), namePresent: Boolean(item.getAttribute('name') || item.getAttribute('aria-label')),
       accessibleNamePresent: Boolean(item.getAttribute('aria-label') || item.innerText || item.labels?.[0]?.innerText),
@@ -50,7 +59,8 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
       valueClass: ('value' in item) ? (String(item.value || '').length ? 'non_empty' : 'empty') : 'not_applicable',
       checked: item.checked === true ? true : item.checked === false ? false : null,
       expanded: item.getAttribute('aria-expanded')
-    }))
+    })),
+    bindingSignals
   };
 }"""
 
@@ -121,6 +131,7 @@ class BrowserEvidenceAdapter:
                 "objectId": target["objectId"], "pageStateId": page_state["pageStateId"],
                 "route": value.get("route"), "stateKind": value.get("stateKind", "page"),
                 "object": value.get("object", {}), "controls": value.get("controls", []),
+                "bindingSignals": value.get("bindingSignals", {}),
                 "networkSummary": network,
             }
             if include_raw_visual:
