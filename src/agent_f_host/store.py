@@ -132,6 +132,10 @@ class SQLiteStore:
         row = self._conn.execute("SELECT * FROM operations WHERE operation_id = ?", (operation_id,)).fetchone()
         return dict(row) if row else None
 
+    def get_interrupted_operations(self) -> list[dict]:
+        rows = self._conn.execute("SELECT * FROM operations WHERE status='running' AND operation_kind IN ('browser_action','recovery') ORDER BY operation_id").fetchall()
+        return [dict(row) for row in rows]
+
     def get_by_idempotency(self, scan_id: str, key: str) -> dict | None:
         row = self._conn.execute("SELECT * FROM operations WHERE scan_id = ? AND idempotency_key = ?", (scan_id, key)).fetchone()
         return dict(row) if row else None
@@ -150,9 +154,10 @@ class SQLiteStore:
         )
 
     def update_operation(self, op: dict) -> None:
+        operation_id = op.get("operationId") or op.get("operation_id")
         self._conn.execute(
             "UPDATE operations SET status=?, error_code=?, error_message=?, result_json=?, case_ref=? WHERE operation_id=?",
-            (op["status"], op.get("errorCode"), op.get("errorMessage"), op.get("resultJson"), op.get("caseRef"), op["operationId"]),
+            (op["status"], op.get("errorCode") or op.get("error_code"), op.get("errorMessage") or op.get("error_message"), op.get("resultJson") or op.get("result_json"), op.get("caseRef") or op.get("case_ref"), operation_id),
         )
 
     def insert_page_inspection(self, page_state: dict, inspection: dict, entrypoints: list[dict], candidates: list[dict]) -> None:

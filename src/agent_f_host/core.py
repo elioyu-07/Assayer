@@ -15,6 +15,7 @@ from .page import DeterministicPageAdapter, ReadOnlyPageAdapter
 from .object_identity import DeterministicObjectIdentityAdapter, ObjectIdentityAdapter
 from .action_safety import (ActionExecution, ActionSafetyPolicy,
                             SafeActionAdapter, UnavailableActionAdapter)
+from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, RecoveryCheck, UnavailableRecoveryAdapter
 from .store import SQLiteStore
 
 
@@ -32,7 +33,8 @@ class HostCore:
     def __init__(self, schema_root: str | Path | None = None, *, store: SQLiteStore | None = None,
                  credential_vault: CredentialVault | None = None, login_adapter: LoginAdapter | None = None,
                  page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None,
-                 action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None):
+                 action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None,
+                 recovery_adapter: RecoveryAdapter | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -64,6 +66,7 @@ class HostCore:
         self._object_identity_adapter = object_identity_adapter or DeterministicObjectIdentityAdapter()
         self._action_adapter = action_adapter or UnavailableActionAdapter()
         self._action_policy = action_policy or ActionSafetyPolicy()
+        self._recovery_adapter = recovery_adapter or UnavailableRecoveryAdapter()
         registry_path = root.parent / "rules" / "registry.json"
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
         self._rule_registry_version = registry["registryVersion"]
@@ -76,10 +79,27 @@ class HostCore:
             self._rules[(rule["ruleId"], rule["version"])] = rule
             for kind in rule["objectKinds"]:
                 self._rules_by_kind.setdefault(kind, []).append({"ruleId":rule["ruleId"],"version":rule["version"]})
+        self._recover_interrupted_operations()
 
     @property
     def credential_vault(self) -> CredentialVault:
         return self._credential_vault
+
+    def _recover_interrupted_operations(self):
+        interrupted = self._store.get_interrupted_operations()
+        for row in interrupted:
+            scan = self._scan_from_row(self._store.get_scan(row["scan_id"]))
+            case = self._store.get_case(row.get("case_ref")) if row.get("case_ref") else None
+            scan["runRevision"] += 1
+            scan["status"] = "failed"
+            row.update({"status": "result_unknown", "error_code": "REQUEST_RESULT_UNKNOWN", "error_message": "Host 在 Operation 执行期间重启，无法证明动作或恢复是否发送/完成"})
+            if case:
+                case.update({"status": "invalidated", "endedAt": self._now(), "restoreReason": {"code": "HOST_RESTART_INTERRUPTED", "message": "Host 重启中断了动作或恢复"}})
+            with self._store.transaction():
+                self._store.update_scan(scan)
+                self._store.update_operation(row)
+                if case:
+                    self._store.update_case(case)
 
     def handle(self, request: dict) -> dict:
         self._validate_envelope(request)
@@ -97,11 +117,10 @@ class HostCore:
                 if tool == "inspect_page": return self._inspect_page(request, scan, existing)
                 if tool == "inspect_object": return self._inspect_object(request, scan, existing)
                 if tool == "begin_case": return self._begin_case(request, scan, existing)
-                if tool == "perform_action": return self._perform_action(request, scan, existing)
             return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"}:
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action"}
+        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
@@ -110,8 +129,6 @@ class HostCore:
                 return self._inspect_object(request, scan, operation)
             if operation["status"] == "running" and tool == "begin_case":
                 return self._begin_case(request, scan, operation)
-            if operation["status"] == "running" and tool == "perform_action":
-                return self._perform_action(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
@@ -121,6 +138,8 @@ class HostCore:
             return self._begin_case(request, scan, operation)
         if tool == "perform_action":
             return self._perform_action(request, scan, operation)
+        if tool == "restore_case":
+            return self._restore_case(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -469,6 +488,115 @@ class HostCore:
             return self._response(request, scan, "rejected", error=HostError(operation["errorCode"], operation["errorMessage"]), operation=operation)
         return self._response(request, scan, "ok", result=result, operation=operation)
 
+    def _restore_case(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        case = self._store.get_case(data["caseId"])
+        target = self._store.get_audit_object(data["objectId"])
+        if not case or case["scanId"] != scan["scanId"] or case.get("objectRef") != data["objectId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Case 不存在于当前 Scan 或未绑定目标对象")
+        if case.get("status") in {"completed", "restore_failed", "invalidated"}:
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "Case 已经收束，不能重复恢复")
+        if data["pageStateId"] != scan.get("currentPageStateId"):
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "恢复输入不是当前活动 PageState")
+        if not target or target["scanId"] != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "恢复目标对象不存在")
+        case["status"] = "restoring"
+        case["startedAt"] = case.get("startedAt") or self._now()
+        page = self._store.get_page_state(data["pageStateId"])
+        attempts = []
+        try:
+            first = self._recovery_adapter.restore(case, target, page, "targeted_inverse")
+            self._validate_recovery_attempt(first, "targeted_inverse")
+        except Exception:
+            first = self._unknown_recovery_attempt("targeted_inverse", "恢复适配器执行失败")
+        attempts.append(self._recovery_attempt_dict(first))
+        final = first
+        if first.outcome != "restored" or not self._all_checks_match(first):
+            try:
+                second = self._recovery_adapter.restore(case, target, page, "refresh_replay")
+                self._validate_recovery_attempt(second, "refresh_replay")
+            except Exception:
+                second = self._unknown_recovery_attempt("refresh_replay", "刷新重放适配器执行失败")
+            attempts.append(self._recovery_attempt_dict(second))
+            final = second
+        clean = final.outcome == "restored" and self._all_checks_match(final)
+        if clean:
+            final_status, case_status = "restored", "completed"
+            target["status"] = "eligible"
+        else:
+            final_status, case_status = ("uncertain" if final.outcome == "uncertain" else "failed"), "restore_failed"
+            case["restoreReason"] = {"code": "CASE_NOT_RESTORED", "message": final.reason or "恢复检查未全部通过"}
+            target.update({"status": "blocked", "blockedReason": {"code": "CASE_NOT_RESTORED", "message": "Case 未越过恢复屏障"}})
+            if self._has_pollution_uncertainty(final):
+                scan["status"] = "failed"
+            elif scan["status"] not in {"failed", "completed"}:
+                scan["status"] = "partial"
+        scan["runRevision"] += 1
+        case.update({"status": case_status, "endedAt": self._now(), "afterPageStateRef": case.get("beforePageStateRef"),
+                     "recovery": {"policy": "targeted_then_refresh", "baselinePageStateRef": case.get("beforePageStateRef"), "finalStatus": final_status, "attempts": attempts}})
+        if clean:
+            case.pop("restoreReason", None)
+        try:
+            self._validate_entity(self._case_validator, case, "ReverseCase")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        result = {"caseId": case["caseId"], "finalStatus": final_status, "runRevision": scan["runRevision"]}
+        operation.update({"caseRef": case["caseId"], "status": "succeeded" if clean else "failed_known", "resultJson": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        if not clean:
+            operation.update({"errorCode": "CASE_NOT_RESTORED", "errorMessage": "Case 未越过恢复屏障"})
+        with self._store.transaction():
+            self._store.update_case(case)
+            self._store.update_audit_object(target)
+            self._store.update_scan(scan)
+            self._store.update_operation(operation)
+        if clean:
+            return self._response(request, scan, "ok", result=result, operation=operation)
+        return self._response(request, scan, "failed" if scan["status"] == "failed" else "rejected", result=result,
+                              error=HostError("CASE_NOT_RESTORED", "Case 未越过恢复屏障"), operation=operation)
+
+    @staticmethod
+    def _validate_recovery_attempt(attempt: RecoveryAttempt, method: str):
+        if attempt.method != method or attempt.outcome not in {"restored", "uncertain", "failed"}:
+            raise ValueError("恢复适配器返回未知状态")
+        if not attempt.checks:
+            raise ValueError("恢复结果缺少检查项")
+        if any(check.dimension not in {"url_route", "page_layer", "active_tab", "overlay_state", "control_state", "object_identity", "pending_requests", "write_request", "local_visual"} or check.outcome not in {"match", "mismatch", "unknown"} for check in attempt.checks):
+            raise ValueError("恢复检查项无效")
+        dimensions = [check.dimension for check in attempt.checks]
+        if len(dimensions) != len(set(dimensions)) or not set(RECOVERY_DIMENSIONS[:-1]).issubset(dimensions):
+            raise ValueError("恢复结果缺少必检维度或包含重复维度")
+        outcomes = {check.outcome for check in attempt.checks}
+        if attempt.outcome == "restored" and outcomes != {"match"}:
+            raise ValueError("restored 不能包含 unknown 或 mismatch")
+        if attempt.outcome == "uncertain" and ("unknown" not in outcomes or "mismatch" in outcomes):
+            raise ValueError("uncertain 必须包含 unknown 且不能包含 mismatch")
+        if attempt.outcome == "failed" and not attempt.reason:
+            raise ValueError("failed 必须携带原因")
+
+    @staticmethod
+    def _all_checks_match(attempt: RecoveryAttempt) -> bool:
+        return bool(attempt.checks) and all(check.outcome == "match" for check in attempt.checks)
+
+    @staticmethod
+    def _has_unknown(attempt: RecoveryAttempt) -> bool:
+        return any(check.outcome == "unknown" for check in attempt.checks)
+
+    @staticmethod
+    def _has_pollution_uncertainty(attempt: RecoveryAttempt) -> bool:
+        return any(check.dimension in {"pending_requests", "write_request"} and check.outcome != "match" for check in attempt.checks)
+
+    @staticmethod
+    def _recovery_attempt_dict(attempt: RecoveryAttempt) -> dict:
+        item = {"method": attempt.method, "outcome": attempt.outcome,
+                "checks": [{"dimension": check.dimension, "outcome": check.outcome, "expected": check.expected, "observed": check.observed} for check in attempt.checks]}
+        if attempt.reason:
+            item["reason"] = {"code": "RECOVERY_FAILED", "message": attempt.reason}
+        return item
+
+    @staticmethod
+    def _unknown_recovery_attempt(method: str, reason: str) -> RecoveryAttempt:
+        return RecoveryAttempt(method, "failed", tuple(RecoveryCheck(dimension, "unknown") for dimension in RECOVERY_DIMENSIONS), reason)
+
     def _materialize_object_verification(self, scan, source_kind, source, outcome, operation):
         object_id = source.get("objectId") if source_kind == "audit_object" else None
         audit_object = None
@@ -570,9 +698,12 @@ class HostCore:
             return self._response(request, scan, "ok", result=self._start_result(scan), operation=operation)
         if status == "succeeded" and operation.get("result_json"):
             return self._response(request, scan, "ok", result=json.loads(operation["result_json"]), operation=operation)
-        code = operation.get("error_code") or operation.get("errorCode") or "OPERATION_RESULT_UNKNOWN"
+        code = operation.get("error_code") or operation.get("errorCode") or ("OPERATION_IN_PROGRESS" if status == "running" else "OPERATION_RESULT_UNKNOWN")
         message = operation.get("error_message") or operation.get("errorMessage") or "Operation 尚未产生确定结果"
-        return self._response(request, scan, "failed" if scan["status"] == "failed" else "rejected", error=HostError(code, message), operation=operation)
+        saved_result = operation.get("result_json") or operation.get("resultJson")
+        return self._response(request, scan, "failed" if scan["status"] == "failed" else "rejected",
+                              result=json.loads(saved_result) if saved_result else None,
+                              error=HostError(code, message), operation=operation)
 
     def _require_scan(self, request: dict) -> dict:
         row = self._store.get_scan_by_run(request["scanId"], request["runId"])
@@ -629,9 +760,12 @@ class HostCore:
 
     @staticmethod
     def _new_operation(request, scan_id, kind, digest, status, revision):
-        return {"operationId":HostCore._new_id("operation"),"scanId":scan_id,"requestId":request["requestId"],
+        operation = {"operationId":HostCore._new_id("operation"),"scanId":scan_id,"requestId":request["requestId"],
                 "tool":request["tool"],"operationKind":kind,"idempotencyKey":request["idempotencyKey"],
                 "requestDigest":digest,"status":status,"acceptedAtRevision":revision}
+        if request.get("input", {}).get("caseId"):
+            operation["caseRef"] = request["input"]["caseId"]
+        return operation
 
     @staticmethod
     def _digest(value) -> str:

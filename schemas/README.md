@@ -16,6 +16,7 @@
 - `reverse-case.schema.json`：Agent 规划、Host 安全执行的反向 Case，以及动作前基线、反向动作、定向恢复、验证结果和刷新兜底记录。
 - `action-attempt.schema.json`：一次 Case 动作的 Host 安全决策、目标和请求观察引用。
 - `request-observation.schema.json`：外发请求的脱敏机械分类与是否已发送事实。
+- `recovery` 结构嵌入 `reverse-case.schema.json`；恢复适配器必须为全部必检维度提供 `match/mismatch/unknown` 检查。
 - `evidence.schema.json`：Host 生成的不可变、已脱敏证据。
 - `screenshot.schema.json`：对象病灶截图及其定位状态。
 - `issue.schema.json`：由 `issue_found` 产生的正式问题项。

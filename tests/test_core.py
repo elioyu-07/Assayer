@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, SQLiteStore
+from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RecoveryAttempt, RecoveryCheck, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -52,10 +52,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", "secret")
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter, action_adapter=action_adapter)
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter, action_adapter=action_adapter, recovery_adapter=recovery_adapter)
         self.cores.append(core)
         return core
 
@@ -241,6 +241,9 @@ class HostCoreTest(unittest.TestCase):
     def perform_action(self, core, started, object_id, case_id, *, key="action-1", revision=2, action_type="focus", intent="观察筛选区", parameters=None):
         return core.handle(session(started, tool="perform_action", key=key, revision=revision, input={"pageStateId":started["currentPageStateId"],"caseId":case_id,"objectId":object_id,"type":action_type,"intent":intent,"parameters":parameters or {}}))
 
+    def restore_case(self, core, started, object_id, case_id, *, key="restore-1", revision=3):
+        return core.handle(session(started, tool="restore_case", key=key, revision=revision, input={"caseId":case_id,"pageStateId":started["currentPageStateId"],"objectId":object_id,"fallback":"refresh_and_replay_safe_entrypoints"}))
+
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
         started, candidate_id = self.discover_candidate(core)
@@ -386,6 +389,69 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(retry["error"]["code"], "REQUEST_RESULT_UNKNOWN")
             self.assertEqual(second_adapter.calls, 0)
             second_store.close(); self.cores.remove(second)
+
+    def test_restore_targeted_success_crosses_recovery_barrier(self):
+        adapter = DeterministicRecoveryAdapter()
+        core = self.make_core(action_adapter=DeterministicActionAdapter(), recovery_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        self.perform_action(core, started, object_id, case_result["result"]["caseId"])
+        result = self.restore_case(core, started, object_id, case_result["result"]["caseId"])
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(result["runRevision"], 4)
+        self.assertEqual(adapter.calls, ["targeted_inverse"])
+        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "completed")
+
+    def test_restore_uncertain_requires_refresh_replay(self):
+        dims = tuple(RecoveryCheck(d, "match") for d in ("url_route", "page_layer", "active_tab", "overlay_state", "control_state", "object_identity", "pending_requests", "write_request"))
+        targeted = RecoveryAttempt("targeted_inverse", "uncertain", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "match")))
+        refresh = RecoveryAttempt("refresh_replay", "restored", dims)
+        adapter = DeterministicRecoveryAdapter(targeted=targeted, refresh=refresh)
+        core = self.make_core(recovery_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.restore_case(core, started, object_id, case_result["result"]["caseId"], revision=2)
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(adapter.calls, ["targeted_inverse", "refresh_replay"])
+
+    def test_restore_failure_with_unknown_pending_fails_scan(self):
+        failed = RecoveryAttempt("targeted_inverse", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "pending 请求未收束")
+        refresh = RecoveryAttempt("refresh_replay", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "刷新仍未知")
+        adapter = DeterministicRecoveryAdapter(targeted=failed, refresh=refresh)
+        core = self.make_core(recovery_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.restore_case(core, started, object_id, case_result["result"]["caseId"], revision=2)
+        self.assertEqual(result["result"]["finalStatus"], "failed")
+        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "restore_failed")
+
+    def test_default_recovery_adapter_fails_closed(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.restore_case(core, started, object_id, case_result["result"]["caseId"], revision=2)
+        self.assertEqual(result["result"]["finalStatus"], "failed")
+        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+
+    def test_host_restart_fails_running_action_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "host.sqlite"
+            store = SQLiteStore(path)
+            core = self.make_core(store=store)
+            started = bootstrap(core)["result"]
+            object_id, case_result = self.begin_case(core, started)
+            request = session(started, tool="perform_action", key="interrupted", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察","parameters":{}})
+            operation = core._new_operation(request, started["scanId"], "browser_action", core._request_digest(request), "running", 2)
+            with core._store.transaction():
+                core._store.insert_operation(operation)
+            core._store.close(); self.cores.remove(core)
+            restarted_store = SQLiteStore(path)
+            restarted = self.make_core(store=restarted_store)
+            interrupted = restarted._store.get_by_idempotency(started["scanId"], "interrupted")
+            self.assertEqual(interrupted["status"], "result_unknown")
+            self.assertEqual(restarted._store.get_scan(started["scanId"])["status"], "failed")
+            restarted_store.close(); self.cores.remove(restarted)
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))

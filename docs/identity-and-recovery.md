@@ -157,3 +157,5 @@ AuditObject 表示逻辑对象，不等于某个长期存活的 DOM 节点。对
 - Case 修改过的相关状态全部进入必检范围；
 - 写请求、未知 pending request 和对象丢失不能被视觉相似掩盖；
 - 每次恢复结果都能从账本中的基线、动作和检查记录复算。
+
+当前 Host Core 已实现上述恢复屏障的确定性内核：定向尝试不满足全量 `match` 时固定进入刷新重放，未知 pending/写请求会使 Scan 失败，Host 重启会把遗留动作/恢复 Operation 收束为 `result_unknown`。真实浏览器适配器仍需实现同一 `RecoveryAdapter` 契约，不能降低这些判据。
