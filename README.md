@@ -8,7 +8,8 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 - Host Core 已实现 Scan/Operation、凭据消费、页面发现、对象身份、Case、安全动作、恢复屏障、证据、判定事务、审计收束、账本导出和 JSON/Markdown 派生报告；
 - 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
 - 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
-- 下一阶段按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进，当前完成 B03/9。
+- Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定首个 `filter_region`；
+- 下一阶段按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进，当前完成 B04/9。
 
 ## 运行确定性 Harness
 
@@ -53,7 +54,8 @@ PYTHONPATH=src python3 -m agent_f_host --output-dir ./audit-issue-output --resul
 23. [垂直切片 011](docs/implementation-slice-011.md)
 24. [垂直切片 012](docs/implementation-slice-012.md)
 25. [垂直切片 013](docs/implementation-slice-013.md)
-26. [数据 Schema](schemas/README.md)
+26. [垂直切片 014](docs/implementation-slice-014.md)
+27. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 
