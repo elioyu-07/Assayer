@@ -30,6 +30,8 @@
 | Coverage Universe 闭合 | lifecycle | inspect_page/complete_audit | Entrypoint 引用校验 | processed/skipped/unprocessed 均能回指账本实体 |
 | Candidate 不得越权 | lifecycle, identity-recovery | inspect_page/inspect_object | PageCandidate Schema 与升级校验 | Candidate 不能直接创建 Case 或 Assessment |
 | 只读快照幂等 | lifecycle, host-agent-protocol | inspect_page | PageState/Operation | 同一快照重复读取不调用浏览器且不增 revision |
+| 身份结果机械约束 | identity-recovery | inspect_object | ObjectVerification | matched/not_found/ambiguous/changed 的数量和字段门禁 |
+| Candidate 升级事务 | identity-recovery | inspect_object | AuditObject/ObjectVerification | 仅 matched 生成 eligible AuditObject |
 
 状态：`accepted`、`needs_closure`、`blocked`。只有全部安全和结论完整性条款为 `accepted` 才允许编码。
 
@@ -53,6 +55,7 @@
 ### 身份与恢复
 
 - 前端重渲染后唯一对象可重新绑定；
+- Candidate 恰好一个匹配才升级 AuditObject；多候选不猜测；
 - 两个候选都匹配时返回 `ambiguous`；
 - 定向恢复 `uncertain` 时自动刷新并重放安全入口；
 - 刷新仍失败时 Case `restore_failed`，对象停止；无法排除污染时 Scan `failed`。

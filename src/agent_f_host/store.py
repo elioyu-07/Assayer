@@ -48,6 +48,15 @@ class SQLiteStore:
               candidate_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
               page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id), entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS audit_objects (
+              object_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id), entity_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS object_verifications (
+              verification_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id),
+              source_kind TEXT NOT NULL, source_ref TEXT NOT NULL, entity_json TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -147,6 +156,29 @@ class SQLiteStore:
     def get_candidates(self, page_state_id: str) -> list[dict]:
         rows = self._conn.execute("SELECT entity_json FROM page_candidates WHERE page_state_id=? ORDER BY candidate_id", (page_state_id,)).fetchall()
         return [json.loads(row[0]) for row in rows]
+
+    def get_candidate(self, candidate_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM page_candidates WHERE candidate_id=?", (candidate_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def get_audit_object(self, object_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM audit_objects WHERE object_id=?", (object_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def insert_object_verification(self, verification: dict, audit_object: dict | None) -> None:
+        if audit_object is not None:
+            self._conn.execute("INSERT OR REPLACE INTO audit_objects(object_id,scan_id,page_state_id,entity_json) VALUES(?,?,?,?)",
+                               (audit_object["objectId"], audit_object["scanId"], audit_object["pageStateRef"], json.dumps(audit_object, ensure_ascii=False, separators=(",", ":"))))
+        self._conn.execute("INSERT INTO object_verifications(verification_id,scan_id,page_state_id,source_kind,source_ref,entity_json) VALUES(?,?,?,?,?,?)",
+                           (verification["verificationId"], verification["scanId"], verification["pageStateRef"], verification["sourceKind"], verification["sourceRef"], json.dumps(verification, ensure_ascii=False, separators=(",", ":"))))
+
+    def insert_candidate(self, candidate: dict) -> None:
+        self._conn.execute("INSERT OR IGNORE INTO page_candidates(candidate_id,scan_id,page_state_id,entity_json) VALUES(?,?,?,?)",
+                           (candidate["candidateId"], candidate["scanId"], candidate["pageStateRef"], json.dumps(candidate, ensure_ascii=False, separators=(",", ":"))))
+
+    def get_object_verification(self, verification_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM object_verifications WHERE verification_id=?", (verification_id,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
         self._conn.execute("INSERT INTO bootstrap_idempotency(idempotency_key,operation_id,request_digest) VALUES(?,?,?)", (key, operation_id, digest))

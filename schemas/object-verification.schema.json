@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/object-verification.schema.json",
+  "title": "ObjectVerification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verificationId", "scanId", "pageStateRef", "sourceKind", "sourceRef", "outcome", "candidateCount", "matchedDimensions", "excludedReasons", "changedDimensions", "observedAt", "observedAtRevision"],
+  "properties": {
+    "verificationId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "sourceKind": { "enum": ["candidate", "audit_object"] },
+    "sourceRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "outcome": { "enum": ["matched", "not_found", "ambiguous", "changed"] },
+    "candidateCount": { "type": "integer", "minimum": 0 },
+    "matchedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+    "excludedReasons": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+    "changedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+    "observedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "observedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" }
+  },
+  "allOf": [
+    { "if": { "properties": { "outcome": { "const": "matched" } }, "required": ["outcome"] }, "then": { "required": ["objectRef"], "properties": { "candidateCount": { "const": 1 }, "matchedDimensions": { "minItems": 1 } } } },
+    { "if": { "properties": { "outcome": { "const": "not_found" } }, "required": ["outcome"] }, "then": { "properties": { "candidateCount": { "const": 0 } } } },
+    { "if": { "properties": { "outcome": { "const": "ambiguous" } }, "required": ["outcome"] }, "then": { "properties": { "candidateCount": { "minimum": 2 } } } },
+    { "if": { "properties": { "outcome": { "const": "changed" } }, "required": ["outcome"] }, "then": { "properties": { "candidateCount": { "minimum": 1 }, "changedDimensions": { "minItems": 1 } } } }
+  ]
+}

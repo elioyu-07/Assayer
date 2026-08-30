@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, HostError, SQLiteStore
+from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, HostCore, HostError, ObjectMatch, ObjectVerification, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -25,6 +25,14 @@ class ExplodingPageAdapter:
         raise RuntimeError("page adapter crash")
 
 
+class ExplodingIdentityAdapter:
+    def verify_candidate(self, candidate, page_state):
+        raise RuntimeError("identity adapter crash")
+
+    def rebind_object(self, audit_object, page_state):
+        raise RuntimeError("identity adapter crash")
+
+
 def bootstrap(core, key="boot-001"):
     return core.handle({"protocolVersion":"1.0","requestId":"req-001","agentTurnId":"turn-001","tool":"start_audit","idempotencyKey":key,"input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-001"}})
 
@@ -44,10 +52,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None, page_adapter=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", "secret")
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter)
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter)
         self.cores.append(core)
         return core
 
@@ -80,8 +88,8 @@ class HostCoreTest(unittest.TestCase):
         with core._store.transaction() as connection:
             connection.execute("UPDATE scans SET run_revision=2 WHERE scan_id=?", (started["result"]["scanId"],))
         second = core.handle(request)
-        self.assertEqual(first["error"]["code"], "INTERNAL_FAILURE")
-        self.assertEqual(second["error"]["code"], "INTERNAL_FAILURE")
+        self.assertEqual(first["error"]["code"], "UNKNOWN_REFERENCE")
+        self.assertEqual(second["error"]["code"], "UNKNOWN_REFERENCE")
 
     def test_same_key_on_different_tool_conflicts(self):
         core = self.make_core()
@@ -214,6 +222,65 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         result = core.handle(session(started, input={"pageStateId":"page-foreign","include":["objects"]}))
         self.assertEqual(result["error"]["code"], "UNKNOWN_REFERENCE")
+
+    def discover_candidate(self, core):
+        started = bootstrap(core)["result"]
+        page = core.handle(session(started, key="discover", input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
+        return started, page["candidateRefs"][0]
+
+    def inspect_candidate(self, core, started, candidate_id, key="verify"):
+        return core.handle(session(started, tool="inspect_object", key=key, input={"candidateId":candidate_id}))
+
+    def test_inspect_object_matched_upgrades_candidate(self):
+        core = self.make_core()
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        self.assertEqual(result["result"]["rebindStatus"], "matched")
+        self.assertEqual(result["runRevision"], 1)
+        audit_object = core._store.get_audit_object(result["result"]["objectId"])
+        self.assertEqual(audit_object["status"], "eligible")
+        self.assertEqual(audit_object["potentialRules"], [{"ruleId":"FUA-10","version":"1.0.0"}])
+
+    def test_inspect_object_not_found_does_not_create_object(self):
+        adapter = DeterministicObjectIdentityAdapter(ObjectVerification("not_found", 0, excluded_reasons=("no_required_dimensions",)))
+        core = self.make_core(identity_adapter=adapter)
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        self.assertEqual(result["result"]["rebindStatus"], "not_found")
+        self.assertNotIn("objectId", result["result"])
+
+    def test_inspect_object_ambiguous_never_selects_match(self):
+        adapter = DeterministicObjectIdentityAdapter(ObjectVerification("ambiguous", 2, matched_dimensions=("role",)))
+        core = self.make_core(identity_adapter=adapter)
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        self.assertEqual(result["result"]["candidateCount"], 2)
+        self.assertNotIn("objectId", result["result"])
+
+    def test_inspect_object_changed_returns_replacement_candidate(self):
+        match = ObjectMatch("locator-new","filter_region|search|新筛选区","search","新筛选区","新筛选区",20,80,640,120,1280,800)
+        adapter = DeterministicObjectIdentityAdapter(ObjectVerification("changed", 1, changed_dimensions=("accessible_name",), match=match))
+        core = self.make_core(identity_adapter=adapter)
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        replacement = result["result"]["replacementCandidateRef"]
+        self.assertNotEqual(replacement, candidate_id)
+        self.assertIsNotNone(core._store.get_candidate(replacement))
+        self.assertNotIn("objectId", result["result"])
+
+    def test_invalid_identity_outcome_is_fail_closed(self):
+        adapter = DeterministicObjectIdentityAdapter(ObjectVerification("ambiguous", 1))
+        core = self.make_core(identity_adapter=adapter)
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_identity_adapter_failure_is_fail_closed(self):
+        core = self.make_core(identity_adapter=ExplodingIdentityAdapter())
+        started, candidate_id = self.discover_candidate(core)
+        result = self.inspect_candidate(core, started, candidate_id)
+        self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
 
 
 if __name__ == "__main__":

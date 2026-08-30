@@ -9,6 +9,7 @@
 - `page-state.schema.json`：可复盘的页面/弹窗/抽屉/Tab/详情/编辑状态。
 - `entrypoint.schema.json`：Coverage Universe 中可处理、跳过或待处理的页面入口。
 - `page-candidate.schema.json`：页面发现阶段产生、尚未升级为正式 AuditObject 的候选。
+- `object-verification.schema.json`：Candidate 升级或 AuditObject 重绑的机械身份判定记录。
 - `audit-object.schema.json`：真实运行页面中发现的待检查对象。
 - `operation.schema.json`：Host 请求的幂等执行记录和结果已知性。
 - `rule-assessment.schema.json`：一个对象 × 一条规则的固定五态判定。

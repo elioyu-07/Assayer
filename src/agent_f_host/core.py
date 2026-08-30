@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator, RefResolver
 from .auth import CredentialVault, LoginAdapter, UnavailableLoginAdapter
 from .errors import HostError
 from .page import DeterministicPageAdapter, ReadOnlyPageAdapter
+from .object_identity import DeterministicObjectIdentityAdapter, ObjectIdentityAdapter
 from .store import SQLiteStore
 
 
@@ -27,7 +28,7 @@ class HostCore:
 
     def __init__(self, schema_root: str | Path | None = None, *, store: SQLiteStore | None = None,
                  credential_vault: CredentialVault | None = None, login_adapter: LoginAdapter | None = None,
-                 page_adapter: ReadOnlyPageAdapter | None = None):
+                 page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -47,10 +48,13 @@ class HostCore:
         self._page_state_validator = entity_validator("page-state.schema.json")
         self._entrypoint_validator = entity_validator("entrypoint.schema.json")
         self._candidate_validator = entity_validator("page-candidate.schema.json")
+        self._audit_object_validator = entity_validator("audit-object.schema.json")
+        self._object_verification_validator = entity_validator("object-verification.schema.json")
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
         self._page_adapter = page_adapter or DeterministicPageAdapter()
+        self._object_identity_adapter = object_identity_adapter or DeterministicObjectIdentityAdapter()
         registry_path = root.parent / "rules" / "registry.json"
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
         self._rule_registry_version = registry["registryVersion"]
@@ -75,11 +79,20 @@ class HostCore:
         scan = self._require_scan(request)
         if tool == "get_operation":
             return self._get_operation(request, scan)
-        operation, repeated = self._accept_operation(request, scan, implemented=tool == "inspect_page")
+        if scan["status"] in {"completed", "partial", "failed"}:
+            raise HostError("RUN_TERMINAL", "Scan 已进入终态")
+        implemented = tool in {"inspect_page", "inspect_object"}
+        operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
+            if operation["status"] == "running" and tool == "inspect_page":
+                return self._inspect_page(request, scan, operation)
+            if operation["status"] == "running" and tool == "inspect_object":
+                return self._inspect_object(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
+        if tool == "inspect_object":
+            return self._inspect_object(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -164,8 +177,8 @@ class HostCore:
                     self._validate_entity(self._entrypoint_validator, item, "Entrypoint")
                 for item in candidates:
                     self._validate_entity(self._candidate_validator, item, "PageCandidate")
-            except HostError:
-                raise
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
             except Exception:
                 return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "只读页面适配器执行失败")
             with self._store.transaction():
@@ -215,6 +228,96 @@ class HostCore:
         if "networkSummary" in include:
             result["networkSummary"] = inspection.get("networkSummary", {})
         return result
+
+    def _inspect_object(self, request: dict, scan: dict, operation: dict) -> dict:
+        source_kind = "candidate" if "candidateId" in request["input"] else "audit_object"
+        source_ref = request["input"].get("candidateId") or request["input"].get("objectId")
+        source = self._store.get_candidate(source_ref) if source_kind == "candidate" else self._store.get_audit_object(source_ref)
+        if not source or source["scanId"] != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Candidate 或 AuditObject 不存在于当前 Scan")
+        if source["pageStateRef"] != scan.get("currentPageStateId"):
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "对象来源页面不是当前活动 PageState")
+        page = self._store.get_page_state(source["pageStateRef"])
+        if not page:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "对象来源 PageState 不存在")
+        try:
+            outcome = self._object_identity_adapter.verify_candidate(source, page) if source_kind == "candidate" else self._object_identity_adapter.rebind_object(source, page)
+            self._validate_identity_outcome(outcome)
+            verification, audit_object, replacement = self._materialize_object_verification(scan, source_kind, source, outcome, operation)
+            self._validate_entity(self._object_verification_validator, verification, "ObjectVerification")
+            if audit_object:
+                self._validate_entity(self._audit_object_validator, audit_object, "AuditObject")
+            if replacement:
+                self._validate_entity(self._candidate_validator, replacement, "PageCandidate")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        except Exception:
+            return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "对象身份适配器执行失败")
+        result = {"operationId":operation.get("operation_id") or operation["operationId"],"runRevision":scan["runRevision"],
+                  "verificationRef":verification["verificationId"],"rebindStatus":verification["outcome"],
+                  "candidateCount":verification["candidateCount"],"matchedDimensions":verification["matchedDimensions"],
+                  "changedDimensions":verification["changedDimensions"],"evidenceRefs":[]}
+        if verification.get("objectRef"):
+            result["objectId"] = verification["objectRef"]
+        if replacement:
+            result["replacementCandidateRef"] = replacement["candidateId"]
+        operation.update({"status":"succeeded","resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        with self._store.transaction():
+            if replacement:
+                self._store.insert_candidate(replacement)
+            self._store.insert_object_verification(verification, audit_object)
+            self._store.update_operation(operation)
+        return self._response(request, scan, "ok", result=result, operation=operation)
+
+    def _materialize_object_verification(self, scan, source_kind, source, outcome, operation):
+        object_id = source.get("objectId") if source_kind == "audit_object" else None
+        audit_object = None
+        replacement = None
+        if outcome.status == "matched":
+            match = outcome.match
+            object_id = object_id or self._stable_id("object", scan["scanId"], source["candidateId"])
+            audit_object = {"objectId":object_id,"scanId":scan["scanId"],"pageStateRef":source["pageStateRef"],
+                            "kind":source["kind"],"status":"eligible","runtimeObserved":True,
+                            "identity":{"hostLocatorId":match.host_locator_id,"fingerprint":self._digest(match.identity_material),
+                                        "algorithmVersion":"1.0.0","role":match.role,"accessibleName":match.accessible_name,
+                                        "visibleText":match.visible_text},"rebindStatus":"matched","lastVerifiedAtRevision":scan["runRevision"],
+                            "location":{"boundingBox":{"x":match.x,"y":match.y,"width":match.width,"height":match.height},
+                                        "visible":True,"viewportWidth":match.viewport_width,"viewportHeight":match.viewport_height},
+                            "potentialRules":source["potentialRules"],"assessmentRefs":[],"observedAt":self._now()}
+        elif source_kind == "audit_object":
+            audit_object = dict(source)
+            audit_object.update({"status":"blocked","rebindStatus":outcome.status,
+                                 "blockedReason":{"code":f"OBJECT_{outcome.status.upper()}","message":"对象无法可靠重新绑定。"},
+                                 "lastVerifiedAtRevision":scan["runRevision"]})
+        if outcome.status == "changed":
+            match = outcome.match
+            replacement = {"candidateId":self._stable_id("candidate", source["pageStateRef"], match.identity_material),
+                           "scanId":scan["scanId"],"pageStateRef":source["pageStateRef"],"kind":source["kind"],
+                           "label":match.accessible_name or source.get("label", source["kind"]),"role":match.role,
+                           "locatorDigest":self._digest(match.identity_material),"potentialRules":source["potentialRules"],
+                           "observedAtRevision":scan["runRevision"]}
+        verification = {"verificationId":self._stable_id("verification", operation.get("operation_id") or operation["operationId"]),
+                        "scanId":scan["scanId"],"pageStateRef":source["pageStateRef"],"sourceKind":source_kind,
+                        "sourceRef":source.get("candidateId") or source.get("objectId"),"outcome":outcome.status,
+                        "candidateCount":outcome.candidate_count,"matchedDimensions":list(outcome.matched_dimensions),
+                        "excludedReasons":list(outcome.excluded_reasons),"changedDimensions":list(outcome.changed_dimensions),
+                        "observedAt":self._now(),"observedAtRevision":scan["runRevision"]}
+        if object_id and outcome.status == "matched":
+            verification["objectRef"] = object_id
+        return verification, audit_object, replacement
+
+    @staticmethod
+    def _validate_identity_outcome(outcome):
+        if outcome.status not in {"matched", "not_found", "ambiguous", "changed"}:
+            raise HostError("INTERNAL_FAILURE", "对象身份适配器返回未知状态")
+        if outcome.status == "matched" and (outcome.candidate_count != 1 or not outcome.match or not outcome.matched_dimensions):
+            raise HostError("INTERNAL_FAILURE", "matched 必须恰好一个候选、完整匹配材料和匹配维度")
+        if outcome.status == "not_found" and (outcome.candidate_count != 0 or outcome.match):
+            raise HostError("INTERNAL_FAILURE", "not_found 必须为零候选且不得携带匹配对象")
+        if outcome.status == "ambiguous" and (outcome.candidate_count < 2 or outcome.match):
+            raise HostError("INTERNAL_FAILURE", "ambiguous 必须至少两个候选且不得选择对象")
+        if outcome.status == "changed" and (outcome.candidate_count < 1 or not outcome.match or not outcome.changed_dimensions):
+            raise HostError("INTERNAL_FAILURE", "changed 必须携带相关对象和变化维度")
 
     def _finish_operation_failure(self, request, scan, operation, code, message):
         operation.update({"status":"failed_known","errorCode":code,"errorMessage":message})
