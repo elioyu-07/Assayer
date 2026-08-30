@@ -1,50 +1,75 @@
+import tempfile
 import unittest
+from pathlib import Path
 
-from agent_f_host import HostCore, HostError
+from agent_f_host import CredentialVault, DeterministicLoginAdapter, HostCore, HostError, SQLiteStore
+
+
+class ExplodingLoginAdapter:
+    def authenticate(self, url, secret):
+        raise RuntimeError("adapter crash")
 
 
 def bootstrap(core, key="boot-001"):
     return core.handle({"protocolVersion":"1.0","requestId":"req-001","agentTurnId":"turn-001","tool":"start_audit","idempotencyKey":key,"input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-001"}})
 
 
-def session(scan, tool="inspect_page", key="op-001", revision=0, input=None):
+def session(scan, tool="inspect_page", key="op-001", revision=1, input=None):
     return {"protocolVersion":"1.0","requestId":"req-002","scanId":scan["scanId"],"runId":scan["runId"],"agentTurnId":"turn-002","tool":tool,"idempotencyKey":key,"expectedRunRevision":revision,"input":input or {"pageStateId":"page-001","include":["objects"]}}
 
 
 class HostCoreTest(unittest.TestCase):
+    def setUp(self):
+        self.cores = []
+
+    def tearDown(self):
+        for core in self.cores:
+            try:
+                core.close()
+            except Exception:
+                pass
+
+    def make_core(self, *, succeed=True, store=None):
+        vault = CredentialVault()
+        vault.put("cred-001", "secret")
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed))
+        self.cores.append(core)
+        return core
+
     def test_bootstrap_is_idempotent(self):
-        core = HostCore()
+        core = self.make_core()
         first = bootstrap(core)
         second = bootstrap(core)
         self.assertEqual(first["result"]["scanId"], second["result"]["scanId"])
         self.assertEqual(first["result"]["operationId"], second["result"]["operationId"])
 
     def test_bootstrap_conflict_is_rejected(self):
-        core = HostCore()
+        core = self.make_core()
         bootstrap(core)
         with self.assertRaises(HostError) as caught:
             core.handle({"protocolVersion":"1.0","requestId":"req-003","agentTurnId":"turn-003","tool":"start_audit","idempotencyKey":"boot-001","input":{"url":"https://other.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-002"}})
         self.assertEqual(caught.exception.code, "IDEMPOTENCY_CONFLICT")
 
     def test_stale_revision_fails_before_adapter(self):
-        core = HostCore()
+        core = self.make_core()
         started = bootstrap(core)
         with self.assertRaises(HostError) as caught:
             core.handle(session(started["result"], revision=99))
         self.assertEqual(caught.exception.code, "STALE_STATE")
 
     def test_idempotent_retry_wins_over_later_revision(self):
-        core = HostCore()
+        core = self.make_core()
         started = bootstrap(core)
         request = session(started["result"])
         first = core.handle(request)
-        core._scans[started["result"]["scanId"]]["runRevision"] = 1
+        with core._store.transaction() as connection:
+            connection.execute("UPDATE scans SET run_revision=2 WHERE scan_id=?", (started["result"]["scanId"],))
         second = core.handle(request)
         self.assertEqual(first["error"]["code"], "INTERNAL_FAILURE")
         self.assertEqual(second["error"]["code"], "INTERNAL_FAILURE")
 
     def test_same_key_on_different_tool_conflicts(self):
-        core = HostCore()
+        core = self.make_core()
         started = bootstrap(core)
         core.handle(session(started["result"], key="same-key"))
         with self.assertRaises(HostError) as caught:
@@ -52,12 +77,67 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, "IDEMPOTENCY_CONFLICT")
 
     def test_unknown_operation_reference_is_rejected(self):
-        core = HostCore()
+        core = self.make_core()
         started = bootstrap(core)
         req = session(started["result"], tool="get_operation", input={"operationId":"operation-missing"})
         with self.assertRaises(HostError) as caught:
             core.handle(req)
         self.assertEqual(caught.exception.code, "UNKNOWN_REFERENCE")
+
+    def test_credential_handle_is_one_shot(self):
+        core = self.make_core()
+        first = bootstrap(core)
+        self.assertEqual(first["status"], "ok")
+        second = bootstrap(core, key="boot-002")
+        self.assertEqual(second["status"], "failed")
+        self.assertEqual(second["error"]["code"], "CREDENTIAL_CHANNEL_FAILED")
+
+    def test_login_failure_invalidates_scan(self):
+        core = self.make_core(succeed=False)
+        result = bootstrap(core)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "LOGIN_FAILED")
+        self.assertEqual(result["runRevision"], 1)
+
+    def test_login_adapter_exception_is_fail_closed(self):
+        vault = CredentialVault()
+        vault.put("cred-001", "secret")
+        core = HostCore(credential_vault=vault, login_adapter=ExplodingLoginAdapter())
+        self.cores.append(core)
+        result = bootstrap(core)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_registry_version_mismatch_fails_before_scan(self):
+        core = self.make_core()
+        request = {"protocolVersion":"1.0","requestId":"req-version","agentTurnId":"turn-version","tool":"start_audit","idempotencyKey":"boot-version","input":{"url":"https://test.example.com","ruleRegistryVersion":"9.9.9","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-001"}}
+        with self.assertRaises(HostError) as caught:
+            core.handle(request)
+        self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
+    def test_operation_cannot_be_read_from_another_scan(self):
+        core = self.make_core()
+        first = bootstrap(core)
+        core.credential_vault.put("cred-002", "secret")
+        second = core.handle({"protocolVersion":"1.0","requestId":"req-second","agentTurnId":"turn-second","tool":"start_audit","idempotencyKey":"boot-second","input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-002"}})
+        req = session(second["result"], tool="get_operation", input={"operationId":first["result"]["operationId"]})
+        with self.assertRaises(HostError) as caught:
+            core.handle(req)
+        self.assertEqual(caught.exception.code, "UNKNOWN_REFERENCE")
+
+    def test_sqlite_store_survives_core_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "host.sqlite"
+            first_store = SQLiteStore(path)
+            first = self.make_core(store=first_store)
+            started = bootstrap(first)
+            first_store.close()
+            second_store = SQLiteStore(path)
+            second = self.make_core(store=second_store)
+            retry = bootstrap(second)
+            self.assertEqual(retry["result"]["scanId"], started["result"]["scanId"])
+            self.assertEqual(retry["result"]["operationId"], started["result"]["operationId"])
+            second_store.close()
 
 
 if __name__ == "__main__":
