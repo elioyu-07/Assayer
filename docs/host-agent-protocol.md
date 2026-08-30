@@ -157,6 +157,8 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 
 ## 6. 工具目录
 
+传输层约束：JSON CLI 使用一行一请求的 JSON Lines framing；MCP 工具调用必须携带同一完整协议封套。两者都只调用 `HostCore.handle`，不生成 ID、不判断规则、不读取浏览器，也不改变错误码或生命周期门禁。
+
 ### 6.1 `start_audit`
 
 创建扫描、接收临时凭据并尝试登录。
