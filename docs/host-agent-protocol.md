@@ -60,6 +60,8 @@ Host 不主动给 Agent 下业务结论；Host 只返回事实、能力结果、
 
 Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成功响应创建并返回这些值；同一幂等键重复请求返回同一启动 Operation 和结果。
 
+如果 Host 在创建 Scan 前就能确定请求无效或凭据通道不可用，失败响应可以只带 `protocolVersion`、`requestId`、`status`、`error`、`evidenceRefs` 和 `diagnosticRefs`，不得伪造会话 ID；一旦 Scan 已创建，失败响应必须使用包含 `scanId`、`runId` 和 `runRevision` 的统一响应格式。
+
 ### 4.2 Session 封套
 
 除 `start_audit` 外的工具使用 Session 封套：
@@ -91,7 +93,7 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 | `expectedRunRevision` | Agent 看到的全局运行 revision；状态变更请求过期时返回 `STALE_STATE`，不执行动作 |
 | `input` | 工具专用结构化参数 |
 
-Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 和当前 `runRevision`。读取请求不递增 revision；成功改变浏览器或账本事实的 Operation 只递增一次。
+除创建 Scan 前的 Bootstrap 失败外，Host 响应必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 和当前 `runRevision`。除 `get_operation` 外，每个工具请求都创建 Operation；读取请求记录为 `operationKind=read` 且不递增 revision，成功改变浏览器或账本事实的 Operation 只递增一次。
 
 ## 5. 统一响应格式
 

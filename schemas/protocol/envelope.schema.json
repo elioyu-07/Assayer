@@ -5,6 +5,7 @@
   "oneOf": [
     { "$ref": "#/$defs/bootstrapRequest" },
     { "$ref": "#/$defs/sessionRequest" },
+    { "$ref": "#/$defs/bootstrapFailureResponse" },
     { "$ref": "#/$defs/response" }
   ],
   "$defs": {
@@ -45,6 +46,18 @@
         { "if": { "properties": { "status": { "const": "ok" } }, "required": ["status"] }, "then": { "required": ["result"] } },
         { "if": { "properties": { "status": { "enum": ["rejected", "failed"] } }, "required": ["status"] }, "then": { "required": ["error"] } }
       ]
+    },
+    "bootstrapFailureResponse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "status", "error", "evidenceRefs", "diagnosticRefs"],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" },
+        "requestId": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["rejected", "failed"] },
+        "error": { "$ref": "#/$defs/error" },
+        "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "diagnosticRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+      }
     },
     "error": {
       "type": "object", "additionalProperties": false,

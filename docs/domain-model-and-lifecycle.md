@@ -87,7 +87,9 @@ accepted → running → succeeded
                    ↘ result_unknown
 ```
 
-- 每个可能改变浏览器或账本事实的请求都创建 Operation；
+- 除 `get_operation` 外，每个 Host 工具请求都创建一条 Operation；读取类请求也要记录，但其 `operationKind=read` 且不递增 `runRevision`；
+- Operation 必须声明 `operationKind`：`bootstrap`、`read`、`browser_action`、`recovery`、`decision_preparation`、`decision_commit` 或 `lifecycle`；
+- 只有成功改变浏览器或账本事实的 Operation 才递增 `runRevision`，一次 Operation 最多递增一次；被拒绝、完全重复幂等请求和纯读取不递增；
 - 相同 `idempotencyKey` 和相同请求摘要返回同一 Operation；
 - 相同键但请求摘要不同，返回 `IDEMPOTENCY_CONFLICT`；
 - `result_unknown` 时不得重放动作，Agent 使用 `get_operation` 查询；
