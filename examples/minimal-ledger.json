@@ -96,6 +96,7 @@
       "objectRefs": ["obj-001"]
     }
   ],
+  "entrypoints": [],
   "objects": [
     {
       "objectId": "obj-001",

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "1.0.0",
+  "createdAt": "2026-08-30T13:00:00Z",
+  "scan": {
+    "scanId": "scan-failed-001",
+    "runId": "run-failed-001",
+    "protocolVersion": "1.0",
+    "skillVersion": "1.0.0",
+    "runRevision": 4,
+    "algorithms": {
+      "pageIdentity": "1.0.0",
+      "objectIdentity": "1.0.0",
+      "recoveryPolicy": "1.0.0",
+      "sanitizationPolicy": "1.0.0",
+      "normalization": "1.0.0"
+    },
+    "status": "failed",
+    "auditMode": "runtime_only",
+    "entryUrl": "https://test.example.com/orders",
+    "allowedOrigins": [
+      "https://test.example.com"
+    ],
+    "startedAt": "2026-08-30T13:00:00Z",
+    "endedAt": "2026-08-30T13:10:00Z",
+    "loginStatus": "succeeded",
+    "ruleRegistryDigest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "frozenRules": [
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      }
+    ],
+    "capabilities": [
+      "runtime",
+      "dom",
+      "interaction"
+    ],
+    "coverageProof": {
+      "visitedPageStateRefs": [],
+      "processedObjectRefs": [],
+      "processedEntrypointRefs": [],
+      "skippedEntrypoints": [],
+      "ruleSummaries": [
+        {
+          "rule": {
+            "ruleId": "FUA-10",
+            "version": "1.0.0"
+          },
+          "assessmentCount": 0,
+          "resultCounts": {},
+          "coverageComplete": false,
+          "reason": "初始探索期间检测到未知写请求。"
+        }
+      ],
+      "unprocessedEntrypointRefs": [],
+      "completionReason": "检测到无法证明未发送的潜在写请求，立即终止扫描。"
+    },
+    "terminalReason": {
+      "code": "REQUEST_RESULT_UNKNOWN",
+      "message": "无法证明潜在写请求是否已发送，正式结论全部失效。"
+    },
+    "conclusionsValid": false
+  },
+  "ruleRegistry": {
+    "registryId": "registry-001",
+    "registryVersion": "1.0.0",
+    "digest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "createdAt": "2026-08-30T12:00:00Z",
+    "rules": [
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0",
+        "status": "enabled",
+        "name": "列表筛选必须同时提供查询和重置",
+        "owner": "product-owner",
+        "document": "rules/FUA-10.md",
+        "objectKinds": [
+          "filter_region"
+        ],
+        "requiredCapabilities": [
+          "runtime",
+          "dom",
+          "interaction"
+        ],
+        "capabilityMissingOutcome": "needs_review",
+        "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+        "coverageDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "directConfirmationConditions": [],
+        "defaultSeverity": "P2",
+        "allowedSeverities": [
+          "P1",
+          "P2",
+          "P3"
+        ],
+        "regressionSuite": "rules/FUA-10.md#样本与回归",
+        "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114"
+      }
+    ]
+  },
+  "pageStates": [],
+  "entrypoints": [],
+  "objects": [],
+  "operations": [],
+  "assessments": [],
+  "cases": [],
+  "evidence": [],
+  "screenshots": [],
+  "issues": [],
+  "diagnostics": []
+}

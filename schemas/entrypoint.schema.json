@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/entrypoint.schema.json",
+  "title": "Entrypoint",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["entrypointId", "scanId", "pageStateRef", "kind", "label", "status", "discoveredAtRevision"],
+  "properties": {
+    "entrypointId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "kind": { "enum": ["navigation", "tab", "detail", "safe_action", "unknown"] },
+    "label": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "status": { "enum": ["discovered", "processed", "skipped", "unprocessed"] },
+    "discoveredAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "reason": { "$ref": "common.schema.json#/$defs/reason" }
+  },
+  "allOf": [{ "if": { "properties": { "status": { "enum": ["skipped", "unprocessed"] } }, "required": ["status"] }, "then": { "required": ["reason"] } }]
+}

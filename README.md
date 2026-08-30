@@ -20,7 +20,8 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 8. [证据与判定完整性](docs/evidence-and-decision-integrity.md)
 9. [规则契约](docs/rule-contract.md)
 10. [设计验收与追溯](docs/verification-and-traceability.md)
-11. [数据 Schema](schemas/README.md)
+11. [工具级协议契约](docs/tool-contracts.md)
+12. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 

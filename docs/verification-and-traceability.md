@@ -26,6 +26,8 @@
 | 恢复失败传播 | identity-recovery | restore_case | Case/Scan 语义校验 | 定向失败→刷新成功；刷新失败→partial/failed |
 | 五态判定 | rule-contract, evidence-integrity | prepare/commit_decision | RuleAssessment | 覆盖不足不能 scanned_no_issue |
 | 唯一事实源 | evidence-integrity | complete_audit | Ledger 事件重放 | 派生报告不能改写账本 |
+| 工具参数契约 | host-agent-protocol | 全部工具 | tool-contracts.schema.json | 缺参、未知枚举和结果字段被拒绝 |
+| Coverage Universe 闭合 | lifecycle | inspect_page/complete_audit | Entrypoint 引用校验 | processed/skipped/unprocessed 均能回指账本实体 |
 
 状态：`accepted`、`needs_closure`、`blocked`。只有全部安全和结论完整性条款为 `accepted` 才允许编码。
 
@@ -61,6 +63,7 @@
 - `Issue` 与 `RuleAssessment` 一对一生成；
 - Scan `failed` 后正式问题视图为空或明确标记失效；
 - `complete_audit` 对未处理入口、跳过原因和规则摘要执行闭合校验。
+- `minimal-ledger.json`、`issue-ledger.json`、`partial-ledger.json` 和 `failed-ledger.json` 分别覆盖通过、问题、部分完成和失败终态。
 
 ## 4. FUA-10 设计验收
 
@@ -79,5 +82,6 @@ FUA-10 必须至少有以下纸面样本：
 - 所有状态、错误、门禁和失败传播都有可区分结果；
 - 协议字段命名与 Schema 字段命名一致；
 - 示例账本能代表 pass、issue、partial/failed 三类终态；
+- 每个工具都有独立 input/output Schema，Coverage Proof 的入口引用能闭合到 Entrypoint 实体；
 - 未决问题均有 Owner、决策日期和关闭证据；
 - 最终复核没有阻塞项，治理文档将状态更新为 `implementation-ready`。

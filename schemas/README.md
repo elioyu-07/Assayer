@@ -7,6 +7,7 @@
 - `common.schema.json`：ID、时间、摘要、规则引用、结果状态、严重度、坐标和源码位置等共享类型。
 - `scan-run.schema.json`：一次扫描的输入边界、冻结规则集合、状态和覆盖证明。
 - `page-state.schema.json`：可复盘的页面/弹窗/抽屉/Tab/详情/编辑状态。
+- `entrypoint.schema.json`：Coverage Universe 中可处理、跳过或待处理的页面入口。
 - `audit-object.schema.json`：真实运行页面中发现的待检查对象。
 - `operation.schema.json`：Host 请求的幂等执行记录和结果已知性。
 - `rule-assessment.schema.json`：一个对象 × 一条规则的固定五态判定。
@@ -23,7 +24,7 @@
 
 JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不能可靠表达跨数组的引用闭合。因此 Host 在落账前还必须做语义校验：
 
-1. 所有实体 ID 在当前账本内唯一，引用必须指向同一扫描中的实体；
+1. 所有实体 ID 在当前账本内唯一，引用必须指向同一扫描中的实体；Coverage Proof 的入口引用必须指向 `entrypoints`；
 2. `scan.frozenRules` 必须存在于 `ruleRegistry.rules`，且摘要与注册表内容一致；
 3. 对象、页面状态、Case、证据、截图、判定和问题的关联必须闭合；
 4. `issue_found` 必须引用当前对象的有效证据和独立的 `captured` 截图，截图对象和页面状态必须匹配；
@@ -47,7 +48,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 
 ## 协议与账本的边界
 
-协议请求、响应和 PendingDecision 是运行时交互对象，不等于最终账本实体。Operation 保存幂等执行事实；PendingDecision 只存在于提交事务完成前，不进入最终正式账本。协议封套的第一版机器约束见 `schemas/protocol/envelope.schema.json`；工具专用 Schema 在字段稳定后继续拆分。
+协议请求、响应和 PendingDecision 是运行时交互对象，不等于最终账本实体。Operation 保存幂等执行事实；PendingDecision 只存在于提交事务完成前，不进入最终正式账本。协议封套的机器约束见 `schemas/protocol/envelope.schema.json`，工具专用 input/output 见 `schemas/protocol/tool-contracts.schema.json`。
 
 ## 扩展规则
 

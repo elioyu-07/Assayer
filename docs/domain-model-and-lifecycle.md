@@ -16,6 +16,7 @@
 ```mermaid
 erDiagram
     ScanRun ||--o{ PageState : captures
+    PageState ||--o{ Entrypoint : exposes
     PageState ||--o{ AuditObject : contains
     AuditObject ||--o{ ReverseCase : investigated_by
     ReverseCase ||--o{ Operation : executes
@@ -27,6 +28,7 @@ erDiagram
 ```
 
 - `ScanRun` 是一致性聚合根；所有实体必须属于同一 `scanId`；
+- Coverage Proof 引用的 Entrypoint 必须存在于聚合账本中，状态与 processed/skipped/unprocessed 分类一致；
 - `runRevision` 由 Host 在运行事实成功改变时递增；读取请求和完全重复的幂等请求不递增；
 - `PageState`、Evidence、Screenshot、RuleAssessment 和 Issue 一经持久化即不可变；
 - AuditObject 和 ReverseCase 通过新增事件或状态迁移更新，不覆盖历史证据；

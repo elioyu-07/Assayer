@@ -1,0 +1,378 @@
+{
+  "schemaVersion": "1.0.0",
+  "createdAt": "2026-08-30T11:00:00Z",
+  "scan": {
+    "scanId": "scan-issue-001",
+    "runId": "run-issue-001",
+    "protocolVersion": "1.0",
+    "skillVersion": "1.0.0",
+    "runRevision": 8,
+    "algorithms": {
+      "pageIdentity": "1.0.0",
+      "objectIdentity": "1.0.0",
+      "recoveryPolicy": "1.0.0",
+      "sanitizationPolicy": "1.0.0",
+      "normalization": "1.0.0"
+    },
+    "status": "completed",
+    "auditMode": "runtime_only",
+    "entryUrl": "https://test.example.com/orders",
+    "allowedOrigins": [
+      "https://test.example.com"
+    ],
+    "startedAt": "2026-08-30T10:00:00Z",
+    "endedAt": "2026-08-30T11:00:00Z",
+    "loginStatus": "succeeded",
+    "ruleRegistryDigest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "frozenRules": [
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      }
+    ],
+    "capabilities": [
+      "runtime",
+      "dom",
+      "interaction",
+      "visual"
+    ],
+    "coverageProof": {
+      "visitedPageStateRefs": [
+        "page-issue-001"
+      ],
+      "processedObjectRefs": [
+        "obj-issue-001"
+      ],
+      "processedEntrypointRefs": [],
+      "skippedEntrypoints": [],
+      "ruleSummaries": [
+        {
+          "rule": {
+            "ruleId": "FUA-10",
+            "version": "1.0.0"
+          },
+          "assessmentCount": 1,
+          "resultCounts": {
+            "issue_found": 1
+          },
+          "coverageComplete": true
+        }
+      ],
+      "unprocessedEntrypointRefs": [],
+      "completionReason": "已完成筛选区覆盖并确认缺少重置能力。"
+    },
+    "terminalReason": {
+      "code": "COVERAGE_COMPLETE",
+      "message": "覆盖证明通过。"
+    },
+    "conclusionsValid": true
+  },
+  "ruleRegistry": {
+    "registryId": "registry-001",
+    "registryVersion": "1.0.0",
+    "digest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "createdAt": "2026-08-30T09:00:00Z",
+    "rules": [
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0",
+        "status": "enabled",
+        "name": "列表筛选必须同时提供查询和重置",
+        "owner": "product-owner",
+        "document": "rules/FUA-10.md",
+        "objectKinds": [
+          "filter_region"
+        ],
+        "requiredCapabilities": [
+          "runtime",
+          "dom",
+          "interaction"
+        ],
+        "capabilityMissingOutcome": "needs_review",
+        "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+        "coverageDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "directConfirmationConditions": [],
+        "defaultSeverity": "P2",
+        "allowedSeverities": [
+          "P1",
+          "P2",
+          "P3"
+        ],
+        "regressionSuite": "rules/FUA-10.md#样本与回归",
+        "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
+        "examples": {
+          "positive": [
+            "完整筛选区"
+          ],
+          "negative": [
+            "缺少重置"
+          ],
+          "regression": [
+            "身份歧义"
+          ]
+        }
+      }
+    ]
+  },
+  "pageStates": [
+    {
+      "pageStateId": "page-issue-001",
+      "scanId": "scan-issue-001",
+      "url": "https://test.example.com/orders",
+      "origin": "https://test.example.com",
+      "route": "/orders",
+      "title": "订单列表",
+      "stateKind": "page",
+      "observedAtRevision": 2,
+      "observedAt": "2026-08-30T10:01:00Z",
+      "domDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "identity": {
+        "algorithmVersion": "1.0.0",
+        "materialDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "safeEntrypoints": [],
+      "objectRefs": [
+        "obj-issue-001"
+      ]
+    }
+  ],
+  "entrypoints": [],
+  "objects": [
+    {
+      "objectId": "obj-issue-001",
+      "scanId": "scan-issue-001",
+      "pageStateRef": "page-issue-001",
+      "kind": "filter_region",
+      "status": "decided",
+      "runtimeObserved": true,
+      "identity": {
+        "hostLocatorId": "loc-issue-001",
+        "fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "algorithmVersion": "1.0.0"
+      },
+      "rebindStatus": "matched",
+      "lastVerifiedAtRevision": 7,
+      "location": {
+        "boundingBox": {
+          "x": 20,
+          "y": 80,
+          "width": 640,
+          "height": 120
+        },
+        "visible": true,
+        "viewportWidth": 1280,
+        "viewportHeight": 800
+      },
+      "potentialRules": [
+        {
+          "ruleId": "FUA-10",
+          "version": "1.0.0"
+        }
+      ],
+      "assessmentRefs": [
+        "assessment-issue-001"
+      ],
+      "observedAt": "2026-08-30T10:02:00Z"
+    }
+  ],
+  "operations": [],
+  "assessments": [
+    {
+      "assessmentId": "assessment-issue-001",
+      "scanId": "scan-issue-001",
+      "preparationOperationRef": "operation-issue-prep",
+      "commitOperationRef": "operation-issue-commit",
+      "objectRef": "obj-issue-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "applicable": true,
+      "result": "issue_found",
+      "coverage": {
+        "requiredDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "coveredDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "complete": true
+      },
+      "evidenceRefs": [
+        "evidence-issue-001"
+      ],
+      "caseRefs": [
+        "case-issue-001"
+      ],
+      "screenshotRef": "screenshot-issue-001",
+      "severity": "P2",
+      "title": "筛选区缺少重置能力",
+      "impact": "用户无法快速清除筛选条件。",
+      "recommendation": "增加重置入口并恢复列表默认状态。",
+      "reasonText": "存在筛选条件和查询，但没有重置能力。",
+      "conclusionValidity": "valid",
+      "decidedAt": "2026-08-30T11:00:00Z",
+      "committedAtRevision": 8
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "case-issue-001",
+      "scanId": "scan-issue-001",
+      "objectRef": "obj-issue-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "kind": "observation",
+      "purpose": "确认查询和重置入口。",
+      "status": "completed",
+      "beginRevision": 3,
+      "plannedAt": "2026-08-30T10:03:00Z",
+      "plannedCoverageDimensions": [
+        "filter_present",
+        "query_action",
+        "reset_action",
+        "binding_to_list"
+      ],
+      "startedAt": "2026-08-30T10:03:00Z",
+      "endedAt": "2026-08-30T10:10:00Z",
+      "operationRefs": [],
+      "actions": [],
+      "beforePageStateRef": "page-issue-001",
+      "afterPageStateRef": "page-issue-001",
+      "evidenceRefs": [
+        "evidence-issue-001"
+      ],
+      "recovery": {
+        "policy": "targeted_then_refresh",
+        "baselinePageStateRef": "page-issue-001",
+        "finalStatus": "restored",
+        "attempts": [
+          {
+            "method": "targeted_inverse",
+            "outcome": "restored",
+            "checks": [
+              {
+                "dimension": "object_identity",
+                "outcome": "match"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceId": "evidence-issue-001",
+      "scanId": "scan-issue-001",
+      "pageStateRef": "page-issue-001",
+      "objectRef": "obj-issue-001",
+      "caseRef": "case-issue-001",
+      "kind": "runtime_dom",
+      "capturedAt": "2026-08-30T10:09:00Z",
+      "capturedAtRevision": 7,
+      "collectorVersion": "1.0.0",
+      "sanitizationPolicyVersion": "1.0.0",
+      "normalizationAlgorithmVersion": "1.0.0",
+      "integrityDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "sanitized": true,
+      "payload": {
+        "payloadType": "dom_fragment",
+        "content": {
+          "hasQuery": true,
+          "hasReset": false
+        }
+      }
+    }
+  ],
+  "screenshots": [
+    {
+      "screenshotId": "raw-visual-issue-001",
+      "scanId": "scan-issue-001",
+      "pageStateRef": "page-issue-001",
+      "objectRef": "obj-issue-001",
+      "caseRef": "case-issue-001",
+      "kind": "raw_visual",
+      "status": "captured",
+      "capturedAt": "2026-08-30T10:09:00Z",
+      "capturedAtRevision": 7,
+      "sanitizationPolicyVersion": "1.0.0",
+      "path": "screenshots/raw-issue-001.png",
+      "digest": "abababababababababababababababababababababababababababababababab",
+      "imageType": "png",
+      "width": 640,
+      "height": 120,
+      "problemBoundingBox": {
+        "x": 20,
+        "y": 80,
+        "width": 640,
+        "height": 120
+      },
+      "annotation": "原始视觉证据"
+    },
+    {
+      "screenshotId": "screenshot-issue-001",
+      "scanId": "scan-issue-001",
+      "pageStateRef": "page-issue-001",
+      "objectRef": "obj-issue-001",
+      "caseRef": "case-issue-001",
+      "kind": "issue",
+      "status": "captured",
+      "capturedAt": "2026-08-30T10:09:30Z",
+      "capturedAtRevision": 7,
+      "sanitizationPolicyVersion": "1.0.0",
+      "rawVisualRef": "raw-visual-issue-001",
+      "path": "screenshots/issue-issue-001.png",
+      "digest": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "imageType": "png",
+      "width": 640,
+      "height": 120,
+      "problemBoundingBox": {
+        "x": 20,
+        "y": 80,
+        "width": 640,
+        "height": 120
+      },
+      "annotation": "筛选区缺少重置入口"
+    }
+  ],
+  "issues": [
+    {
+      "issueId": "issue-001",
+      "scanId": "scan-issue-001",
+      "assessmentRef": "assessment-issue-001",
+      "objectRef": "obj-issue-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "result": "issue_found",
+      "evidenceRefs": [
+        "evidence-issue-001"
+      ],
+      "screenshotRef": "screenshot-issue-001",
+      "severity": "P2",
+      "title": "筛选区缺少重置能力",
+      "message": "当前筛选区只有查询，没有重置。",
+      "impact": "用户无法快速清除筛选条件。",
+      "recommendation": "增加重置入口。",
+      "conclusionValidity": "valid",
+      "createdAt": "2026-08-30T11:00:00Z",
+      "createdAtRevision": 8
+    }
+  ],
+  "diagnostics": []
+}

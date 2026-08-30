@@ -54,6 +54,7 @@
 | Run | Scan 的一次实际执行实例；第一版不支持断点续跑，因此一个 Scan 只有一个 Run。 |
 | `runRevision` | Host 对当前运行事实维护的全局、单调递增并发版本。 |
 | PageState | 某一时刻可复盘的页面、路由、弹层、Tab 或详情状态快照。 |
+| Entrypoint | Host 在 PageState 中发现的可导航、可展开或其他安全入口；其处理状态必须进入 Coverage Proof。 |
 | AuditObject | Host 在真实运行页面中验证、且可能适用规则的逻辑检查对象。 |
 | Case | 围绕一个对象和一条规则执行的有边界调查单元。 |
 | Operation | 一个可能耗时或改变运行事实的 Host 请求执行记录。 |
