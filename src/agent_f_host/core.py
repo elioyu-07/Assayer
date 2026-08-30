@@ -1274,9 +1274,15 @@ class HostCore:
 
     def _finish_operation_failure(self, request, scan, operation, code, message):
         operation.update({"status":"failed_known","errorCode":code,"errorMessage":message})
+        terminal = code == "BROWSER_SESSION_FAILED"
+        if terminal and scan.get("status") not in {"completed", "partial", "failed"}:
+            scan["runRevision"] += 1
+            scan["status"] = "failed"
         with self._store.transaction():
             self._store.update_operation(operation)
-        return self._response(request, scan, "rejected", error=HostError(code, message), operation=operation)
+            if terminal:
+                self._store.update_scan(scan)
+        return self._response(request, scan, "failed" if terminal else "rejected", error=HostError(code, message), operation=operation)
 
     def _accept_operation(self, request: dict, scan: dict, *, implemented: bool = False) -> tuple[dict, bool]:
         digest = self._request_digest(request)

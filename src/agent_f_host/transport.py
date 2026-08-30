@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 from typing import TextIO
@@ -19,6 +20,7 @@ from .errors import HostError
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{2,127}$")
 _TOOLS = tuple(TOOL_KINDS)
+_LOG = logging.getLogger(__name__)
 
 
 class JsonLineTransport:
@@ -42,6 +44,7 @@ class JsonLineTransport:
         except Exception:
             # Do not expose parser/adapter stack traces or request contents over
             # an untrusted transport boundary.
+            _LOG.exception("unhandled Host transport failure requestId=%s", request_id)
             return self._error_response(request if isinstance(request, dict) else {}, request_id,
                                         HostError("INTERNAL_FAILURE", "Host 处理请求时发生内部故障"))
 

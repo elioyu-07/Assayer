@@ -3,10 +3,11 @@ import hashlib
 import os
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent_f_host import (BrowserProfile, BrowserSession, CredentialVault,
+from agent_f_host import (BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
                           HostCore, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
                           create_recoverable_browser_adapter_bundle)
@@ -45,6 +46,8 @@ class SiteHandler(BaseHTTPRequestHandler):
     server_port = 0
 
     def do_GET(self):
+        if self.path == "/slow-page":
+            time.sleep(0.5)
         if self.path in {"/action-get-page", "/action-post-page", "/action-cross-page", "/action-route-page"}:
             body = action_page(self.path)
         elif self.path == "/action-route-target":
@@ -61,7 +64,10 @@ class SiteHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def do_POST(self):
         if self.path == "/action-post":
@@ -180,6 +186,42 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     self.assertEqual(os.stat(image_path).st_mode & 0o777, 0o600)
                 finally:
                     core.close()
+        finally:
+            session.close()
+
+    def test_real_chromium_navigation_timeout_invalidates_session(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        profile = BrowserProfile(navigation_timeout_ms=100, operation_timeout_ms=100)
+        session = BrowserSession("scan-timeout", profile, backend=PlaywrightBrowserBackend())
+        try:
+            try:
+                session.open()
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
+            with self.assertRaises(BrowserSessionFailure):
+                bundle.page.navigate(f"{origin}/slow-page")
+            self.assertEqual(session.state, "failed")
+        finally:
+            session.close()
+
+    def test_real_chromium_context_crash_is_sanitized_and_invalidates_session(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        session = BrowserSession("scan-crash", BrowserProfile(), backend=PlaywrightBrowserBackend())
+        try:
+            try:
+                context = session.open()
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
+            bundle.page.navigate(f"{origin}/orders")
+            bundle.page.observe("page-crash-001")
+            context.close()
+            with self.assertRaises(BrowserSessionFailure) as caught:
+                bundle.page.observe("page-crash-002")
+            self.assertEqual(caught.exception.code, "BROWSER_SESSION_FAILED")
+            self.assertNotIn("TargetClosed", caught.exception.message)
+            self.assertEqual(session.state, "failed")
         finally:
             session.close()
 

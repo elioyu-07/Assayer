@@ -15,7 +15,7 @@ from threading import RLock
 from typing import Callable, Protocol, Sequence
 from urllib.parse import urlparse
 
-from .browser_session import BrowserBackend, BrowserProfile, BrowserSession
+from .browser_session import BrowserBackend, BrowserProfile, BrowserSession, BrowserSessionFailure
 from .errors import HostError
 from .object_identity import ObjectMatch, ObjectVerification
 from .page import CandidateObservation, EntrypointObservation, PageObservation
@@ -50,13 +50,18 @@ class PlaywrightBrowserBackend:
         try:
             # The fixed Chromium channel uses the modern headless implementation
             # and avoids a second, separate headless-shell binary.
-            self._browser = self._playwright.chromium.launch(headless=profile.headless, channel="chromium")
-            return self._browser.new_context(
+            self._browser = self._playwright.chromium.launch(
+                headless=profile.headless, channel="chromium", timeout=max(profile.operation_timeout_ms, 1_000),
+            )
+            context = self._browser.new_context(
                 viewport={"width": profile.viewport_width, "height": profile.viewport_height},
                 locale=profile.locale,
                 timezone_id=profile.timezone_id,
                 service_workers="block",
             )
+            context.set_default_timeout(profile.operation_timeout_ms)
+            context.set_default_navigation_timeout(profile.navigation_timeout_ms)
+            return context
         except Exception:
             if self._browser is not None:
                 self._browser.close()
@@ -286,7 +291,7 @@ class BrowserReadOnlyPageAdapter:
         try:
             value = page.evaluate(self.PROBE)
         except Exception as error:
-            raise HostError("INTERNAL_FAILURE", "只读浏览器探针执行失败") from error
+            raise BrowserSessionFailure("只读浏览器探针执行失败，浏览器上下文已失效") from error
         if not isinstance(value, dict):
             raise HostError("INTERNAL_FAILURE", "只读浏览器探针返回格式无效")
         text = value.get("visibleText", "")

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from .action_safety import ActionSafetyPolicy
 from .browser_action import BrowserNetworkGuard
 from .browser_readonly import BrowserLocatorRegistry, BrowserObjectIdentityAdapter, BrowserReadOnlyPageAdapter
-from .browser_session import BrowserSession
+from .browser_session import BrowserSession, BrowserSessionFailure
 from .evidence import EvidenceCapture
 from .evidence import RawVisualCapture
 from .errors import HostError
@@ -161,11 +161,11 @@ class BrowserEvidenceAdapter:
         if not callable(screenshot):
             return RawVisualCapture(status="rejected", reason="浏览器 Page 不支持截图", sanitized=False, sanitization_status="failed")
         try:
-            image = screenshot(type="png", clip=box, animations="disabled")
+            image = screenshot(type="png", clip=box, animations="disabled", timeout=self._session.profile.operation_timeout_ms)
         except TypeError:
-            image = screenshot(type="png", clip=box)
+            image = screenshot(type="png", clip=box, timeout=self._session.profile.operation_timeout_ms)
         except Exception as error:
-            raise HostError("INTERNAL_FAILURE", "浏览器截图执行失败") from error
+            raise BrowserSessionFailure("浏览器截图执行失败，浏览器上下文已失效") from error
         if not isinstance(image, (bytes, bytearray)) or not bytes(image).startswith(b"\x89PNG\r\n\x1a\n"):
             return RawVisualCapture(status="rejected", reason="浏览器返回的截图不是 PNG", sanitized=False, sanitization_status="failed")
         image = bytes(image)

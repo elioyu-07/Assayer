@@ -11,6 +11,15 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Callable, Protocol, TypeVar
 
+from .errors import HostError
+
+
+class BrowserSessionFailure(HostError):
+    """A browser/backend failure that invalidates all facts from the Session."""
+
+    def __init__(self, message: str = "浏览器 Session 已失败，不能继续使用"):
+        super().__init__("BROWSER_SESSION_FAILED", message, next_step="stop_scan")
+
 
 class BrowserBackend(Protocol):
     def launch(self, profile: "BrowserProfile") -> object: ...
@@ -124,10 +133,17 @@ class BrowserSession:
                 raise RuntimeError("browser session is not open")
             try:
                 return callback(self._handle)
-            except Exception:
-                # A backend exception means the context can no longer be trusted.
+            except BrowserSessionFailure:
                 self._state = "failed"
                 raise
+            except HostError:
+                # A deliberate Host rejection (for example navigation policy)
+                # does not prove the browser Context itself is broken.
+                raise
+            except Exception as error:
+                # A backend exception means the context can no longer be trusted.
+                self._state = "failed"
+                raise BrowserSessionFailure() from error
 
     def close(self) -> None:
         with self._lock:
@@ -186,8 +202,14 @@ class ScanSessionRegistry:
         with self._lock:
             sessions = list(self._sessions.values())
             self._sessions.clear()
+        errors = []
         for session in sessions:
-            session.close()
+            try:
+                session.close()
+            except Exception as error:
+                errors.append(error)
+        if errors:
+            raise errors[0]
 
     def __len__(self) -> int:
         with self._lock:

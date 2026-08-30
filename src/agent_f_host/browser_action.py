@@ -15,7 +15,7 @@ from .browser_readonly import (BrowserLocatorRegistry,
                                BrowserObjectIdentityAdapter,
                                BrowserReadOnlyPageAdapter,
                                ReadonlyBrowserPage)
-from .browser_session import BrowserSession
+from .browser_session import BrowserSession, BrowserSessionFailure
 from .errors import HostError
 
 
@@ -222,12 +222,14 @@ class BrowserSafeActionAdapter:
                 with self._guard.operation(operation_id, intercept):
                     self._execute_locator_action(page, locator, action["type"])
                     page.wait_for_timeout(self._session.profile.network_idle_window_ms)
+            except BrowserSessionFailure:
+                raise
             except Exception:
                 requests = self._guard.drain_requests()
                 decisions = self._guard.drain_decisions()
                 if any(item.outcome == "blocked" for item in decisions):
                     return ActionExecution(status="request_blocked", requests=requests, diagnostic="请求在发送前被 Host 阻断", local_state_changed=True)
-                return ActionExecution(status="result_unknown", requests=requests, diagnostic="浏览器动作执行失败")
+                raise BrowserSessionFailure("浏览器动作执行失败，浏览器上下文已失效")
             requests = self._guard.drain_requests()
             for decision in self._guard.drain_decisions():
                 if decision.outcome in {"already_sent", "unknown"}:

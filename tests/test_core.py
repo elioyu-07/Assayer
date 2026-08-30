@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from agent_f_host import ActionExecution, BrowserSessionFailure, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -34,6 +34,11 @@ class CountingPageAdapter(DeterministicPageAdapter):
 class ExplodingPageAdapter:
     def observe(self, page_state_id):
         raise RuntimeError("page adapter crash")
+
+
+class CrashedBrowserPageAdapter:
+    def observe(self, page_state_id):
+        raise BrowserSessionFailure()
 
 
 class ExplodingIdentityAdapter:
@@ -168,6 +173,15 @@ class HostCoreTest(unittest.TestCase):
         result = bootstrap(core)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_browser_session_crash_transitions_scan_to_failed(self):
+        core = self.make_core(page_adapter=CrashedBrowserPageAdapter())
+        started = bootstrap(core)["result"]
+        result = core.handle(session(started, key="browser-crash", input={"pageStateId": started["currentPageStateId"], "include": ["objects"]}))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "BROWSER_SESSION_FAILED")
+        self.assertEqual(result["runRevision"], 2)
+        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
 
     def test_registry_version_mismatch_fails_before_scan(self):
         core = self.make_core()

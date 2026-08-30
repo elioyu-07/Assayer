@@ -63,7 +63,7 @@
 ### 判定与输出
 
 - `issue_found` 无截图、无 Evidence、无完整覆盖或 Case 未恢复时原子拒绝；
-- B07a/B07b 已完成，真实浏览器可以生成结构化 Evidence 和对象级 Raw Visual；B07b 图片会明确标记 `sanitizationStatus=not_performed`，因此所有真实 `issue_found` 仍被脱敏门禁拒绝，B08 传输层不得改变该结果；B08 的 JSON CLI 与 MCP-shaped 适配都只委托同一个 `HostCore.handle`；
+- B07a/B07b、B08、B09 已完成，真实浏览器可以生成结构化 Evidence 和对象级 Raw Visual；B07b 图片会明确标记 `sanitizationStatus=not_performed`，因此所有真实 `issue_found` 仍被脱敏门禁拒绝，B08 的 JSON CLI/MCP 适配都只委托同一个 `HostCore.handle`，B09 故障处理不得改变该结果；
 - `scanned_no_issue` 缺少任一最低维度时拒绝；
 - `not_applicable` 不能用 capability 缺失冒充；
 - `Issue` 与 `RuleAssessment` 一对一生成；

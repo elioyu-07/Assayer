@@ -2,7 +2,7 @@ import threading
 import time
 import unittest
 
-from agent_f_host import BrowserProfile, BrowserSession, ScanSessionRegistry
+from agent_f_host import BrowserProfile, BrowserSession, BrowserSessionFailure, HostError, ScanSessionRegistry
 
 
 class FakeBackend:
@@ -17,6 +17,12 @@ class FakeBackend:
 
     def close(self, handle):
         self.closed.append(handle)
+
+
+class FailingCloseBackend(FakeBackend):
+    def close(self, handle):
+        self.closed.append(handle)
+        raise RuntimeError("injected close failure")
 
 
 class BrowserSessionTest(unittest.TestCase):
@@ -75,11 +81,19 @@ class BrowserSessionTest(unittest.TestCase):
         backend = FakeBackend()
         session = BrowserSession("scan-1", backend=backend)
         session.open()
-        with self.assertRaisesRegex(RuntimeError, "boom"):
+        with self.assertRaises(BrowserSessionFailure) as caught:
             session.run_serial(lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
+        self.assertNotIn("boom", caught.exception.message)
         self.assertEqual(session.state, "failed")
         with self.assertRaises(RuntimeError):
             session.run_serial(lambda _: None)
+
+    def test_deliberate_host_rejection_does_not_poison_session(self):
+        session = BrowserSession("scan-1", backend=FakeBackend()); session.open()
+        with self.assertRaises(HostError):
+            session.run_serial(lambda _: (_ for _ in ()).throw(HostError("NAVIGATION_BLOCKED", "blocked")))
+        self.assertEqual(session.state, "open")
+        session.close()
 
     def test_registry_enforces_exclusive_ownership_and_terminal_release(self):
         registry = ScanSessionRegistry()
@@ -105,6 +119,19 @@ class BrowserSessionTest(unittest.TestCase):
         registry.close_all()
         self.assertEqual(len(registry), 0)
         self.assertEqual([backend.closed for backend in backends], [["context-1"], ["context-1"]])
+
+    def test_close_all_attempts_every_session_when_one_close_fails(self):
+        registry = ScanSessionRegistry()
+        backends = [FailingCloseBackend(), FakeBackend()]
+        sessions = []
+        for index, backend in enumerate(backends):
+            session = BrowserSession(f"scan-{index}", backend=backend); session.open()
+            registry.register(f"scan-{index}", session); sessions.append(session)
+        with self.assertRaisesRegex(RuntimeError, "close failure"):
+            registry.close_all()
+        self.assertEqual(len(registry), 0)
+        self.assertEqual([backend.closed for backend in backends], [["context-1"], ["context-1"]])
+        self.assertEqual([session.state for session in sessions], ["closed", "closed"])
 
 
 if __name__ == "__main__":
