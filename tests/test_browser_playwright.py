@@ -8,7 +8,7 @@ from agent_f_host import (BrowserProfile, BrowserSession, CredentialVault,
                           HostCore, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
                           create_readonly_browser_adapters,
-                          create_safe_browser_adapter_bundle)
+                          create_recoverable_browser_adapter_bundle)
 
 
 PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
@@ -19,15 +19,21 @@ PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
 
 
 def action_page(path):
-    if "action-cross" in path:
+    if "action-route-page" in path:
+        method = "GET"
+        endpoint = ""
+        onclick = "location.href='/action-route-target';"
+    elif "action-cross" in path:
         method = "GET"
         endpoint = f"http://localhost:{SiteHandler.server_port}/action-cross"
+        onclick = f"fetch('{endpoint}', {{method:'{method}'}}).catch(() => {{}});"
     else:
         method = "POST" if "action-post" in path else "GET"
         endpoint = "/action-post" if method == "POST" else "/action-get"
+        onclick = f"fetch('{endpoint}', {{method:'{method}'}}).catch(() => {{}});"
     return f"""<!doctype html><html><head><title>Action Orders</title></head>
 <body><main><form role='search' aria-label='Order filters'>
-<button type='button' aria-expanded='false' onclick=\"fetch('{endpoint}', {{method:'{method}'}}).catch(() => {{}}); this.setAttribute('aria-expanded','true')\">Run action</button>
+<button type='button' aria-expanded='false' onclick=\"{onclick} this.setAttribute('aria-expanded', this.getAttribute('aria-expanded') === 'true' ? 'false' : 'true')\">Run action</button>
 </form></main></body></html>""".encode()
 
 
@@ -38,8 +44,10 @@ class SiteHandler(BaseHTTPRequestHandler):
     server_port = 0
 
     def do_GET(self):
-        if self.path in {"/action-get-page", "/action-post-page", "/action-cross-page"}:
+        if self.path in {"/action-get-page", "/action-post-page", "/action-cross-page", "/action-route-page"}:
             body = action_page(self.path)
+        elif self.path == "/action-route-target":
+            body = action_page("/action-route-target")
         elif self.path == "/action-get":
             type(self).get_actions += 1
             body = b"ok"
@@ -141,7 +149,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         finally:
             session.close()
 
-    def _run_action(self, page_name, action_type="expand"):
+    def _run_action(self, page_name, action_type="expand", restore=False, return_case=False):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         session = BrowserSession(f"scan-{page_name}", BrowserProfile(), backend=PlaywrightBrowserBackend())
         try:
@@ -149,7 +157,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 session.open()
             except Exception as error:
                 self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
-            bundle = create_safe_browser_adapter_bundle(session, allowed_origin=origin)
+            bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             vault = CredentialVault()
             vault.put(f"credential-{page_name}", LoginSecret("local-user", "local-password"))
             with tempfile.TemporaryDirectory() as output:
@@ -157,7 +165,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     credential_vault=vault,
                     login_adapter=LocalNavigationLoginAdapter(bundle.page, f"{origin}/{page_name}-page"),
                     page_adapter=bundle.page, object_identity_adapter=bundle.identity,
-                    action_adapter=bundle.action,
+                    action_adapter=bundle.action, recovery_adapter=bundle.recovery,
                 )
                 try:
                     started = core.handle({
@@ -194,6 +202,16 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                         "input": {"pageStateId": started["currentPageStateId"], "caseId": case["caseId"],
                                   "objectId": object_id, "type": action_type, "intent": "观察筛选区", "parameters": {}},
                     })
+                    if restore:
+                        result = core.handle({
+                            "protocolVersion": "1.0", "requestId": f"{page_name}-restore", "scanId": started["scanId"],
+                            "runId": started["runId"], "agentTurnId": "turn-action-6", "tool": "restore_case",
+                            "idempotencyKey": f"{page_name}-restore", "expectedRunRevision": 3,
+                            "input": {"caseId": case["caseId"], "pageStateId": started["currentPageStateId"],
+                                      "objectId": object_id, "fallback": "refresh_and_replay_safe_entrypoints"},
+                        })
+                    if return_case:
+                        return result, core._store.get_case(case["caseId"])
                     return result
                 finally:
                     core.close()
@@ -215,12 +233,33 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "REQUEST_BLOCKED")
         self.assertEqual(SiteHandler.post_actions, 0)
 
+    def test_real_chromium_blocked_write_can_be_restored_without_server_write(self):
+        SiteHandler.post_actions = 0
+        result = self._run_action("action-post", restore=True)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(SiteHandler.post_actions, 0)
+
     def test_real_chromium_cross_origin_get_is_blocked_before_server(self):
         SiteHandler.cross_actions = 0
         result = self._run_action("action-cross")
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(result["error"]["code"], "REQUEST_BLOCKED")
         self.assertEqual(SiteHandler.cross_actions, 0)
+
+    def test_real_chromium_targeted_inverse_crosses_recovery_barrier(self):
+        result, case = self._run_action("action-get", restore=True, return_case=True)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual([item["method"] for item in case["recovery"]["attempts"]], ["targeted_inverse"])
+        self.assertEqual(len(case["recovery"]["attempts"][0]["checks"]), 9)
+        self.assertTrue(all(item["outcome"] == "match" for item in case["recovery"]["attempts"][0]["checks"]))
+
+    def test_real_chromium_refresh_replay_recovers_route_change(self):
+        result, case = self._run_action("action-route", action_type="expand", restore=True, return_case=True)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual([item["method"] for item in case["recovery"]["attempts"]], ["targeted_inverse", "refresh_replay"])
 
 
 if __name__ == "__main__":

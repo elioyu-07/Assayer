@@ -29,6 +29,9 @@ class BrowserNetworkGuard:
         self._active_operation: str | None = None
         self._requests: list[NetworkRequest] = []
         self._decisions: list[RequestDecision] = []
+        self._pending_requests: set[int] = set()
+        self._sent_writes = 0
+        self._tracking_complete = False
         self._lock = RLock()
 
     def install(self, context: object) -> None:
@@ -43,6 +46,11 @@ class BrowserNetworkGuard:
             route_web_socket = getattr(context, "route_web_socket", None)
             if callable(route_web_socket):
                 route_web_socket("**/*", self._handle_websocket)
+            on = getattr(context, "on", None)
+            if callable(on):
+                on("requestfinished", self._request_completed)
+                on("requestfailed", self._request_completed)
+                self._tracking_complete = True
             self._installed_contexts.add(key)
 
     @contextmanager
@@ -74,11 +82,19 @@ class BrowserNetworkGuard:
     def summary(self) -> dict:
         with self._lock:
             requests = tuple(self._requests)
+            decisions = tuple(self._decisions)
+            pending = len(self._pending_requests)
+            sent_writes = self._sent_writes
+            tracking_complete = self._tracking_complete
         return {
             "status": "active",
             "observedRequests": len(requests),
             "observedWrites": sum(1 for item in requests if item.method.upper() not in {"GET", "HEAD", "OPTIONS"}),
-            "blockedRequests": sum(1 for item in requests if not self.policy.classify_request(item, self.allowed_origin).outcome == "allowed"),
+            "blockedRequests": sum(1 for item in decisions if item.outcome == "blocked"),
+            "unknownRequests": sum(1 for item in decisions if item.outcome in {"unknown", "already_sent"}),
+            "pendingReadRequests": pending,
+            "sentWrites": sent_writes,
+            "trackingStatus": "proven" if tracking_complete else "unavailable",
         }
 
     def _handle_route(self, route: object) -> None:
@@ -91,9 +107,21 @@ class BrowserNetworkGuard:
             self._requests.append(network)
             self._decisions.append(decision)
         if decision.outcome == "allowed":
-            route.continue_()
+            with self._lock:
+                self._pending_requests.add(id(request))
+                if network.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+                    self._sent_writes += 1
+            try:
+                route.continue_()
+            except Exception:
+                self._request_completed(request)
+                raise
         else:
             route.abort()
+
+    def _request_completed(self, request: object) -> None:
+        with self._lock:
+            self._pending_requests.discard(id(request))
 
     def _handle_websocket(self, route: object) -> None:
         url = str(getattr(route, "url", ""))

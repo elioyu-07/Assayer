@@ -386,6 +386,12 @@ class HostCore:
             self._validate_entity(self._case_validator, case, "ReverseCase")
         except HostError as error:
             return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        capture_baseline = getattr(self._recovery_adapter, "capture_baseline", None)
+        if callable(capture_baseline):
+            try:
+                capture_baseline(case, obj, self._store.get_page_state(scan["currentPageStateId"]))
+            except Exception:
+                return self._finish_operation_failure(request, scan, operation, "RECOVERY_BASELINE_UNAVAILABLE", "无法建立 Case 恢复基线")
         scan["runRevision"] += 1
         obj["status"] = "investigating"
         operation["caseRef"] = case["caseId"]
@@ -543,7 +549,9 @@ class HostCore:
         page = self._store.get_page_state(data["pageStateId"])
         attempts = []
         try:
-            first = self._recovery_adapter.restore(case, target, page, "targeted_inverse")
+            adapter_case = dict(case)
+            adapter_case["_hostOperationId"] = operation.get("operation_id") or operation["operationId"]
+            first = self._recovery_adapter.restore(adapter_case, target, page, "targeted_inverse")
             self._validate_recovery_attempt(first, "targeted_inverse")
         except Exception:
             first = self._unknown_recovery_attempt("targeted_inverse", "恢复适配器执行失败")
@@ -551,7 +559,9 @@ class HostCore:
         final = first
         if first.outcome != "restored" or not self._all_checks_match(first):
             try:
-                second = self._recovery_adapter.restore(case, target, page, "refresh_replay")
+                adapter_case = dict(case)
+                adapter_case["_hostOperationId"] = operation.get("operation_id") or operation["operationId"]
+                second = self._recovery_adapter.restore(adapter_case, target, page, "refresh_replay")
                 self._validate_recovery_attempt(second, "refresh_replay")
             except Exception:
                 second = self._unknown_recovery_attempt("refresh_replay", "刷新重放适配器执行失败")
@@ -1229,7 +1239,11 @@ class HostCore:
     def _case_action(action: dict, before_page_state_id: str) -> dict:
         item = {key: action[key] for key in ("actionId", "type", "targetObjectRef", "intent", "parameters", "safetyOutcome", "atRunRevision")}
         if action["safetyOutcome"] == "allowed":
-            item.update({"beforeStateEvidenceRefs": [before_page_state_id], "recoveryMode": "refresh_only"})
+            recovery_mode = "inverse" if action["type"] in {"expand", "collapse"} else ("noop" if action["type"] in {"focus", "scroll"} else "refresh_only")
+            item.update({"beforeStateEvidenceRefs": [before_page_state_id], "recoveryMode": recovery_mode})
+            if recovery_mode == "inverse":
+                inverse_type = {"expand": "collapse", "collapse": "expand"}[action["type"]]
+                item["inverseAction"] = {"type": inverse_type, "targetObjectRef": action.get("targetObjectRef"), "parameters": {}}
         if action.get("blockReason"):
             item["blockReason"] = action["blockReason"]
         if action.get("requestObservationRefs"):
