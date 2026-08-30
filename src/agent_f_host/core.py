@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, RefResolver
 
-from .auth import CredentialVault, LoginAdapter, UnavailableLoginAdapter
+from .auth import CredentialVault, LoginAdapter, LoginCoordinator, UnavailableLoginAdapter
 from .errors import HostError
 from .page import ReadOnlyPageAdapter, UnavailablePageAdapter
 from .object_identity import ObjectIdentityAdapter, UnavailableObjectIdentityAdapter
@@ -39,7 +39,8 @@ class HostCore:
                  page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None,
                  action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None,
                  recovery_adapter: RecoveryAdapter | None = None, evidence_adapter: EvidenceAdapter | None = None,
-                 evidence_sanitizer: EvidenceSanitizer | None = None, report_builder: DerivedReportBuilder | None = None):
+                 evidence_sanitizer: EvidenceSanitizer | None = None, report_builder: DerivedReportBuilder | None = None,
+                 login_coordinator: LoginCoordinator | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -75,6 +76,7 @@ class HostCore:
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
+        self._login_coordinator = login_coordinator or LoginCoordinator()
         self._page_adapter = page_adapter or UnavailablePageAdapter()
         self._object_identity_adapter = object_identity_adapter or UnavailableObjectIdentityAdapter()
         self._action_adapter = action_adapter or UnavailableActionAdapter()
@@ -204,14 +206,10 @@ class HostCore:
         secret = self._credential_vault.consume(request["input"]["credentialHandle"])
         if secret is None:
             return self._finish_bootstrap_failure(request, scan, operation, "CREDENTIAL_CHANNEL_FAILED", "凭据句柄不存在、已过期或已消费")
-        try:
-            login = self._login_adapter.authenticate(request["input"]["url"], secret)
-        except Exception:
-            return self._finish_bootstrap_failure(request, scan, operation, "INTERNAL_FAILURE", "登录适配器执行失败")
-        finally:
-            del secret
-        if login.status != "succeeded":
-            return self._finish_bootstrap_failure(request, scan, operation, "LOGIN_FAILED", login.reason or "登录失败")
+        outcome = self._login_coordinator.authenticate(request["input"]["url"], secret, self._login_adapter)
+        if outcome.status != "succeeded":
+            return self._finish_bootstrap_failure(request, scan, operation, outcome.error_code or "LOGIN_FAILED", outcome.reason or "登录失败")
+        login = outcome.result
 
         scan.update({"runRevision": 1, "status": "exploring", "loginStatus": "succeeded",
                      "currentPageStateId": login.current_page_state_id,
@@ -1384,4 +1382,7 @@ class HostCore:
         return response
 
     def close(self) -> None:
-        self._store.close()
+        try:
+            self._credential_vault.clear_all()
+        finally:
+            self._store.close()

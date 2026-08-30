@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, run_deterministic_harness
+from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, LoginSecret, run_deterministic_harness
 
 
 EXPECTED_ARTIFACTS = {
@@ -35,6 +35,7 @@ class DeterministicHarnessTest(unittest.TestCase):
                 if path.suffix in {".json", ".md", ".log"}
             )
             self.assertNotIn("deterministic-secret", text_artifacts)
+            self.assertNotIn("harness-user", text_artifacts)
             self.assertNotIn(str(Path(tmp).resolve()), text_artifacts)
 
     def test_issue_flow_produces_traceable_visual_issue(self):
@@ -72,7 +73,7 @@ class DeterministicHarnessTest(unittest.TestCase):
 
     def test_injecting_only_login_cannot_activate_fixture_page(self):
         vault = CredentialVault()
-        vault.put("credential-only", "secret")
+        vault.put("credential-only", LoginSecret("test-user", "secret"))
         core = HostCore(credential_vault=vault, login_adapter=DeterministicLoginAdapter())
         try:
             started = core.handle({
@@ -96,7 +97,7 @@ class DeterministicHarnessTest(unittest.TestCase):
 
     def test_injecting_page_without_identity_cannot_create_fixture_object(self):
         vault = CredentialVault()
-        vault.put("credential-page", "secret")
+        vault.put("credential-page", LoginSecret("test-user", "secret"))
         core = HostCore(credential_vault=vault, login_adapter=DeterministicLoginAdapter(),
                         page_adapter=DeterministicPageAdapter())
         try:

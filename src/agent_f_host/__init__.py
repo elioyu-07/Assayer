@@ -1,6 +1,6 @@
 from .core import HostCore
 from .errors import HostError
-from .auth import CredentialVault, DeterministicLoginAdapter, LoginResult, UnavailableLoginAdapter
+from .auth import CredentialVault, DeterministicLoginAdapter, LocalCredentialIntake, LoginCoordinator, LoginOutcome, LoginResult, LoginSecret, UnavailableLoginAdapter
 from .store import SQLiteStore
 from .page import CandidateObservation, DeterministicPageAdapter, EntrypointObservation, PageObservation, UnavailablePageAdapter
 from .object_identity import DeterministicObjectIdentityAdapter, ObjectMatch, ObjectVerification, UnavailableObjectIdentityAdapter
@@ -11,4 +11,4 @@ from .reporting import DerivedReportBuilder
 from .harness import run_deterministic_harness
 from .browser_session import BrowserBackend, BrowserProfile, BrowserSession, ScanSessionRegistry
 
-__all__ = ["HostCore", "HostError", "CredentialVault", "DeterministicLoginAdapter", "LoginResult", "UnavailableLoginAdapter", "SQLiteStore", "CandidateObservation", "DeterministicPageAdapter", "EntrypointObservation", "PageObservation", "UnavailablePageAdapter", "DeterministicObjectIdentityAdapter", "ObjectMatch", "ObjectVerification", "UnavailableObjectIdentityAdapter", "ActionExecution", "ActionSafetyPolicy", "DeterministicActionAdapter", "NetworkRequest", "RequestDecision", "UnavailableActionAdapter", "DeterministicRecoveryAdapter", "RecoveryAttempt", "RecoveryCheck", "UnavailableRecoveryAdapter", "DeterministicEvidenceAdapter", "EvidenceCapture", "EvidenceSanitizer", "RawVisualCapture", "UnavailableEvidenceAdapter", "DerivedReportBuilder", "run_deterministic_harness", "BrowserBackend", "BrowserProfile", "BrowserSession", "ScanSessionRegistry"]
+__all__ = ["HostCore", "HostError", "CredentialVault", "DeterministicLoginAdapter", "LocalCredentialIntake", "LoginCoordinator", "LoginOutcome", "LoginResult", "LoginSecret", "UnavailableLoginAdapter", "SQLiteStore", "CandidateObservation", "DeterministicPageAdapter", "EntrypointObservation", "PageObservation", "UnavailablePageAdapter", "DeterministicObjectIdentityAdapter", "ObjectMatch", "ObjectVerification", "UnavailableObjectIdentityAdapter", "ActionExecution", "ActionSafetyPolicy", "DeterministicActionAdapter", "NetworkRequest", "RequestDecision", "UnavailableActionAdapter", "DeterministicRecoveryAdapter", "RecoveryAttempt", "RecoveryCheck", "UnavailableRecoveryAdapter", "DeterministicEvidenceAdapter", "EvidenceCapture", "EvidenceSanitizer", "RawVisualCapture", "UnavailableEvidenceAdapter", "DerivedReportBuilder", "run_deterministic_harness", "BrowserBackend", "BrowserProfile", "BrowserSession", "ScanSessionRegistry"]

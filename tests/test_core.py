@@ -3,12 +3,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from agent_f_host import ActionExecution, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
 
 
 class ExplodingLoginAdapter:
     def authenticate(self, url, secret):
         raise RuntimeError("adapter crash")
+
+
+class CapturingLoginAdapter(DeterministicLoginAdapter):
+    def __init__(self, *, succeed=True):
+        super().__init__(succeed=succeed)
+        self.secret_ref = None
+
+    def authenticate(self, url, secret):
+        self.secret_ref = secret
+        return super().authenticate(url, secret)
 
 
 class CountingPageAdapter(DeterministicPageAdapter):
@@ -60,7 +70,7 @@ class HostCoreTest(unittest.TestCase):
 
     def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None, evidence_adapter=None):
         vault = CredentialVault()
-        vault.put("cred-001", "secret")
+        vault.put("cred-001", LoginSecret("test-user", "secret"))
         core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter if page_adapter is not None else DeterministicPageAdapter(), object_identity_adapter=identity_adapter if identity_adapter is not None else DeterministicObjectIdentityAdapter(), action_adapter=action_adapter, recovery_adapter=recovery_adapter, evidence_adapter=evidence_adapter)
         self.cores.append(core)
         return core
@@ -121,6 +131,28 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(second["status"], "failed")
         self.assertEqual(second["error"]["code"], "CREDENTIAL_CHANNEL_FAILED")
 
+    def test_bootstrap_clears_consumed_secret_after_success(self):
+        vault = CredentialVault()
+        secret = LoginSecret("test-user", "secret")
+        vault.put("cred-001", secret)
+        adapter = CapturingLoginAdapter()
+        core = HostCore(credential_vault=vault, login_adapter=adapter)
+        self.cores.append(core)
+        result = bootstrap(core)
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(secret.is_cleared)
+        self.assertTrue(adapter.secret_ref.is_cleared)
+        self.assertEqual(len(vault), 0)
+
+    def test_host_close_clears_unconsumed_secrets(self):
+        vault = CredentialVault()
+        secret = LoginSecret("unused-user", "unused-secret")
+        vault.put("unused-credential", secret)
+        core = HostCore(credential_vault=vault)
+        core.close()
+        self.assertTrue(secret.is_cleared)
+        self.assertEqual(len(vault), 0)
+
     def test_login_failure_invalidates_scan(self):
         core = self.make_core(succeed=False)
         result = bootstrap(core)
@@ -130,7 +162,7 @@ class HostCoreTest(unittest.TestCase):
 
     def test_login_adapter_exception_is_fail_closed(self):
         vault = CredentialVault()
-        vault.put("cred-001", "secret")
+        vault.put("cred-001", LoginSecret("test-user", "secret"))
         core = HostCore(credential_vault=vault, login_adapter=ExplodingLoginAdapter())
         self.cores.append(core)
         result = bootstrap(core)
@@ -146,7 +178,7 @@ class HostCoreTest(unittest.TestCase):
 
     def test_default_login_adapter_fails_closed(self):
         vault = CredentialVault()
-        vault.put("cred-001", "secret")
+        vault.put("cred-001", LoginSecret("test-user", "secret"))
         core = HostCore(credential_vault=vault)
         self.cores.append(core)
         result = bootstrap(core)
@@ -155,7 +187,7 @@ class HostCoreTest(unittest.TestCase):
     def test_operation_cannot_be_read_from_another_scan(self):
         core = self.make_core()
         first = bootstrap(core)
-        core.credential_vault.put("cred-002", "secret")
+        core.credential_vault.put("cred-002", LoginSecret("test-user", "secret"))
         second = core.handle({"protocolVersion":"1.0","requestId":"req-second","agentTurnId":"turn-second","tool":"start_audit","idempotencyKey":"boot-second","input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-002"}})
         req = session(second["result"], tool="get_operation", input={"operationId":first["result"]["operationId"]})
         with self.assertRaises(HostError) as caught:

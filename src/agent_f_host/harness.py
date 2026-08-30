@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from .action_safety import DeterministicActionAdapter
-from .auth import CredentialVault, DeterministicLoginAdapter
+from .auth import CredentialVault, DeterministicLoginAdapter, LoginSecret
 from .core import HostCore
 from .evidence import DeterministicEvidenceAdapter
 from .object_identity import DeterministicObjectIdentityAdapter, ObjectMatch, ObjectVerification
@@ -77,7 +77,7 @@ def run_deterministic_harness(output_dir: str | Path, *, result: str = "scanned_
     destination = Path(output_dir).expanduser().resolve()
     page_adapter, identity_adapter = _fixture_adapters(result)
     vault = CredentialVault()
-    vault.put("harness-credential", "deterministic-secret")
+    vault.put("harness-credential", LoginSecret("harness-user", "deterministic-secret"))
     core = HostCore(
         credential_vault=vault,
         login_adapter=DeterministicLoginAdapter(),
