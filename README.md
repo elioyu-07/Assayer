@@ -7,7 +7,8 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 - 产品边界、顶层架构、Host–Agent 协议和核心账本 Schema 已形成可执行基线；
 - Host Core 已实现 Scan/Operation、凭据消费、页面发现、对象身份、Case、安全动作、恢复屏障、证据、判定事务、审计收束、账本导出和 JSON/Markdown 派生报告；
 - 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
-- 浏览器侧登录、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计。
+- 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
+- 下一阶段按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进，当前完成 B01/9。
 
 ## 运行确定性 Harness
 
@@ -38,18 +39,19 @@ PYTHONPATH=src python3 -m agent_f_host --output-dir ./audit-issue-output --resul
 9. [规则契约](docs/rule-contract.md)
 10. [设计验收与追溯](docs/verification-and-traceability.md)
 11. [工具级协议契约](docs/tool-contracts.md)
-12. [垂直切片 001](docs/implementation-slice-001.md)
-13. [垂直切片 002](docs/implementation-slice-002.md)
-14. [垂直切片 003](docs/implementation-slice-003.md)
-15. [垂直切片 004](docs/implementation-slice-004.md)
-16. [垂直切片 005](docs/implementation-slice-005.md)
-17. [垂直切片 006](docs/implementation-slice-006.md)
-18. [垂直切片 007](docs/implementation-slice-007.md)
-19. [垂直切片 008](docs/implementation-slice-008.md)
-20. [垂直切片 009](docs/implementation-slice-009.md)
-21. [垂直切片 010](docs/implementation-slice-010.md)
-22. [垂直切片 011](docs/implementation-slice-011.md)
-23. [数据 Schema](schemas/README.md)
+12. [真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)
+13. [垂直切片 001](docs/implementation-slice-001.md)
+14. [垂直切片 002](docs/implementation-slice-002.md)
+15. [垂直切片 003](docs/implementation-slice-003.md)
+16. [垂直切片 004](docs/implementation-slice-004.md)
+17. [垂直切片 005](docs/implementation-slice-005.md)
+18. [垂直切片 006](docs/implementation-slice-006.md)
+19. [垂直切片 007](docs/implementation-slice-007.md)
+20. [垂直切片 008](docs/implementation-slice-008.md)
+21. [垂直切片 009](docs/implementation-slice-009.md)
+22. [垂直切片 010](docs/implementation-slice-010.md)
+23. [垂直切片 011](docs/implementation-slice-011.md)
+24. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 
@@ -68,4 +70,4 @@ tests/      Host Core 行为测试
 
 ## 生产边界
 
-`run_deterministic_harness` 显式注入静态测试适配器，不接受真实凭据，也不访问真实浏览器。直接构造 `HostCore()` 时，登录、动作和恢复适配器保持不可用并 fail-closed；接入真实浏览器前不得把 Harness 产物解释为目标站点审计结论。
+`run_deterministic_harness` 显式注入静态测试适配器，不接受真实凭据，也不访问真实浏览器。直接构造 `HostCore()` 时，登录、页面、对象身份、动作和恢复适配器保持不可用并 fail-closed；接入真实浏览器前不得把 Harness 产物解释为目标站点审计结论。

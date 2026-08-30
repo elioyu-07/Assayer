@@ -107,7 +107,7 @@ Host 同时暴露：
 
 MCP 与 CLI 只负责协议适配，必须调用同一套 Host 核心能力，不能形成两套执行逻辑。
 
-当前实现提供调用同一 `HostCore.handle` 协议边界的确定性 CLI Harness，用于端到端契约验证和 CI。它显式注入静态适配器，不属于浏览器实现；未注入真实浏览器适配器时，Host 登录、动作和恢复仍默认 fail-closed。
+当前实现提供调用同一 `HostCore.handle` 协议边界的确定性 CLI Harness，用于端到端契约验证和 CI。它显式注入静态适配器，不属于浏览器实现；未注入真实浏览器适配器时，Host 登录、页面、对象身份、动作和恢复均默认 fail-closed。真实接入的依赖顺序见[真实浏览器与 MCP 集成计划](browser-mcp-integration-plan.md)。
 
 ### 4.5 Host 执行层
 

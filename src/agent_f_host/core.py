@@ -13,8 +13,8 @@ from jsonschema import Draft202012Validator, RefResolver
 
 from .auth import CredentialVault, LoginAdapter, UnavailableLoginAdapter
 from .errors import HostError
-from .page import DeterministicPageAdapter, ReadOnlyPageAdapter
-from .object_identity import DeterministicObjectIdentityAdapter, ObjectIdentityAdapter
+from .page import ReadOnlyPageAdapter, UnavailablePageAdapter
+from .object_identity import ObjectIdentityAdapter, UnavailableObjectIdentityAdapter
 from .action_safety import (ActionExecution, ActionSafetyPolicy,
                             SafeActionAdapter, UnavailableActionAdapter)
 from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, RecoveryCheck, UnavailableRecoveryAdapter
@@ -75,8 +75,8 @@ class HostCore:
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
-        self._page_adapter = page_adapter or DeterministicPageAdapter()
-        self._object_identity_adapter = object_identity_adapter or DeterministicObjectIdentityAdapter()
+        self._page_adapter = page_adapter or UnavailablePageAdapter()
+        self._object_identity_adapter = object_identity_adapter or UnavailableObjectIdentityAdapter()
         self._action_adapter = action_adapter or UnavailableActionAdapter()
         self._action_policy = action_policy or ActionSafetyPolicy()
         self._recovery_adapter = recovery_adapter or UnavailableRecoveryAdapter()

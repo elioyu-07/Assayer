@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import HostCore, run_deterministic_harness
+from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, run_deterministic_harness
 
 
 EXPECTED_ARTIFACTS = {
@@ -63,8 +63,64 @@ class DeterministicHarnessTest(unittest.TestCase):
         core = HostCore()
         try:
             self.assertEqual(type(core._login_adapter).__name__, "UnavailableLoginAdapter")
+            self.assertEqual(type(core._page_adapter).__name__, "UnavailablePageAdapter")
+            self.assertEqual(type(core._object_identity_adapter).__name__, "UnavailableObjectIdentityAdapter")
             self.assertEqual(type(core._action_adapter).__name__, "UnavailableActionAdapter")
             self.assertEqual(type(core._recovery_adapter).__name__, "UnavailableRecoveryAdapter")
+        finally:
+            core.close()
+
+    def test_injecting_only_login_cannot_activate_fixture_page(self):
+        vault = CredentialVault()
+        vault.put("credential-only", "secret")
+        core = HostCore(credential_vault=vault, login_adapter=DeterministicLoginAdapter())
+        try:
+            started = core.handle({
+                "protocolVersion": "1.0", "requestId": "default-page-start", "agentTurnId": "turn-001",
+                "tool": "start_audit", "idempotencyKey": "default-page-start",
+                "input": {"url": "https://test.example.com", "ruleRegistryVersion": "1.0.0",
+                          "outputDir": "/tmp/agent-f-unavailable-page", "browserProfile": "default",
+                          "credentialHandle": "credential-only"},
+            })["result"]
+            response = core.handle({
+                "protocolVersion": "1.0", "requestId": "default-page-read", "scanId": started["scanId"],
+                "runId": started["runId"], "agentTurnId": "turn-002", "tool": "inspect_page",
+                "idempotencyKey": "default-page-read", "expectedRunRevision": 1,
+                "input": {"pageStateId": started["currentPageStateId"], "include": ["objects"]},
+            })
+            self.assertEqual(response["status"], "rejected")
+            self.assertEqual(response["error"]["code"], "INTERNAL_FAILURE")
+            self.assertEqual(response["error"]["message"], "只读页面适配器未配置")
+        finally:
+            core.close()
+
+    def test_injecting_page_without_identity_cannot_create_fixture_object(self):
+        vault = CredentialVault()
+        vault.put("credential-page", "secret")
+        core = HostCore(credential_vault=vault, login_adapter=DeterministicLoginAdapter(),
+                        page_adapter=DeterministicPageAdapter())
+        try:
+            started = core.handle({
+                "protocolVersion": "1.0", "requestId": "default-identity-start", "agentTurnId": "turn-001",
+                "tool": "start_audit", "idempotencyKey": "default-identity-start",
+                "input": {"url": "https://test.example.com", "ruleRegistryVersion": "1.0.0",
+                          "outputDir": "/tmp/agent-f-unavailable-identity", "browserProfile": "default",
+                          "credentialHandle": "credential-page"},
+            })["result"]
+            page = core.handle({
+                "protocolVersion": "1.0", "requestId": "default-identity-page", "scanId": started["scanId"],
+                "runId": started["runId"], "agentTurnId": "turn-002", "tool": "inspect_page",
+                "idempotencyKey": "default-identity-page", "expectedRunRevision": 1,
+                "input": {"pageStateId": started["currentPageStateId"], "include": ["objects"]},
+            })["result"]
+            response = core.handle({
+                "protocolVersion": "1.0", "requestId": "default-identity-object", "scanId": started["scanId"],
+                "runId": started["runId"], "agentTurnId": "turn-003", "tool": "inspect_object",
+                "idempotencyKey": "default-identity-object", "expectedRunRevision": 1,
+                "input": {"candidateId": page["candidateRefs"][0]},
+            })
+            self.assertEqual(response["status"], "rejected")
+            self.assertEqual(response["error"]["message"], "对象身份适配器未配置")
         finally:
             core.close()
 

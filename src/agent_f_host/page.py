@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from .errors import HostError
+
 
 @dataclass(frozen=True)
 class EntrypointObservation:
@@ -41,6 +43,13 @@ class ReadOnlyPageAdapter(Protocol):
     """Adapter contract forbids action methods by construction."""
 
     def observe(self, page_state_id: str) -> PageObservation: ...
+
+
+class UnavailablePageAdapter:
+    """Production default; never substitutes a fixture for browser facts."""
+
+    def observe(self, page_state_id: str) -> PageObservation:
+        raise HostError("INTERNAL_FAILURE", "只读页面适配器未配置")
 
 
 class DeterministicPageAdapter:

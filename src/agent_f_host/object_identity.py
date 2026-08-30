@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from .errors import HostError
+
 
 @dataclass(frozen=True)
 class ObjectMatch:
@@ -32,6 +34,16 @@ class ObjectVerification:
 class ObjectIdentityAdapter(Protocol):
     def verify_candidate(self, candidate: dict, page_state: dict) -> ObjectVerification: ...
     def rebind_object(self, audit_object: dict, page_state: dict) -> ObjectVerification: ...
+
+
+class UnavailableObjectIdentityAdapter:
+    """Production default; refuses to invent a browser object match."""
+
+    def verify_candidate(self, candidate: dict, page_state: dict) -> ObjectVerification:
+        raise HostError("INTERNAL_FAILURE", "对象身份适配器未配置")
+
+    def rebind_object(self, audit_object: dict, page_state: dict) -> ObjectVerification:
+        raise HostError("INTERNAL_FAILURE", "对象身份适配器未配置")
 
 
 class DeterministicObjectIdentityAdapter:
