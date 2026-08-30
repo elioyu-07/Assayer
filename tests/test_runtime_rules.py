@@ -1,6 +1,6 @@
 import unittest
 
-from agent_f_host.runtime_rules import RuleEvaluationEngine
+from assayer_host.runtime_rules import RuleEvaluationEngine
 
 
 class RuntimeRuleEvaluationTest(unittest.TestCase):

@@ -11,7 +11,7 @@
 - 未配置真实浏览器登录适配器时默认失败，不会把测试适配器行为带入生产路径；
 - Operation 结果持久化，进程重启后相同幂等请求返回原结果。
 
-实现入口：[page.py](../src/agent_f_host/page.py)、[core.py](../src/agent_f_host/core.py)。
+实现入口：[page.py](../src/assayer_host/page.py)、[core.py](../src/assayer_host/core.py)。
 
 ## 验收边界
 

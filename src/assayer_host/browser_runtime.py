@@ -333,8 +333,25 @@ class BrowserHostRuntime:
                         errors.append(restored.get("error", {"code": "RESTORE_FAILED"}))
                         continue
                     revision = restored["runRevision"]
+                    dimensions = list(rule_contract["coverageDimensions"])
+                    statuses = {dimension: "satisfied" for dimension in dimensions}
+                    if result == "issue_found" and dimensions:
+                        statuses[dimensions[-1]] = "violated"
+                    elif result == "needs_review" and dimensions:
+                        statuses[dimensions[-1]] = "blocked" if blocker else "unresolved"
+                    finding_response = self.handle(self._request(scan, "record_findings",
+                        f"runtime-audit-findings-{page_count}-{object_count}-{rule_index}", revision,
+                        {"objectId":object_id, "rule":self._rule_ref(rule),
+                         "findings":[{"dimension":dimension, "status":status, "reasonText":reason,
+                                      "evidenceRefs":[evidence_id], "caseRefs":[case_result["caseId"]]}
+                                     for dimension, status in statuses.items()]}))
+                    if finding_response.get("status") != "ok":
+                        errors.append(finding_response.get("error", {"code":"FINDING_RECORD_FAILED"}))
+                        continue
+                    revision = finding_response["runRevision"]
                     prepare_input = {"objectId": object_id, "rule": self._rule_ref(rule),
                                  "result": result, "reasonText": reason,
+                                 "findingRefs":finding_response["result"]["findingRefs"],
                                  "evidenceRefs": [evidence_id], "caseRefs": [case_result["caseId"]]}
                     if blocker:
                         prepare_input["blocker"] = blocker
@@ -354,7 +371,7 @@ class BrowserHostRuntime:
                     decision_record = {"objectId": object_id, "rule": self._rule_ref(rule),
                                    "result": result, "evidenceId": evidence_id,
                                    "assessmentId": committed["result"].get("assessmentId"),
-                                   "coverageComplete": True}
+                                   "coverageComplete": result in {"scanned_no_issue", "issue_found"}}
                     if visual_result.get("evidenceId"):
                         decision_record["visualEvidenceId"] = visual_result["evidenceId"]
                     if visual_result.get("screenshotRef"):

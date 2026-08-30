@@ -10,6 +10,6 @@
 - Host 重启时遗留的动作/恢复 `running` Operation 自动收束为 `result_unknown`，关联 Case 失效，Scan 失败；
 - 恢复成功后对象重新回到 `eligible`，Case 进入 `completed`，越过恢复屏障。
 
-实现入口：[recovery.py](../src/agent_f_host/recovery.py)、[core.py](../src/agent_f_host/core.py)。
+实现入口：[recovery.py](../src/assayer_host/recovery.py)、[core.py](../src/assayer_host/core.py)。
 
 默认恢复适配器不可用并 fail-closed；确定性适配器仅用于行为测试，尚不代表真实浏览器恢复能力。

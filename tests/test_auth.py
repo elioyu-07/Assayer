@@ -2,7 +2,7 @@ import getpass
 import unittest
 from unittest.mock import patch
 
-from agent_f_host import (CredentialVault, LocalCredentialIntake,
+from assayer_host import (CredentialVault, LocalCredentialIntake,
                           LoginCoordinator, LoginResult, LoginSecret)
 
 
@@ -77,7 +77,7 @@ class AuthenticationBoundaryTest(unittest.TestCase):
     def test_expired_discarded_and_shutdown_secrets_are_cleared(self):
         vault = CredentialVault()
         expired = LoginSecret("expired", "password")
-        with patch("agent_f_host.auth.monotonic", side_effect=[0.0, 2.0]):
+        with patch("assayer_host.auth.monotonic", side_effect=[0.0, 2.0]):
             vault.put("expired", expired, ttl_seconds=1)
             self.assertIsNone(vault.consume("expired"))
         self.assertTrue(expired.is_cleared)

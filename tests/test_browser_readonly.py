@@ -1,13 +1,13 @@
 import unittest
 
-from agent_f_host import (BrowserProfile, BrowserSession, CredentialVault,
+from assayer_host import (BrowserProfile, BrowserSession, CredentialVault,
                           DeterministicLoginAdapter, HostCore, LoginSecret,
                           ObjectMatch)
-from agent_f_host.browser_readonly import (BrowserLocatorRegistry,
+from assayer_host.browser_readonly import (BrowserLocatorRegistry,
                                            BrowserObjectIdentityAdapter,
                                            BrowserReadOnlyPageAdapter,
                                            create_readonly_browser_adapters)
-from agent_f_host.errors import HostError
+from assayer_host.errors import HostError
 
 
 class FakePage:
@@ -119,7 +119,7 @@ class BrowserReadonlyAdapterTest(unittest.TestCase):
                 "protocolVersion": "1.0", "requestId": "browser-start", "agentTurnId": "turn-001",
                 "tool": "start_audit", "idempotencyKey": "browser-start",
                 "input": {"url": "https://test.example.com/orders", "ruleRegistryVersion": "1.0.0",
-                          "outputDir": "/tmp/agent-f-browser-readonly", "browserProfile": "default",
+                          "outputDir": "/tmp/assayer-browser-readonly", "browserProfile": "default",
                           "credentialHandle": "credential-browser"},
             })["result"]
             inspected = core.handle({

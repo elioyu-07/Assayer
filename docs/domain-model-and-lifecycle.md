@@ -1,15 +1,15 @@
-# agent-f 领域模型与生命周期
+# Assayer 领域模型与生命周期
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
+| 文档版本 | 1.1.0-draft |
+| 日期 | 2026-08-31 |
 | 状态 | 设计收敛中 |
-| Owner | agent-f 维护者 |
+| Owner | Assayer 维护者 |
 
 ## 1. 目的
 
-本文档是 Scan、PageState、Entrypoint、PageCandidate、AuditObject、Operation、ReverseCase、PendingDecision、RuleAssessment 和 Issue 生命周期的唯一语义来源。字段结构由 JSON Schema 拥有，消息由 Host–Agent 协议拥有。
+本文档是 Scan、PageState、Entrypoint、PageCandidate、AuditObject、Operation、ReverseCase、DimensionFinding、PendingDecision、RuleAssessment 和 Issue 生命周期的唯一语义来源。字段结构由 JSON Schema 拥有，消息由 Host–Agent 协议拥有。DimensionFinding 的 Schema 和工具在 C02 实现；本版先冻结其领域语义。
 
 ## 2. 聚合与所有权
 
@@ -21,7 +21,11 @@ erDiagram
     AuditObject ||--o{ ReverseCase : investigated_by
     ReverseCase ||--o{ Operation : executes
     ReverseCase ||--o{ Evidence : produces
+    AuditObject ||--o{ DimensionFinding : assessed_by
+    Evidence ||--o{ DimensionFinding : supports
+    DimensionFinding ||--o| DimensionFinding : supersedes
     ReverseCase ||--o| PendingDecision : prepares
+    DimensionFinding ||--o{ PendingDecision : referenced_by
     PendingDecision ||--|| RuleAssessment : commits
     RuleAssessment ||--o| Issue : derives
     Issue ||--|| Screenshot : visualized_by
@@ -33,6 +37,19 @@ erDiagram
 - `PageState`、Evidence、Screenshot、RuleAssessment 和 Issue 一经持久化即不可变；
 - AuditObject 和 ReverseCase 通过新增事件或状态迁移更新，不覆盖历史证据；
 - PendingDecision 是临时实体，不能出现在最终正式问题报告中。
+
+### 2.1 DimensionFinding 语义
+
+`DimensionFinding` 是 Agent 对一个 `AuditObject × FrozenRule × coverageDimension` 基于 Host Evidence 给出的公开结构化判断。它不是模型隐藏推理，也不是最终 RuleAssessment。
+
+- 状态固定为 `satisfied`、`violated`、`unresolved`、`blocked` 或 `conflicted`；
+- 必须引用同一扫描下的 Object、Rule、至少一个 Evidence 和相关 Case；
+- Finding 一经写入不可变；新证据改变判断时创建新 Finding，并用 `supersedesRef` 指向同一对象、规则和维度的旧 Finding；
+- 被 supersede 的 Finding 保留在账本，但不参与当前进度和最终覆盖计算；
+- Finding 引用的 Case 未 `restored` 时为 staged；Case 进入 `restore_failed` 或 `invalidated` 后，该 Finding 保留历史但对正式覆盖无效；
+- 只有 `satisfied`、`violated` 属于 resolved；其余状态属于 unresolved；
+- `prepare_decision` 只能引用每个所需维度的最新有效 Finding；
+- Finding 理由只保存简明可审计解释，不保存模型隐藏思维过程。
 
 ## 3. ScanRun 状态机
 
@@ -141,6 +158,8 @@ prepared → commit_ready → committed
 
 PendingDecision 可在 Host 重启后从 SQLite 恢复读取，但不进入最终账本；诊断日志只记录其 ID、状态和非敏感原因。
 
+PendingDecision 必须引用最终 `findingRefs`。Case 的 `plannedCoverageDimensions` 只用于检查计划是否越界，不再用于证明覆盖完成。
+
 ## 8. RuleAssessment 与 Issue
 
 RuleAssessment 的五种结果固定为：
@@ -162,6 +181,8 @@ RuleAssessment 的五种结果固定为：
 | `noise` | 候选匹配真实但确认不属于规则问题，记录噪声理由。 |
 
 Issue 与 `issue_found` Assessment 一对一，由 Host 在同一事务内派生。Issue 的标题、消息、影响、建议和严重度必须来自 Agent 已提交的 PendingDecision；Host 只生成 ID、时间和引用，不补写语义。
+
+正式覆盖按最终 Finding 计算：`scanned_no_issue` 的全部必需维度必须为 `satisfied`；`issue_found` 必须满足冻结规则声明的问题 Finding 组合；存在 unresolved 状态时只能 `needs_review`。规则组合使用注册表的通用机器契约解释，Host 主循环不得按规则 ID 分支。
 
 ## 9. 合法转移校验
 

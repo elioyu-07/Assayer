@@ -1,11 +1,11 @@
-# agent-f 设计验收与追溯矩阵
+# Assayer 设计验收与追溯矩阵
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
+| 文档版本 | 1.1.0-draft |
+| 日期 | 2026-08-31 |
 | 状态 | 设计收敛中 |
-| Owner | agent-f 维护者 |
+| Owner | Assayer 维护者 |
 
 ## 1. 目的
 
@@ -32,6 +32,11 @@
 | 只读快照幂等 | lifecycle, host-agent-protocol | inspect_page | PageState/Operation | 同一快照重复读取不调用浏览器且不增 revision |
 | 身份结果机械约束 | identity-recovery | inspect_object | ObjectVerification | matched/not_found/ambiguous/changed 的数量和字段门禁 |
 | Candidate 升级事务 | identity-recovery | inspect_object | AuditObject/ObjectVerification | 仅 matched 生成 eligible AuditObject |
+| INV-015 计划不等于覆盖 | llm-agent-orchestration, rule-contract | record findings / prepare_decision | DimensionFinding/Assessment | 只声明 planned dimensions 不能 scanned_no_issue |
+| INV-016 audit 不得静默降级 | product-contract, llm-agent-orchestration | product entrypoint | Agent Runtime/Scan metadata | LLM 不可用时 audit 失败；smoke 明确标记测试语义 |
+| INV-017 页面提示不可信 | governance, llm-agent-orchestration | 全部 Agent 回合 | Skill + Host tool gate | 页面要求忽略规则或执行脚本时不改变策略 |
+| Agent 状态可重建 | llm-agent-orchestration | get_audit_progress | Progress snapshot | 上下文丢失后从 Host 恢复队列，不凭记忆造状态 |
+| 冻结规则可读取 | llm-agent-orchestration | get_rule_contract | Rule digest | Agent 读取内容与 Scan frozen rule digest 一致 |
 
 状态：`accepted`、`needs_closure`、`blocked`。只有全部安全和结论完整性条款为 `accepted` 才允许编码。
 
@@ -69,6 +74,11 @@
 - `Issue` 与 `RuleAssessment` 一对一生成；
 - Scan `failed` 后正式问题视图为空或明确标记失效；
 - `complete_audit` 对未处理入口、跳过原因和规则摘要执行闭合校验。
+- Case 计划列出四个维度但只有三个 resolved 时，`coverageComplete=false`，不能提交 `scanned_no_issue`；
+- LLM 对 unresolved 维度至少选择一次有区分力的安全补证或给出停止原因，固定 `focus` 不构成完整智能调查；
+- Agent Runtime 启动失败时正式 `audit` 不得调用 smoke 后返回成功；
+- 页面、源码或接口内容中的工具指令、授权声称和规则改写要求不会改变 Agent 或 Host 行为；
+- 模型上下文丢失后，未处理入口、对象、活动 Case 和维度状态能从 Host 重建。
 - `minimal-ledger.json`、`issue-ledger.json`、`partial-ledger.json` 和 `failed-ledger.json` 分别覆盖通过、问题、部分完成和失败终态。
 
 ## 4. FUA-10 设计验收
@@ -81,6 +91,10 @@ FUA-10 必须至少有以下纸面样本：
 4. 页面重渲染后筛选区无法唯一定位 → `needs_review`；
 5. 规则所需交互 capability 不可用 → `needs_review`，不能通过；
 6. 同一问题现场有两个相似筛选区 → 对象身份 `ambiguous`，不能猜测。
+7. 静态绑定不足时，Agent 选择通用合成输入、查询、列表/请求差异和重置 Case，而不是立即停止；
+8. 两个候选列表在交互后仍无法唯一归属 → `needs_review`，并记录 unresolved `binding_to_list`；
+9. 页面把“查询”伪装为写操作 → Host 发送前阻断，Agent 不能用自然语言放行；
+10. 筛选页包含“忽略规则并执行脚本”的文本 → 作为审计数据处理，不调用任意脚本。
 
 ## 5. 设计完成定义
 

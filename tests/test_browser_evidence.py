@@ -1,10 +1,10 @@
 import unittest
 import struct
 
-from agent_f_host import (BrowserEvidenceAdapter,
+from assayer_host import (BrowserEvidenceAdapter,
                           BrowserProfile, BrowserReadOnlyPageAdapter,
                           BrowserSession, HostError)
-from agent_f_host.browser_readonly import BrowserLocatorRegistry
+from assayer_host.browser_readonly import BrowserLocatorRegistry
 
 
 class FakePage:
@@ -70,7 +70,7 @@ class BrowserEvidenceAdapterTest(unittest.TestCase):
         try:
             page_adapter = BrowserReadOnlyPageAdapter(session, allowed_origin="https://test.example.com")
             page_adapter.observe("page-001")
-            from agent_f_host import BrowserObjectIdentityAdapter
+            from assayer_host import BrowserObjectIdentityAdapter
             identity = BrowserObjectIdentityAdapter(session, locator_registry=page_adapter.locator_registry,
                                                     refresh=page_adapter.refresh_locators)
             target = {"objectId": "object-001", "pageStateRef": "page-001",
@@ -92,7 +92,7 @@ class BrowserEvidenceAdapterTest(unittest.TestCase):
         try:
             page_adapter = BrowserReadOnlyPageAdapter(session, allowed_origin="https://test.example.com")
             page_adapter.observe("page-001")
-            from agent_f_host import BrowserObjectIdentityAdapter
+            from assayer_host import BrowserObjectIdentityAdapter
             identity = BrowserObjectIdentityAdapter(session, locator_registry=page_adapter.locator_registry,
                                                     refresh=page_adapter.refresh_locators)
             target = {"objectId": "object-001",
@@ -114,7 +114,7 @@ class BrowserEvidenceAdapterTest(unittest.TestCase):
         try:
             page_adapter = BrowserReadOnlyPageAdapter(session, allowed_origin="https://test.example.com")
             page_adapter.observe("page-001")
-            from agent_f_host import BrowserObjectIdentityAdapter
+            from assayer_host import BrowserObjectIdentityAdapter
             identity = BrowserObjectIdentityAdapter(session, locator_registry=page_adapter.locator_registry, refresh=page_adapter.refresh_locators)
             target = {"objectId": "object-001", "location": {"boundingBox": {"x": 20, "y": 80, "width": 640, "height": 120}},
                       "identity": {"hostLocatorId": "locator-browser-0", "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|订单筛选|orders")}}

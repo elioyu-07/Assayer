@@ -1,4 +1,4 @@
-# agent-f 数据 Schema
+# Assayer 数据 Schema
 
 这些文件使用 JSON Schema Draft 2020-12，描述一次审计的可持久化实体和规则注册表。相对 `$ref` 以本目录为基准。
 
@@ -12,6 +12,7 @@
 - `object-verification.schema.json`：Candidate 升级或 AuditObject 重绑的机械身份判定记录。
 - `audit-object.schema.json`：真实运行页面中发现的待检查对象。
 - `operation.schema.json`：Host 请求的幂等执行记录和结果已知性。
+- `dimension-finding.schema.json`：对象 × 冻结规则 × 覆盖维度的不可变五态 Finding、Evidence/Case 引用和替代链。
 - `rule-assessment.schema.json`：一个对象 × 一条规则的固定五态判定。
 - `reverse-case.schema.json`：Agent 规划、Host 安全执行的反向 Case，以及动作前基线、反向动作、定向恢复、验证结果和刷新兜底记录。
 - `action-attempt.schema.json`：一次 Case 动作的 Host 安全决策、目标和请求观察引用。
@@ -35,7 +36,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 2. `scan.frozenRules` 必须存在于 `ruleRegistry.rules`，且摘要与注册表内容一致；
 3. 对象、页面状态、Case、证据、截图、判定和问题的关联必须闭合；
 4. `issue_found` 必须引用当前对象的有效证据和独立的 `captured` 截图，截图对象和页面状态必须匹配；
-5. `scanned_no_issue` 必须满足规则注册表声明的覆盖契约；
+5. `scanned_no_issue` 必须让全部必需维度的最新有效 Finding 为 `satisfied`；Case 的计划维度不能证明覆盖；
 6. 登录失败或运行中断时，正式问题结论必须标记为无效；
 7. 规则 ID 不得复用，规则语义变化必须使用新版本；扫描期间注册表快照冻结。
 8. Case 恢复中，定向尝试为 `uncertain` 或 `failed` 时必须存在后续刷新重放尝试；最终只有全部必检项为 `match` 的 `restored` 才允许继续调查。
@@ -46,6 +47,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 13. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
 14. Evidence/Screenshot 只能绑定当前 Scan 中真实的 PageState 和唯一验证对象；Raw Visual 失败记录不能作为 captured IssueScreenshot 使用。
 15. `complete_audit` 必须让全部入口恰好归入 processed、skipped 或 unprocessed，并由 Host 从正式 Assessment 重算规则摘要；最终 `audit-ledger.json` 必须通过聚合 Schema 后原子写出。
+16. Finding 只能替代同 Scan、对象、规则和维度的最新 Finding；被替代记录保留但不参与当前覆盖，未恢复或恢复失效 Case 上的 Finding 不参与正式判定。
 
 ## 摘要与规范化
 

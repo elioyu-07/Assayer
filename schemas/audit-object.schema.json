@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/audit-object.schema.json",
+  "$id": "https://assayer.dev/schemas/audit-object.schema.json",
   "title": "AuditObject",
   "type": "object",
   "additionalProperties": false,
@@ -50,6 +50,33 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    },
+    "controls": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["controlRef", "kind", "semanticAction", "visible", "disabled", "valueClass"],
+        "properties": {
+          "controlRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "kind": { "enum": ["input", "select", "textarea", "button", "other"] },
+          "semanticAction": { "enum": ["query", "reset", "filter_input", "other"] },
+          "visible": { "type": "boolean" }, "disabled": { "type": "boolean" },
+          "valueClass": { "enum": ["empty", "non_empty", "unknown"] }
+        }
+      }
+    },
+    "lists": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["listRef", "kind", "visible", "relationship"],
+        "properties": {
+          "listRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "kind": { "enum": ["table", "grid", "list", "unknown"] },
+          "visible": { "type": "boolean" },
+          "relationship": { "enum": ["same_container", "aria_owned", "nearby", "unknown"] }
+        }
+      }
     },
     "relatedObjectRefs": {
       "type": "array",

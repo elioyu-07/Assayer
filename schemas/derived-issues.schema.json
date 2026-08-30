@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/derived-issues.schema.json",
+  "$id": "https://assayer.dev/schemas/derived-issues.schema.json",
   "title": "DerivedIssues",
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "sourceLedger", "sourceLedgerDigest", "scanId", "runId", "scanStatus", "conclusionsValid", "ruleRegistryDigest", "issues", "invalidatedIssueRefs"],

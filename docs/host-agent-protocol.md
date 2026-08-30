@@ -1,8 +1,10 @@
-# agent-f Host–Agent 协作协议
+# Assayer Host–Agent 协作协议
+
+> C02 实现说明：`get_rule_contract`、`get_audit_progress`、可引用子控件/列表和逐维 Finding 已实现；通用查询、重置、合成输入与列表绑定证据仍在 C03。正式 LLM 调查循环仍需 C03–C05，目标循环以 [LLM 调查编排设计](llm-agent-orchestration.md)为准。
 
 ## 1. 目的和适用范围
 
-本文档定义 Codex Agent 与 agent-f Host（审计执行器）之间的协作协议，承接：
+本文档定义 Codex Agent 与 Assayer Host（审计执行器）之间的协作协议，承接：
 
 - [产品契约](product-contract.md)
 - [顶层架构](architecture.md)
@@ -40,6 +42,8 @@ Host：校验判定并落账
 ```
 
 Host 不主动给 Agent 下业务结论；Host 只返回事实、能力结果、拒绝原因和完整性校验结果。Agent 不直接访问浏览器、文件系统、网络或完整源码仓库。
+
+确定性 smoke runner 可以在测试模式下使用固定规划和规则 oracle 验证 Host 生命周期，但其结果不属于本节定义的 Agent 语义控制面。正式运行中，Host 及传输层不得调用 Python 规则评估器替 Agent 生成 Assessment 内容。
 
 ## 4. 消息封套
 
@@ -239,6 +243,8 @@ Host 不把候选对象直接当作正式待检查对象。Candidate 只保存�
 - 已有运行态、请求、源码和截图证据引用；
 - 对象最近验证时的 `runRevision` 和身份算法版本。
 
+Host 还必须返回已验证的可引用 `controlRef` 和 `listRef` 摘要。Agent 只能选择这些引用执行动作，不能提交 selector、DOM 路径或自然语言定位描述。
+
 ### 6.4 `begin_case`
 
 围绕一个 Host 已验证对象和一条冻结规则创建 Case，并在任何动作前保存恢复基线。
@@ -271,6 +277,8 @@ Host 校验对象、规则、能力和当前生命周期，原子返回 `caseId`
 - `open_edit`
 - `input_synthetic_value`
 - `refresh`
+
+C03 将增加固定引用上的 `input_synthetic_value`、`select_synthetic_option`、`activate_query` 和 `activate_reset`。模型只提供 `controlRef` 与 `valueClass`；Host 生成实际合成值并保存恢复所需原状态。新增动作落地前，LLM 不得借助任意点击或脚本绕过能力缺口。
 
 每个请求必须包含：
 
@@ -385,6 +393,8 @@ Host 校验：
 - `noise` 有噪声原因；
 - 一个对象违反多条规范时，按规范分别提交，不合并成无规范的问题。
 
+Agent 先通过 `record_findings` 持久化不可变 `DimensionFinding`，判定提交最终 `findingRefs`。`plannedCoverageDimensions` 不得作为覆盖完成依据；Host 从最新有效 Finding 状态、Evidence 引用和已恢复 Case 重算 attempted/resolved/unresolved。
+
 成功结果返回 `pendingDecisionId`、可选 `screenshotRef` 和当前 `runRevision`。
 
 ### 6.10 `commit_decision`
@@ -442,11 +452,25 @@ inspect_page
   → perform_action / inspect_source
   → capture_evidence
   → 判断证据是否足够
+  → record_findings（逐维状态；未恢复时 staged）
   → restore_case（定向恢复并验证，必要时刷新兜底）
   → prepare_decision(result + 已恢复 Case)
   → commit_decision
   → 继续下一个对象
 ```
+
+该序列允许在 `restore_case` 前执行多轮安全动作和 Evidence 采集，也允许一个 `Object × Rule` 使用多个 Case。Agent 必须根据 unresolved 维度继续补证或给出停止理由，不能固定执行一次 `focus` 后直接判定。
+
+### 7.0 调查进度与冻结规则
+
+C02 增加两个只读能力：
+
+- `get_rule_contract`：读取与 Scan 冻结 digest 一致的规则契约；
+- `get_audit_progress`：读取未处理入口、对象/规则、活动 Case、维度状态和预算。
+
+并增加 `record_findings` 状态变更能力：写入一个或多个不可变 DimensionFinding；新 Finding 只能 supersede 同一对象、冻结规则和维度的旧 Finding。
+
+它们使 Agent 可以在上下文压缩或状态过期后从 Host 重建工作队列。聊天记忆和模型自报不能替代 Coverage Universe。
 
 ### 7.1 Case 选择
 
@@ -489,6 +513,8 @@ Agent 置信度不能替代任何门禁。
 
 只有达到该规范最低覆盖要求，且所有相关 Case 没有发现违规，才能提交 `scanned_no_issue`。覆盖不足必须是 `needs_review`，不能用“本次没看到”判定通过。
 
+达到覆盖要求表示所有必需维度均有 `satisfied` Finding 和可追溯 Evidence，而不是这些维度出现在 Case 计划中。存在 `unresolved`、`blocked` 或 `conflicted` 时必须拒绝 `scanned_no_issue`。
+
 ### 8.3 截图门禁
 
 正式问题的截图必须：
@@ -517,7 +543,7 @@ Agent 置信度不能替代任何门禁。
 CLI 使用 JSON 输入输出，适合测试和批处理：
 
 ```bash
-agent-f host invoke inspect_page \
+assayer host invoke inspect_page \
   --input request.json \
   --output response.json
 ```

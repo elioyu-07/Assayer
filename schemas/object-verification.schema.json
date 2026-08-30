@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/object-verification.schema.json",
+  "$id": "https://assayer.dev/schemas/object-verification.schema.json",
   "title": "ObjectVerification",
   "type": "object",
   "additionalProperties": false,

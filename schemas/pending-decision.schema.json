@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/pending-decision.schema.json",
+  "$id": "https://assayer.dev/schemas/pending-decision.schema.json",
   "title": "PendingDecision",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pendingDecisionId", "scanId", "preparationOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "status", "preparedAt", "preparedAtRevision"],
+  "required": ["pendingDecisionId", "scanId", "preparationOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "findingRefs", "evidenceRefs", "caseRefs", "reasonText", "status", "preparedAt", "preparedAtRevision"],
   "properties": {
     "pendingDecisionId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -15,14 +15,17 @@
     "result": { "$ref": "common.schema.json#/$defs/decisionResult" },
     "coverage": {
       "type": "object", "additionalProperties": false,
-      "required": ["requiredDimensions", "coveredDimensions", "complete"],
+      "required": ["requiredDimensions", "attemptedDimensions", "resolvedDimensions", "unresolvedDimensions", "complete"],
       "properties": {
         "requiredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
-        "coveredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "attemptedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "resolvedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "unresolvedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
         "complete": { "type": "boolean" },
         "coverageNote": { "type": "string" }
       }
     },
+    "findingRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "caseRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },

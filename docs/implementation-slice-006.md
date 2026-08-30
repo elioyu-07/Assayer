@@ -12,7 +12,7 @@
 - Evidence 和 Screenshot 在 SQLite 中不可更新，幂等重试和 Host 重启后返回同一事实；
 - 成功采集会递增一次 `runRevision`，有关联 Case 时进入 `evidence_captured`。
 
-实现入口：[evidence.py](../src/agent_f_host/evidence.py)、[core.py](../src/agent_f_host/core.py)、[store.py](../src/agent_f_host/store.py)。
+实现入口：[evidence.py](../src/assayer_host/evidence.py)、[core.py](../src/assayer_host/core.py)、[store.py](../src/assayer_host/store.py)。
 
 ## 切片边界
 

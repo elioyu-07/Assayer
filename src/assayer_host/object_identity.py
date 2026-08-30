@@ -19,6 +19,8 @@ class ObjectMatch:
     height: float
     viewport_width: int
     viewport_height: int
+    controls: tuple[dict, ...] = ()
+    lists: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,12 @@ class DeterministicObjectIdentityAdapter:
                 visible_text="订单筛选 查询 重置",
                 x=20, y=80, width=640, height=120,
                 viewport_width=1280, viewport_height=800,
+                controls=(
+                    {"controlRef":"control-filter-input-001","kind":"input","semanticAction":"filter_input","visible":True,"disabled":False,"valueClass":"empty"},
+                    {"controlRef":"control-query-001","kind":"button","semanticAction":"query","visible":True,"disabled":False,"valueClass":"unknown"},
+                    {"controlRef":"control-reset-001","kind":"button","semanticAction":"reset","visible":True,"disabled":False,"valueClass":"unknown"},
+                ),
+                lists=({"listRef":"list-orders-001","kind":"table","visible":True,"relationship":"same_container"},),
             ),
         )
 

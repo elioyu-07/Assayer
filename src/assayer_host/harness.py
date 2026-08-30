@@ -130,10 +130,20 @@ def run_deterministic_harness(output_dir: str | Path, *, result: str = "scanned_
         }))
         _expect_ok("restore_case", restore_response)
         evidence_id = evidence_result["evidenceId"]
+        finding_statuses = {dimension: "satisfied" for dimension in ("filter_present", "query_action", "reset_action", "binding_to_list")}
+        if result == "issue_found":
+            finding_statuses["reset_action"] = "violated"
+        findings = _expect_ok("record_findings", core.handle(_request(scan, "record_findings", "record-findings", 5, {
+            "objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.0.0"},
+            "findings": [{"dimension": dimension, "status": status,
+                          "reasonText": "确定性 Evidence 支持该维度状态",
+                          "evidenceRefs": [evidence_id], "caseRefs": [case_id]}
+                         for dimension, status in finding_statuses.items()],
+        })))
         prepare_input = {
             "objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.0.0"},
             "result": result, "reasonText": "确定性 Harness 已完成规则覆盖和恢复屏障",
-            "evidenceRefs": [evidence_id], "caseRefs": [case_id],
+            "findingRefs": findings["findingRefs"], "evidenceRefs": [evidence_id], "caseRefs": [case_id],
         }
         if result == "issue_found":
             prepare_input.update({
@@ -141,13 +151,13 @@ def run_deterministic_harness(output_dir: str | Path, *, result: str = "scanned_
                 "title": "筛选区缺少重置", "message": "筛选区未提供可验证的重置动作。",
                 "impact": "用户无法一键恢复筛选条件。", "recommendation": "增加绑定同一列表的重置动作。",
             })
-        prepared = _expect_ok("prepare_decision", core.handle(_request(scan, "prepare_decision", "prepare-decision", 5, prepare_input)))
-        committed = core.handle(_request(scan, "commit_decision", "commit-decision", 6, {
+        prepared = _expect_ok("prepare_decision", core.handle(_request(scan, "prepare_decision", "prepare-decision", 6, prepare_input)))
+        committed = core.handle(_request(scan, "commit_decision", "commit-decision", 7, {
             "pendingDecisionId": prepared["pendingDecisionId"],
         }))
         _expect_ok("commit_decision", committed)
         entrypoint_id = inspected["entrypointRefs"][0]
-        completion = core.handle(_request(scan, "complete_audit", "complete-audit", 7, {
+        completion = core.handle(_request(scan, "complete_audit", "complete-audit", 8, {
             "visitedPageStateRefs": [page_id], "processedObjectRefs": [object_id],
             "processedEntrypointRefs": [entrypoint_id], "skippedEntrypoints": [],
             "ruleSummaries": [{
@@ -160,7 +170,7 @@ def run_deterministic_harness(output_dir: str | Path, *, result: str = "scanned_
         return {
             "mode": "deterministic",
             "scanId": scan["scanId"], "runId": scan["runId"], "result": result,
-            "steps": ["bootstrap", "inspect_page", "inspect_object", "begin_case", "perform_action", "capture_evidence", "restore_case", "prepare_decision", "commit_decision", "complete_audit"],
+            "steps": ["bootstrap", "inspect_page", "inspect_object", "begin_case", "perform_action", "capture_evidence", "restore_case", "record_findings", "prepare_decision", "commit_decision", "complete_audit"],
             "completion": completion_result,
             "artifacts": sorted(completion_result.get("artifactPaths", [])),
             "outputDir": str(destination),
@@ -171,7 +181,7 @@ def run_deterministic_harness(output_dir: str | Path, *, result: str = "scanned_
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run agent-f deterministic end-to-end Host harness")
+    parser = argparse.ArgumentParser(description="Run Assayer deterministic end-to-end Host harness")
     parser.add_argument("--output-dir", required=True, help="报告输出目录")
     parser.add_argument("--result", choices=("scanned_no_issue", "issue_found"), default="scanned_no_issue")
     args = parser.parse_args(argv)

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/reverse-case.schema.json",
+  "$id": "https://assayer.dev/schemas/reverse-case.schema.json",
   "title": "ReverseCase",
   "type": "object",
   "additionalProperties": false,

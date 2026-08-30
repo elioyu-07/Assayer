@@ -1,4 +1,4 @@
-# agent-f 规则契约
+# Assayer 规则契约
 
 | 元信息 | 内容 |
 |---|---|
@@ -47,6 +47,10 @@
 - 哪些失败只能得到 `needs_review`。
 
 Case 数量由 Agent 决定，但不能少于覆盖维度要求。等价输入、重复点击、纯视觉重复截图不能增加覆盖。
+
+Case 的 `plannedCoverageDimensions` 只表达调查意图。正式覆盖必须为每个维度形成 `DimensionFinding`，包含 `satisfied/violated/unresolved/blocked/conflicted` 状态、公开简明理由和同一扫描 Evidence 引用。只有 `satisfied` 或 `violated` 属于 resolved；其余状态必须出现在 unresolved 集合中。
+
+注册表还必须声明各五态结果的机器可校验门禁，例如允许的 Finding 组合、必需 Evidence kind 和截图要求。门禁按通用结构解释，Host 主循环不得按 `ruleId` 编写条件分支。
 
 ## 5. 直接运行态确认
 

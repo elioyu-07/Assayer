@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/entrypoint.schema.json",
+  "$id": "https://assayer.dev/schemas/entrypoint.schema.json",
   "title": "Entrypoint",
   "type": "object",
   "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/operation.schema.json",
+  "$id": "https://assayer.dev/schemas/operation.schema.json",
   "title": "Operation",
   "type": "object",
   "additionalProperties": false,
@@ -11,7 +11,7 @@
     "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
     "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "tool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
-    "operationKind": { "enum": ["bootstrap", "read", "browser_action", "recovery", "decision_preparation", "decision_commit", "lifecycle"] },
+    "operationKind": { "enum": ["bootstrap", "read", "browser_action", "recovery", "finding_record", "decision_preparation", "decision_commit", "lifecycle"] },
     "idempotencyKey": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "requestDigest": { "$ref": "common.schema.json#/$defs/sha256" },
     "status": { "enum": ["accepted", "running", "succeeded", "rejected", "failed_known", "result_unknown"] },

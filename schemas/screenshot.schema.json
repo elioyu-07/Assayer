@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/screenshot.schema.json",
+  "$id": "https://assayer.dev/schemas/screenshot.schema.json",
   "title": "Screenshot",
   "type": "object",
   "additionalProperties": false,

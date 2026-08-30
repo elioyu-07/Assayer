@@ -8,7 +8,7 @@ B10 已能给定 URL 启动真实 Chromium，但原始 `audit` 只观察首屏�
 
 - 新增 `explore_entrypoint` 协议工具。它只接受 Host 在当前 PageState 发现的 `tab` Entrypoint，切换后创建新的 PageState，保留父页面引用和 runRevision 变化。
 - 固定探针识别可见 Tab、筛选区域，并输出结构摘要：Tab、按钮、字段、表格、链接、对话框和页面错误提示数量；普通结构没有规则时只作为摘要，不伪造成可判定对象。
-- `agent-f audit` 最多遍历 16 个 Host 发现的 Tab，按标签去重；每个新 PageState 重新观察、唯一绑定首个规则候选并尝试 Raw Visual Evidence。
+- `assayer audit` 最多遍历 16 个 Host 发现的 Tab，按标签去重；每个新 PageState 重新观察、唯一绑定首个规则候选并尝试 Raw Visual Evidence。
 - 页面启动和 Tab 切换各有一个受限 network operation window：同源 GET/HEAD/OPTIONS 可归因，写请求、跨源、WebSocket、SSE、Service Worker 未归因请求继续 fail-closed。
 - Hash 路由仅记录不含 query 的安全路径；Evidence/截图继续遵循 B07b 的 `sanitizationStatus=not_performed` 门禁。
 

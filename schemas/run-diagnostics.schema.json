@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/run-diagnostics.schema.json",
+  "$id": "https://assayer.dev/schemas/run-diagnostics.schema.json",
   "title": "RunDiagnostics",
   "type": "object", "additionalProperties": false,
   "required": ["schemaVersion", "sourceLedger", "sourceLedgerDigest", "scanId", "runId", "scanStatus", "conclusionsValid", "terminalReason", "coverageProof", "assessmentResultCounts", "failedOperations"],

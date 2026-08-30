@@ -2,7 +2,7 @@ import threading
 import time
 import unittest
 
-from agent_f_host import BrowserProfile, BrowserSession, BrowserSessionFailure, HostError, ScanSessionRegistry
+from assayer_host import BrowserProfile, BrowserSession, BrowserSessionFailure, HostError, ScanSessionRegistry
 
 
 class FakeBackend:

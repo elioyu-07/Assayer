@@ -26,9 +26,10 @@ from .store import SQLiteStore
 
 
 TOOL_KINDS = {
-    "start_audit": "bootstrap", "inspect_page": "read", "explore_entrypoint": "browser_action", "inspect_object": "read",
+    "start_audit": "bootstrap", "get_rule_contract": "read", "get_audit_progress": "read",
+    "inspect_page": "read", "explore_entrypoint": "browser_action", "inspect_object": "read",
     "begin_case": "lifecycle", "perform_action": "browser_action", "restore_case": "recovery",
-    "inspect_source": "read", "capture_evidence": "read", "prepare_decision": "decision_preparation",
+    "inspect_source": "read", "capture_evidence": "read", "record_findings": "finding_record", "prepare_decision": "decision_preparation",
     "commit_decision": "decision_commit", "complete_audit": "lifecycle",
 }
 
@@ -71,6 +72,7 @@ class HostCore:
         self._request_observation_validator = entity_validator("request-observation.schema.json")
         self._evidence_validator = entity_validator("evidence.schema.json")
         self._screenshot_validator = entity_validator("screenshot.schema.json")
+        self._finding_validator = entity_validator("dimension-finding.schema.json")
         self._pending_decision_validator = entity_validator("pending-decision.schema.json")
         self._assessment_validator = entity_validator("rule-assessment.schema.json")
         self._issue_validator = entity_validator("issue.schema.json")
@@ -92,6 +94,7 @@ class HostCore:
         self._evidence_sanitizer = evidence_sanitizer or EvidenceSanitizer()
         self._report_builder = report_builder or DerivedReportBuilder()
         registry_path = root.parent / "rules" / "registry.json"
+        self._rules_root = registry_path.parent.resolve()
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
         self._rule_registry = registry
         self._rule_registry_version = registry["registryVersion"]
@@ -156,15 +159,18 @@ class HostCore:
                 if tool == "inspect_page": return self._inspect_page(request, scan, existing)
                 if tool == "explore_entrypoint": return self._explore_entrypoint(request, scan, existing)
                 if tool == "inspect_object": return self._inspect_object(request, scan, existing)
+                if tool == "get_rule_contract": return self._get_rule_contract(request, scan, existing)
+                if tool == "get_audit_progress": return self._get_audit_progress(request, scan, existing)
                 if tool == "begin_case": return self._begin_case(request, scan, existing)
                 if tool == "capture_evidence": return self._capture_evidence(request, scan, existing)
+                if tool == "record_findings": return self._record_findings(request, scan, existing)
                 if tool == "prepare_decision": return self._prepare_decision(request, scan, existing)
                 if tool == "commit_decision": return self._commit_decision(request, scan, existing)
                 if tool == "complete_audit": return self._complete_audit(request, scan, existing)
             return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"} and (tool != "complete_audit" or scan["status"] == "completed"):
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "explore_entrypoint", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision", "complete_audit"}
+        implemented = tool in {"get_rule_contract", "get_audit_progress", "inspect_page", "explore_entrypoint", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "record_findings", "prepare_decision", "commit_decision", "complete_audit"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
@@ -173,10 +179,16 @@ class HostCore:
                 return self._explore_entrypoint(request, scan, operation)
             if operation["status"] == "running" and tool == "inspect_object":
                 return self._inspect_object(request, scan, operation)
+            if operation["status"] == "running" and tool == "get_rule_contract":
+                return self._get_rule_contract(request, scan, operation)
+            if operation["status"] == "running" and tool == "get_audit_progress":
+                return self._get_audit_progress(request, scan, operation)
             if operation["status"] == "running" and tool == "begin_case":
                 return self._begin_case(request, scan, operation)
             if operation["status"] == "running" and tool == "capture_evidence":
                 return self._capture_evidence(request, scan, operation)
+            if operation["status"] == "running" and tool == "record_findings":
+                return self._record_findings(request, scan, operation)
             if operation["status"] == "running" and tool == "prepare_decision":
                 return self._prepare_decision(request, scan, operation)
             if operation["status"] == "running" and tool == "commit_decision":
@@ -186,6 +198,10 @@ class HostCore:
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
+        if tool == "get_rule_contract":
+            return self._get_rule_contract(request, scan, operation)
+        if tool == "get_audit_progress":
+            return self._get_audit_progress(request, scan, operation)
         if tool == "explore_entrypoint":
             return self._explore_entrypoint(request, scan, operation)
         if tool == "inspect_object":
@@ -198,6 +214,8 @@ class HostCore:
             return self._restore_case(request, scan, operation)
         if tool == "capture_evidence":
             return self._capture_evidence(request, scan, operation)
+        if tool == "record_findings":
+            return self._record_findings(request, scan, operation)
         if tool == "prepare_decision":
             return self._prepare_decision(request, scan, operation)
         if tool == "commit_decision":
@@ -293,6 +311,68 @@ class HostCore:
         if op.get("result_json"):
             result["result"] = json.loads(op["result_json"])
         return self._response(request, scan, "ok", result=result)
+
+    def _get_rule_contract(self, request: dict, scan: dict, operation: dict) -> dict:
+        rule_ref = request["input"]["rule"]
+        rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+        if not rule or scan.get("ruleRegistryDigest") != self._rule_registry_digest:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "规则不属于当前 Scan 的冻结启用规则")
+        path = (self._rules_root.parent / rule["document"]).resolve()
+        try:
+            if self._rules_root not in path.parents or not path.is_file():
+                raise ValueError("规则文档路径无效")
+            content = path.read_text(encoding="utf-8")
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        except (OSError, ValueError) as error:
+            return self._finish_operation_failure(request, scan, operation, "RULE_CONTRACT_UNAVAILABLE", str(error))
+        if digest != rule.get("contentDigest"):
+            return self._finish_operation_failure(request, scan, operation, "RULE_CONTRACT_INTEGRITY_FAILED", "规则文档摘要与冻结注册表不一致")
+        result = {"operationId": operation.get("operation_id") or operation["operationId"], "runRevision": scan["runRevision"],
+                  "rule": dict(rule), "content": content, "contentDigest": digest, "registryDigest": scan["ruleRegistryDigest"]}
+        operation.update({"status":"succeeded", "resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        with self._store.transaction():
+            self._store.update_operation(operation)
+        return self._response(request, scan, "ok", result=result, operation=operation)
+
+    def _get_audit_progress(self, request: dict, scan: dict, operation: dict) -> dict:
+        pages = self._store.list_entities("page_states", scan["scanId"])
+        entrypoints = self._store.list_entities("entrypoints", scan["scanId"])
+        objects = self._store.list_entities("audit_objects", scan["scanId"])
+        cases = self._store.list_entities("reverse_cases", scan["scanId"])
+        pending = self._store.list_entities("pending_decisions", scan["scanId"])
+        grouped = {"processed": [], "skipped": [], "unprocessed": []}
+        explored = set()
+        for row in self._store.list_operations(scan["scanId"]):
+            if row.get("tool") == "explore_entrypoint" and row.get("status") == "succeeded" and row.get("result_json"):
+                explored.add(json.loads(row["result_json"]).get("entrypointId"))
+        for item in entrypoints:
+            status = "processed" if item["entrypointId"] in explored else item.get("status", "unprocessed")
+            bucket = status if status in grouped else "unprocessed"
+            grouped[bucket].append(item["entrypointId"])
+        active_statuses = {"planned", "safety_check", "executing", "evidence_captured", "decision_prepared", "restoring"}
+        investigations = []
+        for target in objects:
+            for rule_ref in target.get("potentialRules", []):
+                rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+                if not rule:
+                    continue
+                latest = self._store.get_latest_findings(scan["scanId"], target["objectId"], rule_ref)
+                coverage, effective = self._finding_coverage(scan["scanId"], target["objectId"], rule_ref)
+                effective_ids = {item["findingId"] for item in effective}
+                investigations.append({"objectRef":target["objectId"], "rule":rule_ref, **coverage,
+                                       "latestFindingRefs":[item["findingId"] for item in latest],
+                                       "stagedFindingRefs":[item["findingId"] for item in latest if item["findingId"] not in effective_ids]})
+        result = {"operationId":operation.get("operation_id") or operation["operationId"], "runRevision":scan["runRevision"],
+                  "scanStatus":scan["status"], "currentPageStateId":scan["currentPageStateId"],
+                  "visitedPageStateRefs":[item["pageStateId"] for item in pages], "entrypoints":grouped,
+                  "objects":[{"objectId":item["objectId"], "status":item["status"], "potentialRules":item.get("potentialRules", []), "assessmentRefs":item.get("assessmentRefs", [])} for item in objects],
+                  "activeCases":[{"caseId":item["caseId"], "objectRef":item["objectRef"], "rule":item["rule"], "status":item["status"]} for item in cases if item.get("status") in active_statuses],
+                  "investigations":investigations,
+                  "pendingDecisionRefs":[item["pendingDecisionId"] for item in pending if item.get("status") == "pending"]}
+        operation.update({"status":"succeeded", "resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        with self._store.transaction():
+            self._store.update_operation(operation)
+        return self._response(request, scan, "ok", result=result, operation=operation)
 
     def _inspect_page(self, request: dict, scan: dict, operation: dict) -> dict:
         page_state_id = request["input"]["pageStateId"]
@@ -474,6 +554,8 @@ class HostCore:
             result["objectId"] = verification["objectRef"]
             result["objectKind"] = audit_object["kind"]
             result["potentialRules"] = audit_object["potentialRules"]
+            result["controls"] = audit_object.get("controls", [])
+            result["lists"] = audit_object.get("lists", [])
         if replacement:
             result["replacementCandidateRef"] = replacement["candidateId"]
         operation.update({"status":"succeeded","resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
@@ -855,6 +937,101 @@ class HostCore:
         common.update({"status": status, "failureReason": {"code": "SANITIZATION_FAILED" if raw and not status_consistent else "SCREENSHOT_NOT_CAPTURED", "message": reason}})
         return common, None
 
+    def _record_findings(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        target = self._store.get_audit_object(data["objectId"])
+        rule_ref = data["rule"]
+        rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+        if not target or target.get("scanId") != scan["scanId"] or not rule or rule_ref not in target.get("potentialRules", []):
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Finding 对象或规则不属于当前 Scan")
+        operation_id = operation.get("operation_id") or operation["operationId"]
+        revision = scan["runRevision"] + 1
+        findings = []
+        dimensions = [item["dimension"] for item in data["findings"]]
+        if len(dimensions) != len(set(dimensions)):
+            return self._finish_operation_failure(request, scan, operation, "INVALID_REQUEST", "一次请求不能重复写入同一维度")
+        latest_ids = {item["findingId"] for item in self._store.get_latest_findings(scan["scanId"], target["objectId"], rule_ref)}
+        evidence_refs = set()
+        for index, item in enumerate(data["findings"]):
+            if item["dimension"] not in rule.get("coverageDimensions", []):
+                return self._finish_operation_failure(request, scan, operation, "INVALID_REQUEST", "Finding 维度不属于冻结规则覆盖契约")
+            for case_ref in item["caseRefs"]:
+                case = self._store.get_case(case_ref)
+                if not case or case.get("scanId") != scan["scanId"] or case.get("objectRef") != target["objectId"] or case.get("rule") != rule_ref:
+                    return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Finding 的 Case 引用未绑定当前对象与规则")
+            for evidence_ref in item["evidenceRefs"]:
+                evidence = self._store.get_evidence(evidence_ref)
+                if not evidence or evidence.get("scanId") != scan["scanId"] or evidence.get("objectRef") != target["objectId"]:
+                    return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Finding 的 Evidence 引用未绑定当前对象")
+                if evidence.get("caseRef") and evidence["caseRef"] not in item["caseRefs"]:
+                    return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Finding 的 Evidence/Case 引用不闭合")
+                evidence_refs.add(evidence_ref)
+            if item.get("supersedesRef"):
+                old = self._store.get_dimension_finding(item["supersedesRef"])
+                if not old or old.get("scanId") != scan["scanId"] or old.get("objectRef") != target["objectId"] or old.get("rule") != rule_ref or old.get("dimension") != item["dimension"] or old["findingId"] not in latest_ids:
+                    return self._finish_operation_failure(request, scan, operation, "INVALID_SUPERSEDES_REFERENCE", "只能替代同对象、规则、维度的最新 Finding")
+            finding = {"findingId":self._stable_id("finding", operation_id, str(index)), "scanId":scan["scanId"], "recordOperationRef":operation_id,
+                       "objectRef":target["objectId"], "rule":rule_ref, "dimension":item["dimension"], "status":item["status"],
+                       "reasonText":self._evidence_sanitizer.sanitize(item["reasonText"]), "evidenceRefs":list(item["evidenceRefs"]),
+                       "caseRefs":list(item["caseRefs"]), "createdAt":self._now(), "createdAtRevision":revision}
+            if item.get("supersedesRef"):
+                finding["supersedesRef"] = item["supersedesRef"]
+            try:
+                self._validate_entity(self._finding_validator, finding, "DimensionFinding")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            findings.append(finding)
+        result = {"findingRefs":[item["findingId"] for item in findings], "runRevision":revision}
+        operation.update({"status":"succeeded", "resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        scan["runRevision"] = revision
+        with self._store.transaction():
+            for finding in findings:
+                self._store.insert_dimension_finding(finding)
+            self._store.update_scan(scan)
+            self._store.update_operation(operation)
+        return self._response(request, scan, "ok", result=result, operation=operation, evidence_refs=sorted(evidence_refs))
+
+    def _finding_coverage(self, scan_id: str, object_id: str, rule_ref: dict, finding_refs: list[str] | None = None) -> tuple[dict, list[dict]]:
+        rule = self._rules[(rule_ref["ruleId"], rule_ref["version"])]
+        latest = self._store.get_latest_findings(scan_id, object_id, rule_ref)
+        if finding_refs is not None:
+            selected = set(finding_refs)
+            latest = [item for item in latest if item["findingId"] in selected]
+        effective = []
+        for finding in latest:
+            valid = True
+            for case_ref in finding["caseRefs"]:
+                case = self._store.get_case(case_ref)
+                if not case or case.get("status") != "completed" or case.get("recovery", {}).get("finalStatus") != "restored":
+                    valid = False
+                    break
+            if valid:
+                effective.append(finding)
+        by_dimension = {item["dimension"]: item for item in effective}
+        required = list(rule.get("coverageDimensions", []))
+        attempted = [dimension for dimension in required if dimension in by_dimension]
+        resolved = [dimension for dimension in required if by_dimension.get(dimension, {}).get("status") in {"satisfied", "violated"}]
+        unresolved = [dimension for dimension in required if dimension in by_dimension and dimension not in resolved]
+        coverage = {"requiredDimensions":required, "attemptedDimensions":attempted, "resolvedDimensions":resolved,
+                    "unresolvedDimensions":unresolved, "complete":set(required).issubset(resolved)}
+        return coverage, effective
+
+    @staticmethod
+    def _check_decision_gate(result: str, coverage: dict, findings: list[dict], rule: dict) -> tuple[str, str] | None:
+        gate = rule.get("decisionGates", {}).get(result)
+        if not gate:
+            return "RULE_CONTRACT_UNAVAILABLE", "冻结规则缺少当前结果的机器判定门禁"
+        by_dimension = {item["dimension"]: item["status"] for item in findings}
+        allowed = set(gate.get("allRequiredStatuses", []))
+        if allowed and any(by_dimension.get(dimension) not in allowed for dimension in coverage["requiredDimensions"]):
+            return "COVERAGE_INCOMPLETE", "Finding 状态未满足规则声明的全维度机器门禁"
+        minimum = gate.get("anyStatusMinimum")
+        if minimum and sum(item["status"] in set(minimum["statuses"]) for item in findings) < minimum["minimum"]:
+            return "EVIDENCE_INSUFFICIENT", "Finding 状态未满足规则声明的最小状态数量门禁"
+        if len(findings) < gate.get("minimumFindings", 0):
+            return "EVIDENCE_INSUFFICIENT", "Finding 数量未满足规则声明的最小门禁"
+        return None
+
     def _prepare_decision(self, request: dict, scan: dict, operation: dict) -> dict:
         data = request["input"]
         target = self._store.get_audit_object(data["objectId"])
@@ -879,7 +1056,6 @@ class HostCore:
             evidence.append(item)
 
         cases = []
-        covered_dimensions = set()
         for case_ref in data["caseRefs"]:
             case = self._store.get_case(case_ref)
             if not case or case.get("scanId") != scan["scanId"] or case.get("objectRef") != target["objectId"] or case.get("rule") != rule_ref:
@@ -887,14 +1063,25 @@ class HostCore:
             if case.get("status") != "completed" or case.get("recovery", {}).get("finalStatus") != "restored":
                 return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "引用 Case 尚未完成恢复屏障")
             cases.append(case)
-            covered_dimensions.update(case.get("plannedCoverageDimensions", []))
 
-        required_dimensions = list(rule.get("coverageDimensions", []))
-        covered = [dimension for dimension in required_dimensions if dimension in covered_dimensions]
-        coverage = {"requiredDimensions": required_dimensions, "coveredDimensions": covered,
-                    "complete": set(required_dimensions).issubset(covered_dimensions)}
-        if data["result"] == "scanned_no_issue" and not coverage["complete"]:
-            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INCOMPLETE", "无问题结论未满足规则最低覆盖契约")
+        latest_all = self._store.get_latest_findings(scan["scanId"], target["objectId"], rule_ref)
+        latest_by_id = {item["findingId"]: item for item in latest_all}
+        findings = []
+        for finding_ref in data["findingRefs"]:
+            finding = self._store.get_dimension_finding(finding_ref)
+            if not finding or finding.get("scanId") != scan["scanId"] or finding.get("objectRef") != target["objectId"] or finding.get("rule") != rule_ref or finding_ref not in latest_by_id:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "判定只能引用当前对象、规则、维度的最新 Finding")
+            if not set(finding["evidenceRefs"]).issubset(data["evidenceRefs"]) or not set(finding["caseRefs"]).issubset(data["caseRefs"]):
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Finding 的 Evidence/Case 未包含在判定引用闭包中")
+            if any(self._store.get_case(case_ref).get("status") != "completed" or self._store.get_case(case_ref).get("recovery", {}).get("finalStatus") != "restored" for case_ref in finding["caseRefs"]):
+                return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "Finding 仍处于 staged 或其 Case 已失效")
+            findings.append(finding)
+        coverage, effective_findings = self._finding_coverage(scan["scanId"], target["objectId"], rule_ref, data["findingRefs"])
+        if {item["findingId"] for item in effective_findings} != set(data["findingRefs"]):
+            return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "Finding 未全部越过恢复屏障")
+        gate_error = self._check_decision_gate(data["result"], coverage, findings, rule)
+        if gate_error:
+            return self._finish_operation_failure(request, scan, operation, *gate_error)
         if data["result"] == "issue_found" and not evidence:
             return self._finish_operation_failure(request, scan, operation, "EVIDENCE_INSUFFICIENT", "问题结论至少需要一条有效 Evidence")
         if data.get("severity") and data["severity"] not in rule.get("allowedSeverities", []):
@@ -930,7 +1117,7 @@ class HostCore:
         applicable = data["result"] != "not_applicable"
         pending = {"pendingDecisionId": pending_id, "scanId": scan["scanId"], "preparationOperationRef": operation_id,
                    "objectRef": target["objectId"], "rule": rule_ref, "applicable": applicable, "result": data["result"],
-                   "coverage": coverage, "evidenceRefs": list(data["evidenceRefs"]), "caseRefs": list(data["caseRefs"]),
+                   "coverage": coverage, "findingRefs":list(data["findingRefs"]), "evidenceRefs": list(data["evidenceRefs"]), "caseRefs": list(data["caseRefs"]),
                    "reasonText": self._evidence_sanitizer.sanitize(data["reasonText"]), "status": "pending",
                    "preparedAt": self._now(), "preparedAtRevision": revision}
         if data["result"] == "needs_review":
@@ -993,7 +1180,6 @@ class HostCore:
             return self._finish_operation_failure(request, scan, operation, error.code, error.message)
         if self._store.get_assessment_for_object_rule(scan["scanId"], target["objectId"], rule_ref):
             return self._finish_operation_failure(request, scan, operation, "ALREADY_COMMITTED", "同一对象和规则已经存在正式判定")
-        covered_dimensions = set()
         for case_ref in pending["caseRefs"]:
             case = self._store.get_case(case_ref)
             if not case or case.get("scanId") != scan["scanId"] or case.get("objectRef") != target["objectId"] or case.get("rule") != rule_ref:
@@ -1007,13 +1193,23 @@ class HostCore:
                 self._validate_entity(self._case_validator, case, "ReverseCase")
             except HostError as error:
                 return self._finish_operation_failure(request, scan, operation, error.code, error.message)
-            covered_dimensions.update(case.get("plannedCoverageDimensions", []))
-        required_dimensions = list(rule.get("coverageDimensions", []))
-        coverage = {"requiredDimensions": required_dimensions, "coveredDimensions": [d for d in required_dimensions if d in covered_dimensions], "complete": set(required_dimensions).issubset(covered_dimensions)}
+        findings = []
+        latest_ids = {item["findingId"] for item in self._store.get_latest_findings(scan["scanId"], target["objectId"], rule_ref)}
+        for finding_ref in pending["findingRefs"]:
+            finding = self._store.get_dimension_finding(finding_ref)
+            if not finding or finding_ref not in latest_ids or finding.get("scanId") != scan["scanId"] or finding.get("objectRef") != target["objectId"] or finding.get("rule") != rule_ref:
+                return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "提交时 Finding 已被替代或引用失效")
+            if not set(finding["evidenceRefs"]).issubset(pending["evidenceRefs"]) or not set(finding["caseRefs"]).issubset(pending["caseRefs"]):
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "提交时 Finding 引用闭包失效")
+            findings.append(finding)
+        coverage, effective_findings = self._finding_coverage(scan["scanId"], target["objectId"], rule_ref, pending["findingRefs"])
+        if {item["findingId"] for item in effective_findings} != set(pending["findingRefs"]):
+            return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "提交时 Finding 的恢复屏障失效")
         if coverage != pending.get("coverage"):
             return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "提交时覆盖证明已变化")
-        if pending["result"] == "scanned_no_issue" and not coverage["complete"]:
-            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INCOMPLETE", "提交时覆盖不足")
+        gate_error = self._check_decision_gate(pending["result"], coverage, findings, rule)
+        if gate_error:
+            return self._finish_operation_failure(request, scan, operation, *gate_error)
         evidence_refs = list(pending["evidenceRefs"])
         for evidence_ref in evidence_refs:
             evidence = self._store.get_evidence(evidence_ref)
@@ -1030,7 +1226,7 @@ class HostCore:
                 return self._finish_operation_failure(request, scan, operation, error.code, error.message)
         assessment_id = self._new_id("assessment")
         revision = scan["runRevision"] + 1
-        assessment = {"assessmentId": assessment_id, "scanId": scan["scanId"], "preparationOperationRef": pending["preparationOperationRef"], "commitOperationRef": operation.get("operation_id") or operation["operationId"], "objectRef": target["objectId"], "rule": rule_ref, "applicable": pending["applicable"], "result": pending["result"], "coverage": coverage, "evidenceRefs": evidence_refs, "caseRefs": list(pending["caseRefs"]), "reasonText": pending["reasonText"], "conclusionValidity": "valid", "decidedAt": self._now(), "committedAtRevision": revision}
+        assessment = {"assessmentId": assessment_id, "scanId": scan["scanId"], "preparationOperationRef": pending["preparationOperationRef"], "commitOperationRef": operation.get("operation_id") or operation["operationId"], "objectRef": target["objectId"], "rule": rule_ref, "applicable": pending["applicable"], "result": pending["result"], "coverage": coverage, "findingRefs":list(pending["findingRefs"]), "evidenceRefs": evidence_refs, "caseRefs": list(pending["caseRefs"]), "reasonText": pending["reasonText"], "conclusionValidity": "valid", "decidedAt": self._now(), "committedAtRevision": revision}
         if pending.get("screenshotRef"):
             screenshot = self._store.get_screenshot(pending["screenshotRef"])
             raw = self._store.get_screenshot(pending.get("rawVisualRef"))
@@ -1105,10 +1301,25 @@ class HostCore:
             return self._finish_operation_failure(request, scan, operation, "CASE_ACTIVE", "仍有未收束的 Case")
         page_states = self._store.list_entities("page_states", scan["scanId"]); entrypoints = self._store.list_entities("entrypoints", scan["scanId"])
         objects = self._store.list_entities("audit_objects", scan["scanId"]); assessments = self._store.list_entities("assessments", scan["scanId"]); issues = self._store.list_entities("issues", scan["scanId"])
+        findings = self._store.list_entities("dimension_findings", scan["scanId"]); evidence_items = self._store.list_entities("evidence", scan["scanId"])
         scan_id = scan["scanId"]
-        if any(item.get("scanId") != scan_id for item in page_states + entrypoints + objects + assessments + issues):
+        if any(item.get("scanId") != scan_id for item in page_states + entrypoints + objects + cases + findings + evidence_items + assessments + issues):
             return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "账本包含跨 Scan 实体")
         page_ids = {item["pageStateId"] for item in page_states}; object_ids = {item["objectId"] for item in objects}; entry_ids = {item["entrypointId"] for item in entrypoints}
+        case_ids = {item["caseId"] for item in cases}; evidence_ids = {item["evidenceId"] for item in evidence_items}; finding_ids = {item["findingId"] for item in findings}
+        findings_by_id = {item["findingId"]: item for item in findings}
+        for finding in findings:
+            try:
+                self._validate_entity(self._finding_validator, finding, "DimensionFinding")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            rule = self._rules.get((finding["rule"]["ruleId"], finding["rule"]["version"]))
+            if finding["objectRef"] not in object_ids or not rule or finding["dimension"] not in rule.get("coverageDimensions", []) or not set(finding["caseRefs"]).issubset(case_ids) or not set(finding["evidenceRefs"]).issubset(evidence_ids):
+                return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "DimensionFinding 引用不闭合")
+            if finding.get("supersedesRef"):
+                old = findings_by_id.get(finding["supersedesRef"])
+                if not old or any(old[field] != finding[field] for field in ("objectRef", "rule", "dimension")):
+                    return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "DimensionFinding 替代链不闭合")
         if len(data["visitedPageStateRefs"]) != len(set(data["visitedPageStateRefs"])) or not set(data["visitedPageStateRefs"]).issubset(page_ids):
             return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "visitedPageStateRefs 引用不闭合")
         if len(data["processedObjectRefs"]) != len(set(data["processedObjectRefs"])) or not set(data["processedObjectRefs"]).issubset(object_ids):
@@ -1124,6 +1335,8 @@ class HostCore:
                 self._validate_entity(self._assessment_validator, assessment, "RuleAssessment")
             except HostError as error:
                 return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            if not set(assessment["findingRefs"]).issubset(finding_ids) or any(findings_by_id[ref]["objectRef"] != assessment["objectRef"] or findings_by_id[ref]["rule"] != assessment["rule"] for ref in assessment["findingRefs"]):
+                return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "Assessment 的 Finding 引用不闭合")
             by_rule.setdefault((assessment["rule"]["ruleId"], assessment["rule"]["version"]), []).append(assessment)
         assessment_ids = {item["assessmentId"] for item in assessments}
         issues_by_assessment = {}
@@ -1209,7 +1422,7 @@ class HostCore:
                 if ref in processed: embedded["status"] = "processed"
                 elif ref in skipped: embedded.update({"status": "skipped", "reason": skipped[ref]})
                 elif ref in unprocessed: embedded["status"] = "unprocessed"
-        ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
+        ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "dimensionFindings":self._store.list_entities("dimension_findings", scan["scanId"]), "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
         self._validate_entity(self._ledger_validator, ledger, "AuditLedger")
         artifacts = {"audit-ledger.json": (json.dumps(ledger, ensure_ascii=False, indent=2) + "\n").encode("utf-8")}
         derived = self._report_builder.render(ledger)
@@ -1346,6 +1559,8 @@ class HostCore:
                             "location":{"boundingBox":{"x":match.x,"y":match.y,"width":match.width,"height":match.height},
                                         "visible":True,"viewportWidth":match.viewport_width,"viewportHeight":match.viewport_height},
                             "potentialRules":source["potentialRules"],"assessmentRefs":[],"observedAt":self._now()}
+            audit_object["controls"] = [dict(item) for item in match.controls]
+            audit_object["lists"] = [dict(item) for item in match.lists]
         elif source_kind == "audit_object":
             audit_object = dict(source)
             audit_object.update({"status":"blocked","rebindStatus":outcome.status,
@@ -1487,18 +1702,18 @@ class HostCore:
             raise HostError("UNKNOWN_TOOL", f"未知工具: {request['tool']}")
 
     def _validate_tool_input(self, tool: str, value: dict) -> None:
-        name = {"start_audit":"startAuditInput","inspect_page":"inspectPageInput","explore_entrypoint":"exploreEntrypointInput","inspect_object":"inspectObjectInput",
+        name = {"start_audit":"startAuditInput","get_rule_contract":"getRuleContractInput","get_audit_progress":"getAuditProgressInput","inspect_page":"inspectPageInput","explore_entrypoint":"exploreEntrypointInput","inspect_object":"inspectObjectInput",
                 "begin_case":"beginCaseInput","perform_action":"performActionInput","restore_case":"restoreCaseInput",
-                "inspect_source":"inspectSourceInput","capture_evidence":"captureEvidenceInput","prepare_decision":"prepareDecisionInput",
+                "inspect_source":"inspectSourceInput","capture_evidence":"captureEvidenceInput","record_findings":"recordFindingsInput","prepare_decision":"prepareDecisionInput",
                 "commit_decision":"commitDecisionInput","get_operation":"getOperationInput","complete_audit":"completeAuditInput"}[tool]
         errors = sorted(self._contract_validator(name).iter_errors(value), key=lambda e: list(e.path))
         if errors:
             raise HostError("INVALID_REQUEST", errors[0].message, next_step="fix_tool_input")
 
     def _validate_tool_output(self, tool: str, value: dict) -> None:
-        name = {"start_audit":"startAuditOutput","inspect_page":"inspectPageOutput","explore_entrypoint":"exploreEntrypointOutput","inspect_object":"inspectObjectOutput",
+        name = {"start_audit":"startAuditOutput","get_rule_contract":"getRuleContractOutput","get_audit_progress":"getAuditProgressOutput","inspect_page":"inspectPageOutput","explore_entrypoint":"exploreEntrypointOutput","inspect_object":"inspectObjectOutput",
                 "begin_case":"beginCaseOutput","perform_action":"performActionOutput","restore_case":"restoreCaseOutput",
-                "inspect_source":"inspectSourceOutput","capture_evidence":"captureEvidenceOutput","prepare_decision":"prepareDecisionOutput",
+                "inspect_source":"inspectSourceOutput","capture_evidence":"captureEvidenceOutput","record_findings":"recordFindingsOutput","prepare_decision":"prepareDecisionOutput",
                 "commit_decision":"commitDecisionOutput","get_operation":"getOperationOutput","complete_audit":"completeAuditOutput"}[tool]
         errors = sorted(self._contract_validator(name).iter_errors(value), key=lambda e: list(e.path))
         if errors:

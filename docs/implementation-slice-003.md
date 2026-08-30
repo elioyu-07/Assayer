@@ -11,7 +11,7 @@
 - 所有验证结果持久化为 ObjectVerification，并支持 Operation 幂等重试；
 - 适配器异常或自相矛盾的结果统一 fail-closed。
 
-实现入口：[object_identity.py](../src/agent_f_host/object_identity.py)、[core.py](../src/agent_f_host/core.py)。
+实现入口：[object_identity.py](../src/assayer_host/object_identity.py)、[core.py](../src/assayer_host/core.py)。
 
 ## 尚未实现
 

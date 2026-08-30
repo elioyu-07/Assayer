@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, LoginSecret, run_deterministic_harness
+from assayer_host import CredentialVault, DeterministicLoginAdapter, DeterministicPageAdapter, HostCore, LoginSecret, run_deterministic_harness
 
 
 EXPECTED_ARTIFACTS = {
@@ -23,10 +23,10 @@ class DeterministicHarnessTest(unittest.TestCase):
             self.assertTrue(summary["completion"]["conclusionsValid"])
             self.assertEqual(set(summary["artifacts"]), EXPECTED_ARTIFACTS)
             self.assertEqual(summary["responses"], {"action": "ok", "restore": "ok", "commit": "ok"})
-            self.assertEqual(len(summary["steps"]), 10)
+            self.assertEqual(len(summary["steps"]), 11)
             ledger = json.loads((Path(tmp) / "audit-ledger.json").read_text())
             self.assertEqual(ledger["scan"]["status"], "completed")
-            self.assertEqual(len(ledger["operations"]), 10)
+            self.assertEqual(len(ledger["operations"]), 11)
             self.assertEqual(ledger["assessments"][0]["result"], "scanned_no_issue")
             self.assertEqual(json.loads((Path(tmp) / "issues.json").read_text())["issues"], [])
             self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).rglob("*")))
@@ -53,12 +53,12 @@ class DeterministicHarnessTest(unittest.TestCase):
     def test_module_cli_emits_machine_readable_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
             completed = subprocess.run(
-                [sys.executable, "-m", "agent_f_host", "--output-dir", tmp],
+                [sys.executable, "-m", "assayer_host", "--output-dir", tmp],
                 check=True, capture_output=True, text=True,
             )
             summary = json.loads(completed.stdout)
             self.assertEqual(summary["mode"], "deterministic")
-            self.assertEqual(summary["completion"]["runRevision"], 8)
+            self.assertEqual(summary["completion"]["runRevision"], 9)
 
     def test_default_host_still_fails_closed_without_browser_adapters(self):
         core = HostCore()
@@ -80,7 +80,7 @@ class DeterministicHarnessTest(unittest.TestCase):
                 "protocolVersion": "1.0", "requestId": "default-page-start", "agentTurnId": "turn-001",
                 "tool": "start_audit", "idempotencyKey": "default-page-start",
                 "input": {"url": "https://test.example.com", "ruleRegistryVersion": "1.0.0",
-                          "outputDir": "/tmp/agent-f-unavailable-page", "browserProfile": "default",
+                          "outputDir": "/tmp/assayer-unavailable-page", "browserProfile": "default",
                           "credentialHandle": "credential-only"},
             })["result"]
             response = core.handle({
@@ -105,7 +105,7 @@ class DeterministicHarnessTest(unittest.TestCase):
                 "protocolVersion": "1.0", "requestId": "default-identity-start", "agentTurnId": "turn-001",
                 "tool": "start_audit", "idempotencyKey": "default-identity-start",
                 "input": {"url": "https://test.example.com", "ruleRegistryVersion": "1.0.0",
-                          "outputDir": "/tmp/agent-f-unavailable-identity", "browserProfile": "default",
+                          "outputDir": "/tmp/assayer-unavailable-identity", "browserProfile": "default",
                           "credentialHandle": "credential-page"},
             })["result"]
             page = core.handle({

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/scan-run.schema.json",
+  "$id": "https://assayer.dev/schemas/scan-run.schema.json",
   "title": "ScanRun",
   "type": "object",
   "additionalProperties": false,

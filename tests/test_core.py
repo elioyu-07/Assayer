@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, BrowserSessionFailure, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
-from agent_f_host.page import EntrypointExecution, EntrypointObservation, PageObservation
+from assayer_host import ActionExecution, BrowserSessionFailure, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from assayer_host.page import EntrypointExecution, EntrypointObservation, PageObservation
 
 
 class ExplodingLoginAdapter:
@@ -83,7 +83,7 @@ def bootstrap(core, key="boot-001"):
 
 
 def session(scan, tool="inspect_page", key="op-001", revision=1, input=None):
-    return {"protocolVersion":"1.0","requestId":"req-002","scanId":scan["scanId"],"runId":scan["runId"],"agentTurnId":"turn-002","tool":tool,"idempotencyKey":key,"expectedRunRevision":revision,"input":input or {"pageStateId":"page-001","include":["objects"]}}
+    return {"protocolVersion":"1.0","requestId":"req-002","scanId":scan["scanId"],"runId":scan["runId"],"agentTurnId":"turn-002","tool":tool,"idempotencyKey":key,"expectedRunRevision":revision,"input":input if input is not None else {"pageStateId":"page-001","include":["objects"]}}
 
 
 class HostCoreTest(unittest.TestCase):
@@ -368,9 +368,21 @@ class HostCoreTest(unittest.TestCase):
             input_data["caseId"] = case_id
         return core.handle(session(started, tool="capture_evidence", key=key, revision=revision, input=input_data))
 
-    def prepare_input(self, object_id, case_id, evidence_id, *, result="issue_found", raw_visual_ref=None):
+    def record_findings(self, core, started, object_id, case_id, evidence_id, *, result="scanned_no_issue", revision=4, dimensions=None, key="findings"):
+        dimensions = dimensions or ["filter_present", "query_action", "reset_action", "binding_to_list"]
+        statuses = {dimension:"satisfied" for dimension in dimensions}
+        if result == "issue_found": statuses["reset_action"] = "violated"
+        if result == "needs_review": statuses[dimensions[-1]] = "unresolved"
+        response = core.handle(session(started, tool="record_findings", key=key, revision=revision,
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
+                   "findings":[{"dimension":dimension,"status":status,"reasonText":"测试 Evidence 支持维度状态",
+                                "evidenceRefs":[evidence_id],"caseRefs":[case_id]} for dimension, status in statuses.items()]}))
+        return response["result"]["findingRefs"]
+
+    def prepare_input(self, object_id, case_id, evidence_id, *, finding_refs=None, result="issue_found", raw_visual_ref=None):
         data = {"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":result,
-                "reasonText":"Host 证据支持该判定","evidenceRefs":[evidence_id],"caseRefs":[case_id]}
+                "reasonText":"Host 证据支持该判定","findingRefs":finding_refs or ["finding-placeholder"],
+                "evidenceRefs":[evidence_id],"caseRefs":[case_id]}
         if result == "issue_found":
             data.update({"rawVisualRef":raw_visual_ref,"severity":"P2","title":"筛选区缺少重置",
                          "message":"筛选区只有查询动作。","impact":"用户无法一键恢复筛选条件。","recommendation":"增加绑定同一列表的重置动作。"})
@@ -381,9 +393,10 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        prepared = core.handle(session(started, tool="prepare_decision", key="complete-prepare", revision=4,
-                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
-        committed = core.handle(session(started, tool="commit_decision", key="complete-commit", revision=5,
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
+        prepared = core.handle(session(started, tool="prepare_decision", key="complete-prepare", revision=5,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
+        committed = core.handle(session(started, tool="commit_decision", key="complete-commit", revision=6,
                                         input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         return object_id, committed
 
@@ -404,6 +417,61 @@ class HostCoreTest(unittest.TestCase):
         audit_object = core._store.get_audit_object(result["result"]["objectId"])
         self.assertEqual(audit_object["status"], "eligible")
         self.assertEqual(audit_object["potentialRules"], [{"ruleId":"FUA-10","version":"1.0.0"}])
+        self.assertTrue(result["result"]["controls"])
+        self.assertTrue(result["result"]["lists"])
+        self.assertNotIn("selector", json.dumps(result["result"]))
+        self.assertNotIn("hostLocatorId", json.dumps(result["result"]))
+
+    def test_get_rule_contract_reads_frozen_digest_without_revision_change(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        request = session(started, tool="get_rule_contract", key="rule-contract",
+                          input={"rule":{"ruleId":"FUA-10","version":"1.0.0"}})
+        result = core.handle(request)
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("最低覆盖契约", result["result"]["content"])
+        self.assertEqual(result["result"]["contentDigest"], core._rules[("FUA-10", "1.0.0")]["contentDigest"])
+        self.assertEqual(result["runRevision"], 1)
+        core._rules[("FUA-10", "1.0.0")]["contentDigest"] = "0" * 64
+        failed = core.handle(session(started, tool="get_rule_contract", key="rule-contract-tampered",
+                                     input={"rule":{"ruleId":"FUA-10","version":"1.0.0"}}))
+        self.assertEqual(failed["error"]["code"], "RULE_CONTRACT_INTEGRITY_FAILED")
+
+    def test_progress_rebuilds_investigation_from_effective_findings(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"],
+                                            revision=3, dimensions=["filter_present"], key="progress-finding")
+        staged = core.handle(session(started, tool="get_audit_progress", key="progress-staged", revision=4, input={}))
+        investigation = staged["result"]["investigations"][0]
+        self.assertEqual(investigation["attemptedDimensions"], [])
+        self.assertEqual(investigation["stagedFindingRefs"], finding_refs)
+        self.restore_case(core, started, object_id, case_id, revision=4)
+        effective = core.handle(session(started, tool="get_audit_progress", key="progress-effective", revision=5, input={}))
+        investigation = effective["result"]["investigations"][0]
+        self.assertEqual(investigation["attemptedDimensions"], ["filter_present"])
+        self.assertEqual(investigation["latestFindingRefs"], finding_refs)
+        self.assertFalse(investigation["complete"])
+
+    def test_superseded_finding_is_retained_but_not_current(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        old_ref = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"],
+                                       dimensions=["binding_to_list"], key="finding-old")[0]
+        replacement = core.handle(session(started, tool="record_findings", key="finding-new", revision=5,
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
+                   "findings":[{"dimension":"binding_to_list","status":"unresolved","reasonText":"现有证据无法确认绑定",
+                                "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id],"supersedesRef":old_ref}]}))
+        latest = core._store.get_latest_findings(started["scanId"], object_id, {"ruleId":"FUA-10","version":"1.0.0"})
+        self.assertEqual([item["findingId"] for item in latest], replacement["result"]["findingRefs"])
+        self.assertEqual(len(core._store.list_entities("dimension_findings", started["scanId"])), 2)
 
     def test_inspect_object_not_found_does_not_create_object(self):
         adapter = DeterministicObjectIdentityAdapter(ObjectVerification("not_found", 0, excluded_reasons=("no_required_dimensions",)))
@@ -718,10 +786,11 @@ class HostCoreTest(unittest.TestCase):
             case_id = case_result["result"]["caseId"]
             evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
             self.restore_case(core, started, object_id, case_id, revision=3)
-            request = session(started, tool="prepare_decision", key="prepare-issue", revision=4,
-                              input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"]))
+            finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+            request = session(started, tool="prepare_decision", key="prepare-issue", revision=5,
+                              input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"]))
             result = core.handle(request)
-            self.assertEqual(result["runRevision"], 5)
+            self.assertEqual(result["runRevision"], 6)
             self.assertNotEqual(result["result"]["screenshotRef"], evidence["result"]["screenshotRef"])
             screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
             self.assertEqual(screenshot["kind"], "issue")
@@ -747,7 +816,7 @@ class HostCoreTest(unittest.TestCase):
         core = self.make_core()
         started = bootstrap(core)["result"]
         data = {"objectId":"object-001","rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":"needs_review",
-                "reasonText":"证据冲突","evidenceRefs":[],"caseRefs":["case-001"]}
+                "reasonText":"证据冲突","findingRefs":["finding-001"],"evidenceRefs":[],"caseRefs":["case-001"]}
         with self.assertRaises(HostError) as caught:
             core.handle(session(started, tool="prepare_decision", key="prepare-no-blocker", input=data))
         self.assertEqual(caught.exception.code, "INVALID_REQUEST")
@@ -758,8 +827,9 @@ class HostCoreTest(unittest.TestCase):
         object_id, case_result = self.begin_case(core, started)
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
-        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="not_applicable")
-        result = core.handle(session(started, tool="prepare_decision", key="prepare-unrestored", revision=3, input=data))
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="not_applicable", revision=3)
+        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="not_applicable")
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-unrestored", revision=4, input=data))
         self.assertEqual(result["error"]["code"], "CASE_NOT_RESTORED")
 
     def test_prepare_rejects_incomplete_no_issue_coverage(self):
@@ -770,9 +840,43 @@ class HostCoreTest(unittest.TestCase):
         case = core.handle(session(started, tool="begin_case", key="partial-case", input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"局部覆盖","plannedCoverageDimensions":["filter_present"]}))["result"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case["caseId"], revision=2)
         self.restore_case(core, started, object_id, case["caseId"], revision=3)
-        data = self.prepare_input(object_id, case["caseId"], evidence["result"]["evidenceId"], result="scanned_no_issue")
-        result = core.handle(session(started, tool="prepare_decision", key="prepare-partial", revision=4, input=data))
+        finding_refs = self.record_findings(core, started, object_id, case["caseId"], evidence["result"]["evidenceId"], dimensions=["filter_present"])
+        data = self.prepare_input(object_id, case["caseId"], evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-partial", revision=5, input=data))
         self.assertEqual(result["error"]["code"], "COVERAGE_INCOMPLETE")
+
+    def test_prepare_rejects_no_issue_when_latest_finding_is_unresolved(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        statuses = {dimension:"satisfied" for dimension in ["filter_present", "query_action", "reset_action", "binding_to_list"]}
+        statuses["binding_to_list"] = "unresolved"
+        recorded = core.handle(session(started, tool="record_findings", key="unresolved-findings", revision=4,
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
+                   "findings":[{"dimension":dimension,"status":status,"reasonText":"逐维结论",
+                                "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id]}
+                               for dimension, status in statuses.items()]}))
+        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"],
+                                  finding_refs=recorded["result"]["findingRefs"], result="scanned_no_issue")
+        result = core.handle(session(started, tool="prepare_decision", key="unresolved-no-issue", revision=5, input=data))
+        self.assertEqual(result["error"]["code"], "COVERAGE_INCOMPLETE")
+
+    def test_record_finding_rejects_cross_dimension_supersedes(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        old_ref = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"],
+                                       revision=3, dimensions=["query_action"], key="supersede-source")[0]
+        result = core.handle(session(started, tool="record_findings", key="supersede-wrong-dimension", revision=4,
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
+                   "findings":[{"dimension":"reset_action","status":"satisfied","reasonText":"错误替代目标",
+                                "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id],"supersedesRef":old_ref}]}))
+        self.assertEqual(result["error"]["code"], "INVALID_SUPERSEDES_REFERENCE")
 
     def test_prepare_rejects_failed_raw_visual(self):
         capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=RawVisualCapture(status="ambiguous", reason="对象歧义"))
@@ -782,8 +886,9 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])
-        result = core.handle(session(started, tool="prepare_decision", key="prepare-bad-raw", revision=4, input=data))
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-bad-raw", revision=5, input=data))
         self.assertEqual(result["error"]["code"], "SCREENSHOT_NOT_CAPTURED")
 
     def test_prepare_rejects_captured_visual_without_image_sanitization(self):
@@ -799,8 +904,9 @@ class HostCoreTest(unittest.TestCase):
             case_id = case_result["result"]["caseId"]
             evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
             self.restore_case(core, started, object_id, case_id, revision=3)
-            data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])
-            result = core.handle(session(started, tool="prepare_decision", key="prepare-unsanitized", revision=4, input=data))
+            finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+            data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])
+            result = core.handle(session(started, tool="prepare_decision", key="prepare-unsanitized", revision=5, input=data))
             self.assertEqual(result["error"]["code"], "SCREENSHOT_SANITIZATION_REQUIRED")
 
     def test_two_issue_preparations_never_reuse_issue_screenshot(self):
@@ -813,14 +919,16 @@ class HostCoreTest(unittest.TestCase):
             first_id = first_case["result"]["caseId"]
             first_ev = self.capture_evidence(core, started, object_id, case_id=first_id, key="multi-ev-one", revision=2, raw=True)
             self.restore_case(core, started, object_id, first_id, key="multi-restore-one", revision=3)
-            first = core.handle(session(started, tool="prepare_decision", key="multi-prepare-one", revision=4,
-                                        input=self.prepare_input(object_id, first_id, first_ev["result"]["evidenceId"], raw_visual_ref=first_ev["result"]["screenshotRef"])))
-            _, second_case = self.begin_case(core, started, key="multi-two", revision=5)
+            first_findings = self.record_findings(core, started, object_id, first_id, first_ev["result"]["evidenceId"], result="issue_found", key="multi-findings-one")
+            first = core.handle(session(started, tool="prepare_decision", key="multi-prepare-one", revision=5,
+                                        input=self.prepare_input(object_id, first_id, first_ev["result"]["evidenceId"], finding_refs=first_findings, raw_visual_ref=first_ev["result"]["screenshotRef"])))
+            _, second_case = self.begin_case(core, started, key="multi-two", revision=6)
             second_id = second_case["result"]["caseId"]
-            second_ev = self.capture_evidence(core, started, object_id, case_id=second_id, key="multi-ev-two", revision=6, raw=True)
-            self.restore_case(core, started, object_id, second_id, key="multi-restore-two", revision=7)
-            second = core.handle(session(started, tool="prepare_decision", key="multi-prepare-two", revision=8,
-                                         input=self.prepare_input(object_id, second_id, second_ev["result"]["evidenceId"], raw_visual_ref=second_ev["result"]["screenshotRef"])))
+            second_ev = self.capture_evidence(core, started, object_id, case_id=second_id, key="multi-ev-two", revision=7, raw=True)
+            self.restore_case(core, started, object_id, second_id, key="multi-restore-two", revision=8)
+            second_findings = self.record_findings(core, started, object_id, second_id, second_ev["result"]["evidenceId"], result="issue_found", revision=9, key="multi-findings-two")
+            second = core.handle(session(started, tool="prepare_decision", key="multi-prepare-two", revision=10,
+                                         input=self.prepare_input(object_id, second_id, second_ev["result"]["evidenceId"], finding_refs=second_findings, raw_visual_ref=second_ev["result"]["screenshotRef"])))
             self.assertNotEqual(first["result"]["screenshotRef"], second["result"]["screenshotRef"])
 
     def test_commit_no_issue_writes_assessment_atomically_and_marks_object(self):
@@ -830,17 +938,18 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        prepared = core.handle(session(started, tool="prepare_decision", key="commit-prepare", revision=4,
-                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
-        committed = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=5,
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
+        prepared = core.handle(session(started, tool="prepare_decision", key="commit-prepare", revision=5,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
+        committed = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=6,
                                         input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
-        self.assertEqual(committed["runRevision"], 6)
+        self.assertEqual(committed["runRevision"], 7)
         assessment = core._store.get_assessment(committed["result"]["assessmentId"])
         self.assertEqual(assessment["result"], "scanned_no_issue")
         self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "committed")
         self.assertEqual(core._store.get_audit_object(object_id)["status"], "decided")
         self.assertIsNone(committed["result"].get("issueId"))
-        retry = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=5,
+        retry = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=6,
                                     input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(retry["result"], committed["result"])
 
@@ -854,9 +963,10 @@ class HostCoreTest(unittest.TestCase):
             case_id = case_result["result"]["caseId"]
             evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
             self.restore_case(core, started, object_id, case_id, revision=3)
-            prepared = core.handle(session(started, tool="prepare_decision", key="issue-prepare", revision=4,
-                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
-            committed = core.handle(session(started, tool="commit_decision", key="issue-commit", revision=5,
+            finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+            prepared = core.handle(session(started, tool="prepare_decision", key="issue-prepare", revision=5,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])))
+            committed = core.handle(session(started, tool="commit_decision", key="issue-commit", revision=6,
                                             input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
             issue = core._store.get_issue(committed["result"]["issueId"])
             self.assertEqual(issue["assessmentRef"], committed["result"]["assessmentId"])
@@ -869,8 +979,9 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        prepared = core.handle(session(started, tool="prepare_decision", key="stale-prepare", revision=4,
-                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
+        prepared = core.handle(session(started, tool="prepare_decision", key="stale-prepare", revision=5,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
         with core._store.transaction() as connection:
             case = core._store.get_case(case_id)
             case["status"] = "restore_failed"
@@ -878,7 +989,7 @@ class HostCoreTest(unittest.TestCase):
             case["endedAt"] = core._now()
             case["restoreReason"] = {"code":"TEST_INVALIDATION","message":"测试使恢复屏障失效"}
             core._store.update_case(case)
-        result = core.handle(session(started, tool="commit_decision", key="stale-commit", revision=5,
+        result = core.handle(session(started, tool="commit_decision", key="stale-commit", revision=6,
                                      input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(result["error"]["code"], "CASE_NOT_RESTORED")
         self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "invalidated")
@@ -891,13 +1002,14 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        prepared = core.handle(session(started, tool="prepare_decision", key="integrity-prepare", revision=4,
-                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
+        prepared = core.handle(session(started, tool="prepare_decision", key="integrity-prepare", revision=5,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
         tampered = core._store.get_evidence(evidence["result"]["evidenceId"])
         tampered["payload"]["content"] = {"tampered": True}
         with core._store.transaction() as connection:
             connection.execute("UPDATE evidence SET entity_json=? WHERE evidence_id=?", (json.dumps(tampered), tampered["evidenceId"]))
-        result = core.handle(session(started, tool="commit_decision", key="integrity-commit", revision=5,
+        result = core.handle(session(started, tool="commit_decision", key="integrity-commit", revision=6,
                                      input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(result["error"]["code"], "EVIDENCE_INTEGRITY_FAILED")
         self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
@@ -913,15 +1025,16 @@ class HostCoreTest(unittest.TestCase):
             case_id = case_result["result"]["caseId"]
             evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
             self.restore_case(core, started, object_id, case_id, revision=3)
-            prepared = core.handle(session(started, tool="prepare_decision", key="rollback-prepare", revision=4,
-                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
-            result = core.handle(session(started, tool="commit_decision", key="rollback-commit", revision=5,
+            finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+            prepared = core.handle(session(started, tool="prepare_decision", key="rollback-prepare", revision=5,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])))
+            result = core.handle(session(started, tool="commit_decision", key="rollback-commit", revision=6,
                                          input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
             self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
             self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
             self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
             self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "pending")
-            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 5)
+            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 6)
 
     def test_complete_audit_closes_coverage_and_exports_valid_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -930,7 +1043,7 @@ class HostCoreTest(unittest.TestCase):
             with core._store.transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
-            request = session(started, tool="complete_audit", key="complete-ok", revision=6,
+            request = session(started, tool="complete_audit", key="complete-ok", revision=7,
                               input=self.completion_input(core, started, object_id))
             result = core.handle(request)
             self.assertEqual(result["result"]["scanStatus"], "completed")
@@ -956,7 +1069,7 @@ class HostCoreTest(unittest.TestCase):
             with core._store.transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
-            result = core.handle(session(started, tool="complete_audit", key="complete-partial", revision=6,
+            result = core.handle(session(started, tool="complete_audit", key="complete-partial", revision=7,
                                          input=self.completion_input(core, started, object_id, partial=True)))
             self.assertEqual(result["result"]["scanStatus"], "partial")
             self.assertTrue(result["result"]["conclusionsValid"])
@@ -968,10 +1081,10 @@ class HostCoreTest(unittest.TestCase):
             with core._store.transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
-            result = core.handle(session(started, tool="complete_audit", key="complete-bad-count", revision=6,
+            result = core.handle(session(started, tool="complete_audit", key="complete-bad-count", revision=7,
                                          input=self.completion_input(core, started, object_id, assessment_count=2)))
             self.assertEqual(result["error"]["code"], "COVERAGE_INVALID")
-            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 6)
+            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 7)
             self.assertFalse((Path(tmp) / "audit-ledger.json").exists())
 
     def test_complete_audit_rejects_pending_decision(self):
@@ -981,9 +1094,10 @@ class HostCoreTest(unittest.TestCase):
         case_id = case_result["result"]["caseId"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
         self.restore_case(core, started, object_id, case_id, revision=3)
-        core.handle(session(started, tool="prepare_decision", key="pending-at-end", revision=4,
-                            input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
-        result = core.handle(session(started, tool="complete_audit", key="complete-with-pending", revision=5,
+        finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
+        core.handle(session(started, tool="prepare_decision", key="pending-at-end", revision=5,
+                            input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
+        result = core.handle(session(started, tool="complete_audit", key="complete-with-pending", revision=6,
                                      input=self.completion_input(core, started, object_id)))
         self.assertEqual(result["error"]["code"], "DECISION_PENDING")
 
@@ -997,13 +1111,14 @@ class HostCoreTest(unittest.TestCase):
             case_id = case_result["result"]["caseId"]
             evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
             self.restore_case(core, started, object_id, case_id, revision=3)
-            prepared = core.handle(session(started, tool="prepare_decision", key="report-prepare", revision=4,
-                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
-            committed = core.handle(session(started, tool="commit_decision", key="report-commit", revision=5,
+            finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"], result="issue_found")
+            prepared = core.handle(session(started, tool="prepare_decision", key="report-prepare", revision=5,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])))
+            committed = core.handle(session(started, tool="commit_decision", key="report-commit", revision=6,
                                             input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
             entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
             complete_input = {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],"processedEntrypointRefs":[entrypoint_id],"skippedEntrypoints":[],"ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.0.0"},"assessmentCount":1,"resultCounts":{"issue_found":1},"coverageComplete":True}],"unprocessedEntrypointRefs":[],"completionReason":"问题和覆盖均已确认"}
-            core.handle(session(started, tool="complete_audit", key="report-complete", revision=6, input=complete_input))
+            core.handle(session(started, tool="complete_audit", key="report-complete", revision=7, input=complete_input))
             report = json.loads((Path(tmp) / "issues.json").read_text())
             self.assertEqual(len(report["issues"]), 1)
             self.assertEqual(report["issues"][0]["issueId"], committed["result"]["issueId"])
@@ -1028,7 +1143,7 @@ class HostCoreTest(unittest.TestCase):
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             (Path(tmp) / "issues.json").write_text("conflict")
-            result = core.handle(session(started, tool="complete_audit", key="report-conflict", revision=6,
+            result = core.handle(session(started, tool="complete_audit", key="report-conflict", revision=7,
                                          input=self.completion_input(core, started, object_id)))
             self.assertEqual(result["error"]["code"], "LEDGER_EXPORT_FAILED")
             self.assertEqual((Path(tmp) / "issues.json").read_text(), "conflict")

@@ -1,17 +1,17 @@
-# agent-f 顶层架构
+# Assayer 顶层架构
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.1.0-draft |
-| 日期 | 2026-08-30 |
+| 文档版本 | 1.2.0-draft |
+| 日期 | 2026-08-31 |
 | 状态 | 设计收敛中 |
-| Owner | agent-f 维护者 |
+| Owner | Assayer 维护者 |
 
 架构原则中的系统不变量以 [设计治理与系统不变量](design-governance.md) 为准，领域和算法细节分别见 [领域模型](domain-model-and-lifecycle.md)、[身份与恢复](identity-and-recovery.md)、[动作安全](action-safety-and-credentials.md) 和 [证据完整性](evidence-and-decision-integrity.md)。
 
 ## 1. 文档目的
 
-本文档定义 agent-f 第一版的顶层工程架构，承接 [产品契约](product-contract.md)，回答以下问题：
+本文档定义 Assayer 第一版的顶层工程架构，承接 [产品契约](product-contract.md)，回答以下问题：
 
 - Codex、Agent、Skill 和 Host 如何协作；
 - 谁拥有调查决策权，谁拥有执行和安全控制权；
@@ -23,7 +23,7 @@
 
 ## 2. 架构目标
 
-agent-f 的架构必须同时满足五个目标：
+Assayer 的架构必须同时满足五个目标：
 
 1. **Agent 自主调查**：由 Agent 选择对象、生成反向 Case、补充证据并完成语义判断；
 2. **Host 安全执行**：所有浏览器、源码、网络、截图和持久化操作均由 Host 执行和约束；
@@ -54,7 +54,7 @@ flowchart LR
     R --> U
 ```
 
-Codex Runtime 承载 Agent、Skill 和 MCP 调用。Audit Host 是 agent-f 自己实现的本地执行程序，不是第二个 Agent，也不参与业务语义争论。
+Codex Runtime 承载 Agent、Skill 和 MCP 调用。Audit Host 是 Assayer 自己实现的本地执行程序，不是第二个 Agent，也不参与业务语义争论。
 
 ## 4. 逻辑分层
 
@@ -63,7 +63,7 @@ Codex Runtime 承载 Agent、Skill 和 MCP 调用。Audit Host 是 agent-f 自�
 负责：
 
 - 承载大模型 Agent；
-- 加载 agent-f Skill；
+- 加载 Assayer Skill；
 - 调用 MCP 工具；
 - 保持一次扫描中的调查上下文。
 
@@ -98,6 +98,8 @@ Agent 是语义控制面，负责：
 
 Agent 一次只处理一个对象的精简证据包。完整页面、源码和历史证据不直接塞入模型上下文。
 
+Agent 的多轮状态、覆盖 Finding、停滞处理、Codex 入口和当前实现迁移由 [LLM 调查编排设计](llm-agent-orchestration.md)定义。Agent Runtime 位于 Host 之外；Host Core 不依赖模型 SDK，也不调用模型。
+
 ### 4.4 Host 接口层
 
 Host 同时暴露：
@@ -107,7 +109,7 @@ Host 同时暴露：
 
 MCP 与 CLI 只负责协议适配，必须调用同一套 Host 核心能力，不能形成两套执行逻辑。
 
-当前实现提供调用同一 `HostCore.handle` 协议边界的确定性 CLI Harness，用于端到端契约验证和 CI。它显式注入静态适配器，不属于浏览器实现；未注入真实浏览器适配器时，Host 登录、页面、对象身份、动作和恢复均默认 fail-closed。真实接入的依赖顺序见[真实浏览器与 MCP 集成计划](browser-mcp-integration-plan.md)。
+当前实现同时提供静态 deterministic Harness 和真实 Chromium deterministic smoke runner，用于端到端契约、集成和 CI 验证。两者都不是 Agent 调查层：smoke runner 以固定 Case 和 Python 规则评估器完成 Host 生命周期，不能冒充 LLM 自主审计。未注入真实浏览器适配器时，Host 登录、页面、对象身份、动作和恢复均默认 fail-closed。真实浏览器依赖见[真实浏览器与 MCP 集成计划](browser-mcp-integration-plan.md)，LLM 接入见 [C01–C07 实施计划](llm-agent-integration-plan.md)。
 
 ### 4.5 Host 执行层
 
@@ -220,6 +222,8 @@ flowchart TD
 ```
 
 每条规范定义自己的最低覆盖维度。Agent 可以选择具体 Case，但未覆盖最低维度时不得输出 `scanned_no_issue`。
+
+`plannedCoverageDimensions` 只声明 Case 意图，不能直接成为已覆盖事实。正式覆盖必须由 Agent 提交的逐维 Finding 与 Host Evidence 引用共同构成；attempted、resolved 和 unresolved 的定义见 [LLM 调查编排设计](llm-agent-orchestration.md)。
 
 ### 6.4 Case 恢复
 
@@ -461,8 +465,8 @@ Host 不得为每条规则堆叠独立的顶层执行流程。规则专用逻辑
 
 ```text
 Codex
-  ├── agent-f Skill
-  └── agent-f MCP Server
+  ├── Assayer Skill
+  └── Assayer MCP Server
           └── Host Core (Python)
                  ├── Playwright 浏览器
                  ├── 源码只读分析
@@ -470,7 +474,7 @@ Codex
                  └── 账本与报告
 
 开发/测试
-  └── agent-f CLI
+  └── Assayer CLI
           └── 同一 Host Core
 ```
 

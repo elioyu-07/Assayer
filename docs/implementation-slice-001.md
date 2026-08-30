@@ -13,7 +13,7 @@
 - 一次性、带 TTL 的 credentialHandle 和可替换登录适配器；
 - 未接入浏览器适配器的工具默认返回 `INTERNAL_FAILURE`，不尝试副作用。
 
-实现入口：[src/agent_f_host/core.py](../src/agent_f_host/core.py)。行为测试：[tests/test_core.py](../tests/test_core.py)。
+实现入口：[src/assayer_host/core.py](../src/assayer_host/core.py)。行为测试：[tests/test_core.py](../tests/test_core.py)。
 
 当前代码不仅校验请求；对已实现的 Bootstrap 响应也会再次通过工具 Output Schema，防止 Host 自己产生无法被 Agent 消费的结果。
 

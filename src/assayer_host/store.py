@@ -88,6 +88,12 @@ class SQLiteStore:
               rule_id TEXT NOT NULL, rule_version TEXT NOT NULL, status TEXT NOT NULL,
               entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS dimension_findings (
+              finding_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
+              rule_id TEXT NOT NULL, rule_version TEXT NOT NULL, dimension TEXT NOT NULL,
+              supersedes_ref TEXT REFERENCES dimension_findings(finding_id), entity_json TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS assessments (
               assessment_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
               object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
@@ -308,6 +314,25 @@ class SQLiteStore:
             (decision["pendingDecisionId"], decision["scanId"], decision["objectRef"], decision["rule"]["ruleId"], decision["rule"]["version"], decision["status"], json.dumps(decision, ensure_ascii=False, separators=(",", ":"))),
         )
 
+    def insert_dimension_finding(self, finding: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO dimension_findings(finding_id,scan_id,object_id,rule_id,rule_version,dimension,supersedes_ref,entity_json) VALUES(?,?,?,?,?,?,?,?)",
+            (finding["findingId"], finding["scanId"], finding["objectRef"], finding["rule"]["ruleId"], finding["rule"]["version"], finding["dimension"], finding.get("supersedesRef"), json.dumps(finding, ensure_ascii=False, separators=(",", ":"))),
+        )
+
+    def get_dimension_finding(self, finding_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM dimension_findings WHERE finding_id=?", (finding_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def get_latest_findings(self, scan_id: str, object_id: str, rule: dict) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT entity_json FROM dimension_findings WHERE scan_id=? AND object_id=? AND rule_id=? AND rule_version=? ORDER BY rowid",
+            (scan_id, object_id, rule["ruleId"], rule["version"]),
+        ).fetchall()
+        findings = [json.loads(row[0]) for row in rows]
+        superseded = {item["supersedesRef"] for item in findings if item.get("supersedesRef")}
+        return [item for item in findings if item["findingId"] not in superseded]
+
     def get_pending_decision(self, pending_decision_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM pending_decisions WHERE pending_decision_id=?", (pending_decision_id,)).fetchone()
         return json.loads(row[0]) if row else None
@@ -343,7 +368,7 @@ class SQLiteStore:
         return json.loads(row[0]) if row else None
 
     def list_entities(self, table: str, scan_id: str | None = None) -> list[dict]:
-        allowed = {"page_states", "entrypoints", "page_candidates", "audit_objects", "object_verifications", "reverse_cases", "action_attempts", "request_observations", "evidence", "screenshots", "pending_decisions", "assessments", "issues"}
+        allowed = {"page_states", "entrypoints", "page_candidates", "audit_objects", "object_verifications", "reverse_cases", "action_attempts", "request_observations", "evidence", "screenshots", "dimension_findings", "pending_decisions", "assessments", "issues"}
         if table not in allowed:
             raise ValueError("不允许读取未知实体表")
         if scan_id is None:

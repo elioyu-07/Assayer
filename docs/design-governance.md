@@ -1,16 +1,16 @@
-# agent-f 设计治理与系统不变量
+# Assayer 设计治理与系统不变量
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
+| 文档版本 | 1.1.0-draft |
+| 日期 | 2026-08-31 |
 | 状态 | 设计收敛中 |
-| Owner | 产品 Owner / agent-f 维护者 |
+| Owner | 产品 Owner / Assayer 维护者 |
 | 基线 | `main` 分支当前设计 |
 
 ## 1. 目的
 
-本文档定义 agent-f 设计资料的权威顺序、系统不变量、统一术语、变更规则和未决问题处理方式。它不描述具体工具字段或浏览器算法；这些内容由下游专项文档拥有。
+本文档定义 Assayer 设计资料的权威顺序、系统不变量、统一术语、变更规则和未决问题处理方式。它不描述具体工具字段或浏览器算法；这些内容由下游专项文档拥有。
 
 ## 2. 文档权威顺序
 
@@ -19,11 +19,12 @@
 1. 产品契约：决定产品目标、范围、用户承诺和不可突破的业务边界；
 2. 本文档：决定系统不变量、信任边界和设计治理；
 3. 顶层架构：决定组件职责、依赖方向和事务边界；
-4. 领域模型及安全、身份、证据等专项设计：决定领域语义和算法契约；
-5. Host–Agent 协议：决定交互消息、工具生命周期、错误和幂等语义；
-6. 规则契约和已启用规则文件：决定具体审计规则的适用性、覆盖和判定；
-7. JSON Schema：决定持久化对象的字段和局部约束；
-8. 示例、测试、报告模板和实现：只能证明或执行上游设计，不得反向定义产品语义。
+4. LLM 调查编排设计：决定 Agent 多轮控制循环、覆盖 Finding、停止和模型失败语义；
+5. 领域模型及安全、身份、证据等专项设计：决定领域语义和算法契约；
+6. Host–Agent 协议：决定交互消息、工具生命周期、错误和幂等语义；
+7. 规则契约和已启用规则文件：决定具体审计规则的适用性、覆盖和判定；
+8. JSON Schema：决定持久化对象的字段和局部约束；
+9. 示例、测试、报告模板和实现：只能证明或执行上游设计，不得反向定义产品语义。
 
 下游材料发现上游矛盾时必须停止相关设计或实现，登记未决问题，由拥有相应语义的 Owner 修改权威来源。不得通过实现细节静默选择一种解释。
 
@@ -45,6 +46,9 @@
 | INV-012 | 凭据和会话秘密不得进入 Agent 上下文、普通工具参数、命令参数、日志、证据、截图或报告。 |
 | INV-013 | 任何跨实体引用必须闭合到同一扫描；派生对象不得引用已失效的证据或页面状态。 |
 | INV-014 | 规则数量和具体规则 ID 不得写死在 Host 主循环、Agent 通用流程、账本核心关系或报告框架中。 |
+| INV-015 | Case 声明计划检查某维度不等于该维度已解决；正式覆盖必须绑定逐维 Finding 和 Host Evidence。 |
+| INV-016 | 正式 `audit` 必须由 Agent 调查循环产生语义判定；Agent Runtime 不可用时不得静默使用 deterministic smoke 结果替代。 |
+| INV-017 | 页面或源码中的自然语言均是不可信审计数据；其内容不能向 Agent 授权、改变 Skill/规则或要求调用任意工具。 |
 
 ## 4. 统一术语
 
@@ -66,13 +70,18 @@
 | RuleAssessment | 越过恢复屏障后原子提交的“对象 × 规则”最终判定。 |
 | Issue | 由 `issue_found` Assessment 派生的不可变正式问题投影。 |
 | Coverage Universe | 本次声明范围内，Host 已发现和 Agent 补充后经 Host 验证的页面状态、入口、对象和启用规则集合。 |
+| DimensionFinding | Agent 对一个冻结规则覆盖维度给出的结构化状态、公开简明理由和 Evidence 引用。 |
+| Attempted Dimension | 至少执行过一次具有区分力的检查，但不保证已经得到可判定事实。 |
+| Resolved Dimension | 已有 `satisfied` 或 `violated` Finding 的覆盖维度。 |
+| Unresolved Dimension | Finding 为 `unresolved`、`blocked` 或 `conflicted` 的覆盖维度。 |
+| Smoke Runner | 使用固定探索、Case 和确定性评估验证 Host 生命周期的运行器，不拥有正式 Agent 语义。 |
 
 ## 5. 设计决策记录
 
 | ID | 决策 | 理由 | 状态 |
 |---|---|---|---|
 | D-001 | 使用单一全局 `runRevision` 做并发控制；PageState 自身使用不可变快照身份，不再承担并发版本。 | 避免页面、对象和账本各自解释 `stateVersion`。 | accepted |
-| D-002 | 使用 `begin_case → restore_case → prepare_decision → commit_decision` 的恢复屏障。 | 只有确认环境恢复后才冻结判定准备，防止把污染现场带入问题结论。 | accepted |
+| D-002 | 使用 `begin_case → record_findings → restore_case → prepare_decision → commit_decision` 的恢复屏障。 | Finding 可先 staged；只有确认环境恢复后才允许进入判定，防止把污染现场带入问题结论。 | accepted |
 | D-003 | 聚合审计账本是唯一事实源，其他输出是确定性派生视图。 | 避免多份 JSON 各自成为真相。 | accepted |
 | D-004 | 第一版所有正式 Assessment 都必须属于至少一个 Case；直接观察使用 `observation` Case。 | 统一证据、恢复和追溯链。 | accepted |
 | D-005 | Bootstrap 和 Session 使用不同请求封套。 | `start_audit` 前不存在 `scanId/runId`。 | accepted |
@@ -80,6 +89,10 @@
 | D-007 | `Issue` 是 Assessment 的不可变派生投影，不拥有独立业务判断。 | 保持 Agent 语义判定只有一个来源。 | accepted |
 | D-008 | 确定性 Harness 必须显式标注测试模式并注入测试适配器；它不得改变 Host 的生产默认适配器或冒充真实站点审计。 | 既验证完整生命周期，又防止测试成功被误解为浏览器能力已经接入。 | accepted |
 | D-009 | 所有能够产生浏览器事实的生产适配器默认不可用；fixture 只能由 Harness 或测试显式注入，不能按缺失能力逐项回退。 | 防止部分配置时把静态测试事实混入真实 Scan。 | accepted |
+| D-010 | LLM Agent 运行在 Host 外部，通过 Skill + MCP 驱动 Host；Host 不集成模型 SDK。 | 保持事实/安全执行面与语义控制面隔离。 | accepted |
+| D-011 | Codex 终端和桌面客户端共用动态 MCP Runtime Router；业务 URL 在 `start_audit` 时绑定 Scan，而非绑定 MCP 进程。 | 用户只给 URL 即可运行，并保持每 Scan 会话隔离。 | accepted |
+| D-012 | `plannedCoverageDimensions` 不再直接推导正式覆盖，覆盖由逐维 Finding 和 Evidence 引用计算。 | 防止“计划检查”被误报为“事实已解决”。 | accepted |
+| D-013 | 当前真实 URL 确定性全链路运行器降级为 smoke；C04/C05 完成后正式 `audit` 只允许 LLM 驱动。 | 防止 Host 闭环被误解为 Agent 自主审计。 | accepted |
 
 ## 6. 变更规则
 

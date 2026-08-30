@@ -1,7 +1,7 @@
 {
   "registryId": "registry-001",
   "registryVersion": "1.0.0",
-  "digest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+  "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
   "createdAt": "2026-08-30T08:00:00Z",
   "rules": [
     {
@@ -16,6 +16,13 @@
       "capabilityMissingOutcome": "needs_review",
       "coverageContract": "rules/FUA-10.md#最低覆盖契约",
       "coverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
+      "decisionGates": {
+        "scanned_no_issue": { "allRequiredStatuses": ["satisfied"] },
+        "issue_found": { "anyStatusMinimum": { "statuses": ["violated"], "minimum": 1 } },
+        "needs_review": { "anyStatusMinimum": { "statuses": ["unresolved", "blocked", "conflicted"], "minimum": 1 } },
+        "not_applicable": { "minimumFindings": 1 },
+        "noise": { "minimumFindings": 1 }
+      },
       "directConfirmationConditions": [],
       "defaultSeverity": "P2",
       "allowedSeverities": ["P1", "P2", "P3"],

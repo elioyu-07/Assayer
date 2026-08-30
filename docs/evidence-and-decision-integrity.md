@@ -1,9 +1,9 @@
-# agent-f 证据、判定与账本完整性
+# Assayer 证据、判定与账本完整性
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
+| 文档版本 | 1.1.0-draft |
+| 日期 | 2026-08-31 |
 | 状态 | 设计收敛中 |
 | Owner | Host Core / Audit Owner |
 
@@ -14,9 +14,12 @@
 1. **Raw Fact**：Host 从浏览器、网络或源码读取的原始事实，暂存于 Host；
 2. **Evidence**：经裁剪、脱敏、规范化摘要并绑定实体后的不可变记录；
 3. **Agent Evidence Pack**：提供给 Agent 的最小充分证据包，只包含已存在的 Evidence 引用和事实摘要；
-4. **Derived View**：Assessment、Issue、报告和诊断等由账本事实派生的视图。
+4. **Agent Finding**：Agent 对一个规则覆盖维度基于 Evidence 给出的不可变结构化解释，不是 Host Fact，也不是最终结论；
+5. **Derived View**：Assessment、Issue、报告和诊断等由账本事实派生的视图。
 
 Agent 只能引用 Evidence ID，不能复制事实后重新声明为 Host 证据。Host 不能将 Agent 自然语言理由写入 Evidence payload。
+
+DimensionFinding 必须保留 Agent 来源并引用 Evidence/Case；它不能反向修改 Evidence，也不能因自然语言理由把 Host 的 blocked、ambiguous 或 restore_failed 事实改写为成功。
 
 ## 2. 证据绑定
 
@@ -69,7 +72,7 @@ Case 执行期间按规则要求同步采集，绑定当前 PageState、Object �
 Agent/Host → restore_case
 Host  → 仅 restored 的 Case 才允许 prepare_decision
 Agent → prepare_decision
-Host  → 校验规则、覆盖、证据、语义字段，创建 PendingDecision 和 IssueScreenshot
+Host  → 校验规则、最终 Finding、证据、语义字段，创建 PendingDecision 和 IssueScreenshot
 Host  → 仅 restored 才允许 commit_decision
 Host  → 原子写入 RuleAssessment，并按需派生 Issue
 ```
@@ -77,8 +80,8 @@ Host  → 原子写入 RuleAssessment，并按需派生 Issue
 `prepare_decision` 不能改变正式账本中的 Assessment 或 Issue 数组。`commit_decision` 必须在一个事务中完成：
 
 1. 再次校验 Scan 终态、对象身份、规则注册表摘要和 runRevision；
-2. 校验所有 Evidence、Case、Screenshot 引用闭合；
-3. 校验结果与 `applicable`、coverage、字段门禁一致；
+2. 校验所有 Finding、Evidence、Case、Screenshot 引用闭合；
+3. 校验结果与 `applicable`、resolved/unresolved coverage、字段门禁一致；
 4. 写入不可变 RuleAssessment；
 5. `issue_found` 时写入一条与 Assessment 一对一的 Issue；
 6. 增加 runRevision 并记录提交 Operation。
@@ -90,7 +93,7 @@ Host  → 原子写入 RuleAssessment，并按需派生 Issue
 | 结果 | 门槛 |
 |---|---|
 | `issue_found` | 规则 enabled、对象 matched、覆盖满足、证据有效、Case restored、IssueScreenshot captured、语义字段完整。 |
-| `scanned_no_issue` | 规则 enabled、对象 matched、所有最低覆盖维度完成、引用 Case restored、没有冲突证据。 |
+| `scanned_no_issue` | 规则 enabled、对象 matched、所有最低覆盖维度的最终 Finding 为 satisfied、引用 Case restored、没有 unresolved 或冲突证据。 |
 | `not_applicable` | 有针对当前对象的适用性证据和理由；能力不足不能冒充不适用。 |
 | `needs_review` | 明确记录证据缺口、冲突、阻断或身份问题；不得声称完成覆盖。 |
 | `noise` | 候选与对象真实相关，但依据规则定义确认不是问题；记录噪声理由。 |
@@ -128,7 +131,7 @@ Host 在每个提交点和 `complete_audit` 前校验：
 1. 所有实体 ID 在 Scan 内唯一；
 2. 所有引用存在、同一扫描、类型正确；
 3. Frozen rules 与 Registry 内容和摘要一致；
-4. PageState/Object/Case/Evidence/Screenshot/Assessment/Issue 关系闭合；
+4. PageState/Object/Case/Evidence/DimensionFinding/Screenshot/Assessment/Issue 关系闭合；
 5. Issue 与 Assessment 一对一且结果为 `issue_found`；
 6. Case 恢复状态和 PendingDecision 屏障满足结果门槛；
 7. 敏感数据扫描和摘要校验通过；
@@ -137,3 +140,5 @@ Host 在每个提交点和 `complete_audit` 前校验：
 当前 Host Core 已实现结构化 Evidence、Raw Visual 和 `prepare_decision` PendingDecision 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图由判定准备事务从同一 Raw Visual 复制为独立文件和实体。正式 Assessment/Issue 的原子写入仍由 `commit_decision` 负责。
 
 实现状态补充（2026-08-30）：B07a 真实结构化 Evidence、B07b 真实对象级截图、B08 JSON/MCP 传输和 B09 发布级故障注入已完成。Raw Visual 的图片绑定、裁剪、digest、不可变落盘和派生链路已验证；由于 B07c 自动像素脱敏尚未实现，截图记录 `sanitizationStatus=not_performed`，不能写成 `sanitized`，也不能进入正式 `issue_found`。B08/B09 不能放宽或绕过该限制。
+
+实现状态补充（2026-08-31）：C02 已实现 DimensionFinding Schema、Store、工具和 Finding 驱动 Coverage。`plannedCoverageDimensions` 只表达调查计划，不能再作为正式覆盖证明；旧 coverage 结构已从 Host、测试 Harness 和示例账本移除。

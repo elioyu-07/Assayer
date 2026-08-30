@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-f-host"
+name = "assayer"
 version = "0.1.0"
-description = "Protocol and operation core for agent-f Host"
+description = "Protocol and operation core for Assayer Host"
 requires-python = ">=3.11"
 dependencies = ["jsonschema>=4.18"]
 
@@ -14,7 +14,7 @@ browser = ["playwright>=1.46,<2"]
 mcp = ["mcp>=1.0,<2"]
 
 [project.scripts]
-agent-f-harness = "agent_f_host.harness:main"
-agent-f-json = "agent_f_host.transport:main"
-agent-f-mcp = "agent_f_host.transport:mcp_main"
-agent-f = "agent_f_host.cli:main"
+assayer-harness = "assayer_host.harness:main"
+assayer-json = "assayer_host.transport:main"
+assayer-mcp = "assayer_host.transport:mcp_main"
+assayer = "assayer_host.cli:main"

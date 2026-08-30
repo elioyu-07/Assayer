@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/common.schema.json",
-  "title": "agent-f Common Types",
+  "$id": "https://assayer.dev/schemas/common.schema.json",
+  "title": "Assayer Common Types",
   "$defs": {
     "nonEmptyString": {
       "type": "string",

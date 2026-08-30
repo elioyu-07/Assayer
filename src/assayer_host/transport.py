@@ -86,7 +86,7 @@ class JsonLineTransport:
 class McpToolTransport:
     """MCP-shaped tool listing/call adapter over the same JSON envelope.
 
-    ``arguments`` must contain the complete agent-f protocol request.  This
+    ``arguments`` must contain the complete Assayer protocol request.  This
     keeps IDs and lifecycle fields caller-owned and prevents MCP from becoming
     a second business-logic implementation.
     """
@@ -95,7 +95,7 @@ class McpToolTransport:
         self._json = JsonLineTransport(core)
 
     def list_tools(self) -> list[dict]:
-        return [{"name": name, "description": f"agent-f Host {name}（仅传输适配）",
+        return [{"name": name, "description": f"Assayer Host {name}（仅传输适配）",
                  "inputSchema": {"type": "object"}} for name in _TOOLS]
 
     def call_tool(self, name: str, arguments: object) -> dict:
@@ -114,8 +114,8 @@ def create_mcp_server(core: HostCore):
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as error:
-        raise RuntimeError("MCP SDK 未安装；请安装 agent-f-host[mcp]") from error
-    server = FastMCP("agent-f")
+        raise RuntimeError("MCP SDK 未安装；请安装 assayer[mcp]") from error
+    server = FastMCP("Assayer")
     adapter = McpToolTransport(core)
     for item in adapter.list_tools():
         name = item["name"]
@@ -123,15 +123,15 @@ def create_mcp_server(core: HostCore):
         def invoke(request: dict, _name=name) -> dict:
             return adapter.call_tool(_name, request)
 
-        invoke.__name__ = f"agent_f_{name}"
+        invoke.__name__ = f"assayer_{name}"
         server.tool(name=name, description=item["description"])(invoke)
     return server
 
 
 def mcp_main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="agent-f real-browser MCP stdio server")
+    parser = argparse.ArgumentParser(description="Assayer real-browser MCP stdio server")
     parser.add_argument("--url", required=True, help="本次 Host 允许访问的真实 URL")
-    parser.add_argument("--output-dir", default="./agent-f-output")
+    parser.add_argument("--output-dir", default="./assayer-output")
     args = parser.parse_args(argv)
     from .browser_runtime import BrowserHostRuntime
     core = BrowserHostRuntime(args.url, args.output_dir)
@@ -143,10 +143,10 @@ def mcp_main(argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="agent-f JSON-lines Host transport")
+    parser = argparse.ArgumentParser(description="Assayer JSON-lines Host transport")
     parser.add_argument("--stdio", action="store_true", help="从 stdin 读取 JSON 请求并向 stdout 输出响应")
     parser.add_argument("--url", help="可选：组装此 URL 的真实 Chromium Host")
-    parser.add_argument("--output-dir", default="./agent-f-output")
+    parser.add_argument("--output-dir", default="./assayer-output")
     args = parser.parse_args(argv)
     if not args.stdio:
         parser.error("必须指定 --stdio")

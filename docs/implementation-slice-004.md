@@ -13,7 +13,7 @@
 - 默认动作适配器不可用且 fail-closed，只有显式注入浏览器适配器后才可能执行动作；
 - `get_operation` 返回已保存的结构化结果快照，供未知结果收束使用。
 
-实现入口：[action_safety.py](../src/agent_f_host/action_safety.py)、[core.py](../src/agent_f_host/core.py)、[store.py](../src/agent_f_host/store.py)。
+实现入口：[action_safety.py](../src/assayer_host/action_safety.py)、[core.py](../src/assayer_host/core.py)、[store.py](../src/assayer_host/store.py)。
 
 ## 状态与 revision 语义
 

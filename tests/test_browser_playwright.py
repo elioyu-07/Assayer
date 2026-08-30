@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from agent_f_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
+from assayer_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
                           HostCore, HostError, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
                           create_recoverable_browser_adapter_bundle)

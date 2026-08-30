@@ -44,7 +44,7 @@ def scan(root: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run deterministic agent-f resilience scan")
+    parser = argparse.ArgumentParser(description="Run deterministic Assayer resilience scan")
     parser.add_argument("--root", default=".")
     parser.add_argument("--output", help="optional JSON output path")
     args = parser.parse_args(argv)

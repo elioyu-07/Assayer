@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/dimension-finding.schema.json",
+  "title": "DimensionFinding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findingId", "scanId", "recordOperationRef", "objectRef", "rule", "dimension", "status", "reasonText", "evidenceRefs", "caseRefs", "createdAt", "createdAtRevision"],
+  "properties": {
+    "findingId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "recordOperationRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "dimension": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "status": { "enum": ["satisfied", "violated", "unresolved", "blocked", "conflicted"] },
+    "reasonText": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "evidenceRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "caseRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "supersedesRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "createdAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" }
+  }
+}

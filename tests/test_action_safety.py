@@ -1,6 +1,6 @@
 import unittest
 
-from agent_f_host import ActionSafetyPolicy, NetworkRequest
+from assayer_host import ActionSafetyPolicy, NetworkRequest
 
 
 class ActionSafetyPolicyTest(unittest.TestCase):

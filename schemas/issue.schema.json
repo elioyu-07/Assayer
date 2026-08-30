@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/issue.schema.json",
+  "$id": "https://assayer.dev/schemas/issue.schema.json",
   "title": "Issue",
   "type": "object",
   "additionalProperties": false,

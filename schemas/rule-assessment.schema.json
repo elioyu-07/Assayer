@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/rule-assessment.schema.json",
+  "$id": "https://assayer.dev/schemas/rule-assessment.schema.json",
   "title": "RuleAssessment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["assessmentId", "scanId", "preparationOperationRef", "commitOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "conclusionValidity", "decidedAt", "committedAtRevision"],
+  "required": ["assessmentId", "scanId", "preparationOperationRef", "commitOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "findingRefs", "evidenceRefs", "caseRefs", "reasonText", "conclusionValidity", "decidedAt", "committedAtRevision"],
   "properties": {
     "assessmentId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -17,14 +17,17 @@
     "coverage": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requiredDimensions", "coveredDimensions", "complete"],
+      "required": ["requiredDimensions", "attemptedDimensions", "resolvedDimensions", "unresolvedDimensions", "complete"],
       "properties": {
         "requiredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
-        "coveredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "attemptedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "resolvedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "unresolvedDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
         "complete": { "type": "boolean" },
         "coverageNote": { "type": "string" }
       }
     },
+    "findingRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "caseRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },

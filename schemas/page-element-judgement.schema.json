@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agent-f.dev/schemas/page-element-judgement.schema.json",
+  "$id": "https://assayer.dev/schemas/page-element-judgement.schema.json",
   "title": "PageElementJudgement",
   "type": "object",
   "additionalProperties": false,

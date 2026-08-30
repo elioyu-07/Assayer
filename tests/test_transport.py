@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 
-from agent_f_host import (CredentialVault, DeterministicLoginAdapter,
+from assayer_host import (CredentialVault, DeterministicLoginAdapter,
                           DeterministicObjectIdentityAdapter,
                           DeterministicPageAdapter, HostCore, HostError,
                           JsonLineTransport, LoginSecret, McpToolTransport)
@@ -57,6 +57,7 @@ class TransportTest(unittest.TestCase):
         adapter = McpToolTransport(core)
         names = {item["name"] for item in adapter.list_tools()}
         self.assertIn("start_audit", names)
+        self.assertTrue({"get_rule_contract", "get_audit_progress", "record_findings"}.issubset(names))
         request = {"protocolVersion": "1.0", "requestId": "req-001", "tool": "inspect_page", "input": {}}
         result = adapter.call_tool("inspect_page", request)
         self.assertEqual(result["structuredContent"], VALID_RESPONSE)
@@ -81,7 +82,7 @@ class TransportTest(unittest.TestCase):
             request = {"protocolVersion": "1.0", "requestId": "req-start", "agentTurnId": "turn-001",
                        "tool": "start_audit", "idempotencyKey": "start-001",
                        "input": {"url": "https://test.example.com", "ruleRegistryVersion": "1.0.0",
-                                 "outputDir": "/tmp/agent-f-transport-test", "browserProfile": "default",
+                                 "outputDir": "/tmp/assayer-transport-test", "browserProfile": "default",
                                  "credentialHandle": "credential-001"}}
             direct = JsonLineTransport(core).invoke(request)
             via_mcp = McpToolTransport(core).call_tool("start_audit", request)["structuredContent"]

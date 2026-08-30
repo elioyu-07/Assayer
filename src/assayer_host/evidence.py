@@ -63,7 +63,7 @@ class DeterministicEvidenceAdapter:
         if include_raw_visual:
             bbox = target.get("location", {}).get("boundingBox") or {"x": 0, "y": 0, "width": 1, "height": 1}
             location = target.get("location", {})
-            raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nagent-f-deterministic-v1", width=location.get("viewportWidth", max(1, int(bbox["width"]))), height=location.get("viewportHeight", max(1, int(bbox["height"]))), bounding_box=bbox, annotation="Host 定位的对象区域")
+            raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nassayer-deterministic-v1", width=location.get("viewportWidth", max(1, int(bbox["width"]))), height=location.get("viewportHeight", max(1, int(bbox["height"]))), bounding_box=bbox, annotation="Host 定位的对象区域")
         return EvidenceCapture(kind="runtime_visual" if include_raw_visual else "runtime_dom",
                                payload_type="image_metadata" if include_raw_visual else "json",
                                payload={"objectId": target["objectId"], "pageStateId": page_state["pageStateId"], "stateKind": page_state.get("stateKind"), "identityFingerprint": target.get("identity", {}).get("fingerprint")},

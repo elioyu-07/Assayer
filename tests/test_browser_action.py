@@ -1,10 +1,10 @@
 import unittest
 
-from agent_f_host import (ActionSafetyPolicy, BrowserNetworkGuard,
+from assayer_host import (ActionSafetyPolicy, BrowserNetworkGuard,
                           BrowserProfile, BrowserReadOnlyPageAdapter,
                           BrowserSafeActionAdapter, BrowserSession,
                           NetworkRequest)
-from agent_f_host.browser_readonly import BrowserLocatorRegistry
+from assayer_host.browser_readonly import BrowserLocatorRegistry
 
 
 class FakeRequest:

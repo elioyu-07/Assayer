@@ -45,7 +45,7 @@ class DerivedReportBuilder:
 
         by_object = {}
         for assessment in assessments:
-            by_object.setdefault(assessment["objectRef"], []).append({key: assessment[key] for key in ("assessmentId", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "screenshotRef", "severity", "title", "impact", "recommendation", "reasonText", "blocker", "conclusionValidity", "decidedAt") if key in assessment})
+            by_object.setdefault(assessment["objectRef"], []).append({key: assessment[key] for key in ("assessmentId", "rule", "applicable", "result", "coverage", "findingRefs", "evidenceRefs", "caseRefs", "screenshotRef", "severity", "title", "impact", "recommendation", "reasonText", "blocker", "conclusionValidity", "decidedAt") if key in assessment})
         page_items = []
         for page in sorted(pages.values(), key=lambda item: item["pageStateId"]):
             page_objects = []
@@ -61,7 +61,7 @@ class DerivedReportBuilder:
         failed_operations = [{"operationId": item["operationId"], "tool": item["tool"], "status": item["status"], "reason": item.get("reason")} for item in ledger["operations"] if item["status"] in {"rejected", "failed_known", "result_unknown"}]
         diagnostics = {"schemaVersion": self.VERSION, "sourceLedger": "audit-ledger.json", "sourceLedgerDigest": ledger_digest, "scanId": scan["scanId"], "runId": scan["runId"], "scanStatus": scan["status"], "conclusionsValid": effective_valid, "terminalReason": scan["terminalReason"], "coverageProof": scan["coverageProof"], "assessmentResultCounts": result_counts, "failedOperations": failed_operations}
 
-        summary = ["# agent-f 审计摘要", "", f"- Scan：{scan['scanId']}", f"- 账本摘要：{ledger_digest}", f"- 状态：{scan['status']}", f"- 结论有效：{'是' if effective_valid else '否'}", f"- 正式问题：{len(issue_items)}", f"- 待复核：{result_counts['needs_review']}", "", "## 问题"]
+        summary = ["# Assayer 审计摘要", "", f"- Scan：{scan['scanId']}", f"- 账本摘要：{ledger_digest}", f"- 状态：{scan['status']}", f"- 结论有效：{'是' if effective_valid else '否'}", f"- 正式问题：{len(issue_items)}", f"- 待复核：{result_counts['needs_review']}", "", "## 问题"]
         if not issue_items:
             summary.extend(["", "本次没有可发布的有效问题。"])
         for index, issue in enumerate(issue_items, 1):
@@ -70,6 +70,6 @@ class DerivedReportBuilder:
         for item in scan["coverageProof"]["ruleSummaries"]:
             summary.append(f"- {item['rule']['ruleId']}@{item['rule']['version']}：{item['assessmentCount']} 个判定，覆盖{'完整' if item['coverageComplete'] else '不完整'}")
         summary.append("")
-        diagnostics_md = ["# agent-f 运行诊断", "", f"- 终态：{scan['status']}", f"- 原因：{self._text(scan['terminalReason']['message'])}", f"- 未处理入口：{len(scan['coverageProof'].get('unprocessedEntrypointRefs', []))}", f"- 失败/拒绝 Operation：{len(failed_operations)}", ""]
+        diagnostics_md = ["# Assayer 运行诊断", "", f"- 终态：{scan['status']}", f"- 原因：{self._text(scan['terminalReason']['message'])}", f"- 未处理入口：{len(scan['coverageProof'].get('unprocessedEntrypointRefs', []))}", f"- 失败/拒绝 Operation：{len(failed_operations)}", ""]
         log_lines = [f"{item['acceptedAt']} {item['status']} {item['tool']} {item['operationId']}" + (f" {item['reason']['code']}" if item.get("reason") else "") for item in sorted(ledger["operations"], key=lambda value: (value["acceptedAtRevision"], value["operationId"]))]
         return {"issues.json": self._json(issues_view), "page-element-judgement.json": self._json(judgement), "run-diagnostics.json": self._json(diagnostics), "audit-summary.md": ("\n".join(summary)).encode("utf-8"), "run-diagnostics.md": ("\n".join(diagnostics_md)).encode("utf-8"), "audit.log": ("\n".join(log_lines) + "\n").encode("utf-8")}

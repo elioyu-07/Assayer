@@ -17,38 +17,60 @@
     "status": "completed",
     "auditMode": "runtime_only",
     "entryUrl": "https://test.example.com/orders",
-    "allowedOrigins": ["https://test.example.com"],
+    "allowedOrigins": [
+      "https://test.example.com"
+    ],
     "startedAt": "2026-08-30T09:00:00Z",
     "endedAt": "2026-08-30T10:00:00Z",
     "loginStatus": "succeeded",
-    "ruleRegistryDigest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "ruleRegistryDigest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
     "frozenRules": [
-      { "ruleId": "FUA-10", "version": "1.0.0" }
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      }
     ],
-    "capabilities": ["runtime", "dom", "interaction", "visual"],
+    "capabilities": [
+      "runtime",
+      "dom",
+      "interaction",
+      "visual"
+    ],
     "coverageProof": {
-      "visitedPageStateRefs": ["page-001"],
-      "processedObjectRefs": ["obj-001"],
+      "visitedPageStateRefs": [
+        "page-001"
+      ],
+      "processedObjectRefs": [
+        "obj-001"
+      ],
       "processedEntrypointRefs": [],
       "skippedEntrypoints": [],
       "ruleSummaries": [
         {
-          "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+          "rule": {
+            "ruleId": "FUA-10",
+            "version": "1.0.0"
+          },
           "assessmentCount": 1,
-          "resultCounts": { "scanned_no_issue": 1 },
+          "resultCounts": {
+            "scanned_no_issue": 1
+          },
           "coverageComplete": true
         }
       ],
       "unprocessedEntrypointRefs": [],
       "completionReason": "入口页面中的列表筛选区已完成规则覆盖。"
     },
-    "terminalReason": { "code": "COVERAGE_COMPLETE", "message": "覆盖证明通过。" },
+    "terminalReason": {
+      "code": "COVERAGE_COMPLETE",
+      "message": "覆盖证明通过。"
+    },
     "conclusionsValid": true
   },
   "ruleRegistry": {
     "registryId": "registry-001",
     "registryVersion": "1.0.0",
-    "digest": "c0dbc5404f87e7ca3d24bc8a67b91a2d01182d853c1977da7ebfb2f4da94aa78",
+    "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
     "createdAt": "2026-08-30T08:00:00Z",
     "rules": [
       {
@@ -58,20 +80,72 @@
         "name": "列表筛选必须同时提供查询和重置",
         "owner": "product-owner",
         "document": "rules/FUA-10.md",
-        "objectKinds": ["filter_region"],
-        "requiredCapabilities": ["runtime", "dom", "interaction"],
+        "objectKinds": [
+          "filter_region"
+        ],
+        "requiredCapabilities": [
+          "runtime",
+          "dom",
+          "interaction"
+        ],
         "capabilityMissingOutcome": "needs_review",
         "coverageContract": "rules/FUA-10.md#最低覆盖契约",
-        "coverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
+        "coverageDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "decisionGates": {
+          "scanned_no_issue": {
+            "allRequiredStatuses": [
+              "satisfied"
+            ]
+          },
+          "issue_found": {
+            "anyStatusMinimum": {
+              "statuses": [
+                "violated"
+              ],
+              "minimum": 1
+            }
+          },
+          "needs_review": {
+            "anyStatusMinimum": {
+              "statuses": [
+                "unresolved",
+                "blocked",
+                "conflicted"
+              ],
+              "minimum": 1
+            }
+          },
+          "not_applicable": {
+            "minimumFindings": 1
+          },
+          "noise": {
+            "minimumFindings": 1
+          }
+        },
         "directConfirmationConditions": [],
         "defaultSeverity": "P2",
-        "allowedSeverities": ["P1", "P2", "P3"],
+        "allowedSeverities": [
+          "P1",
+          "P2",
+          "P3"
+        ],
         "regressionSuite": "rules/FUA-10.md#样本与回归",
         "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
         "examples": {
-          "positive": ["筛选条件、查询和重置均存在"],
-          "negative": ["筛选条件和查询存在，但没有重置"],
-          "regression": ["对象身份歧义时必须 needs_review"]
+          "positive": [
+            "筛选条件、查询和重置均存在"
+          ],
+          "negative": [
+            "筛选条件和查询存在，但没有重置"
+          ],
+          "regression": [
+            "对象身份歧义时必须 needs_review"
+          ]
         }
       }
     ]
@@ -93,7 +167,9 @@
         "materialDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "safeEntrypoints": [],
-      "objectRefs": ["obj-001"]
+      "objectRefs": [
+        "obj-001"
+      ]
     }
   ],
   "entrypoints": [],
@@ -115,13 +191,25 @@
       "rebindStatus": "matched",
       "lastVerifiedAtRevision": 6,
       "location": {
-        "boundingBox": { "x": 20, "y": 80, "width": 640, "height": 120 },
+        "boundingBox": {
+          "x": 20,
+          "y": 80,
+          "width": 640,
+          "height": 120
+        },
         "visible": true,
         "viewportWidth": 1280,
         "viewportHeight": 800
       },
-      "potentialRules": [{ "ruleId": "FUA-10", "version": "1.0.0" }],
-      "assessmentRefs": ["assessment-001"],
+      "potentialRules": [
+        {
+          "ruleId": "FUA-10",
+          "version": "1.0.0"
+        }
+      ],
+      "assessmentRefs": [
+        "assessment-001"
+      ],
       "observedAt": "2026-08-30T09:02:00Z"
     }
   ],
@@ -154,7 +242,9 @@
       "acceptedAt": "2026-08-30T09:04:10Z",
       "acceptedAtRevision": 5,
       "endedAt": "2026-08-30T09:04:10Z",
-      "resultEvidenceRefs": ["evidence-001"]
+      "resultEvidenceRefs": [
+        "evidence-001"
+      ]
     },
     {
       "operationId": "operation-003",
@@ -179,20 +269,50 @@
       "preparationOperationRef": "operation-002",
       "commitOperationRef": "operation-003",
       "objectRef": "obj-001",
-      "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
       "applicable": true,
       "result": "scanned_no_issue",
       "coverage": {
-        "requiredDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
-        "coveredDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
+        "requiredDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "attemptedDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "resolvedDimensions": [
+          "filter_present",
+          "query_action",
+          "reset_action",
+          "binding_to_list"
+        ],
+        "unresolvedDimensions": [],
         "complete": true
       },
-      "evidenceRefs": ["evidence-001"],
-      "caseRefs": ["case-001"],
+      "evidenceRefs": [
+        "evidence-001"
+      ],
+      "caseRefs": [
+        "case-001"
+      ],
       "reasonText": "筛选区同时存在查询和重置能力。",
       "conclusionValidity": "valid",
       "decidedAt": "2026-08-30T09:05:00Z",
-      "committedAtRevision": 7
+      "committedAtRevision": 7,
+      "findingRefs": [
+        "finding-minimal-0",
+        "finding-minimal-1",
+        "finding-minimal-2",
+        "finding-minimal-3"
+      ]
     }
   ],
   "cases": [
@@ -200,21 +320,35 @@
       "caseId": "case-001",
       "scanId": "scan-001",
       "objectRef": "obj-001",
-      "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
       "kind": "observation",
       "purpose": "观察筛选区的查询和重置入口。",
       "status": "completed",
       "beginRevision": 3,
       "plannedAt": "2026-08-30T09:03:00Z",
-      "plannedCoverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
+      "plannedCoverageDimensions": [
+        "filter_present",
+        "query_action",
+        "reset_action",
+        "binding_to_list"
+      ],
       "startedAt": "2026-08-30T09:03:30Z",
       "endedAt": "2026-08-30T09:04:00Z",
-      "operationRefs": ["operation-001", "operation-002", "operation-003"],
+      "operationRefs": [
+        "operation-001",
+        "operation-002",
+        "operation-003"
+      ],
       "preparationOperationRef": "operation-002",
       "actions": [],
       "beforePageStateRef": "page-001",
       "afterPageStateRef": "page-001",
-      "evidenceRefs": ["evidence-001"],
+      "evidenceRefs": [
+        "evidence-001"
+      ],
       "recovery": {
         "policy": "targeted_then_refresh",
         "baselinePageStateRef": "page-001",
@@ -224,8 +358,16 @@
             "method": "targeted_inverse",
             "outcome": "restored",
             "checks": [
-              { "dimension": "object_identity", "outcome": "match" },
-              { "dimension": "pending_requests", "outcome": "match", "expected": 0, "observed": 0 }
+              {
+                "dimension": "object_identity",
+                "outcome": "match"
+              },
+              {
+                "dimension": "pending_requests",
+                "outcome": "match",
+                "expected": 0,
+                "observed": 0
+              }
             ]
           }
         ]
@@ -249,11 +391,100 @@
       "sanitized": true,
       "payload": {
         "payloadType": "dom_fragment",
-        "content": { "hasQuery": true, "hasReset": true }
+        "content": {
+          "hasQuery": true,
+          "hasReset": true
+        }
       }
     }
   ],
   "screenshots": [],
   "issues": [],
-  "diagnostics": []
+  "diagnostics": [],
+  "dimensionFindings": [
+    {
+      "findingId": "finding-minimal-0",
+      "scanId": "scan-001",
+      "recordOperationRef": "operation-002",
+      "objectRef": "obj-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "dimension": "filter_present",
+      "status": "satisfied",
+      "reasonText": "证据支持该覆盖维度。",
+      "evidenceRefs": [
+        "evidence-001"
+      ],
+      "caseRefs": [
+        "case-001"
+      ],
+      "createdAt": "2026-08-30T10:00:00Z",
+      "createdAtRevision": 5
+    },
+    {
+      "findingId": "finding-minimal-1",
+      "scanId": "scan-001",
+      "recordOperationRef": "operation-002",
+      "objectRef": "obj-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "dimension": "query_action",
+      "status": "satisfied",
+      "reasonText": "证据支持该覆盖维度。",
+      "evidenceRefs": [
+        "evidence-001"
+      ],
+      "caseRefs": [
+        "case-001"
+      ],
+      "createdAt": "2026-08-30T10:00:00Z",
+      "createdAtRevision": 5
+    },
+    {
+      "findingId": "finding-minimal-2",
+      "scanId": "scan-001",
+      "recordOperationRef": "operation-002",
+      "objectRef": "obj-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "dimension": "reset_action",
+      "status": "satisfied",
+      "reasonText": "证据支持该覆盖维度。",
+      "evidenceRefs": [
+        "evidence-001"
+      ],
+      "caseRefs": [
+        "case-001"
+      ],
+      "createdAt": "2026-08-30T10:00:00Z",
+      "createdAtRevision": 5
+    },
+    {
+      "findingId": "finding-minimal-3",
+      "scanId": "scan-001",
+      "recordOperationRef": "operation-002",
+      "objectRef": "obj-001",
+      "rule": {
+        "ruleId": "FUA-10",
+        "version": "1.0.0"
+      },
+      "dimension": "binding_to_list",
+      "status": "satisfied",
+      "reasonText": "证据支持该覆盖维度。",
+      "evidenceRefs": [
+        "evidence-001"
+      ],
+      "caseRefs": [
+        "case-001"
+      ],
+      "createdAt": "2026-08-30T10:00:00Z",
+      "createdAtRevision": 5
+    }
+  ]
 }
