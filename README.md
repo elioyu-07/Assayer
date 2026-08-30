@@ -22,7 +22,8 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 10. [设计验收与追溯](docs/verification-and-traceability.md)
 11. [工具级协议契约](docs/tool-contracts.md)
 12. [垂直切片 001](docs/implementation-slice-001.md)
-13. [数据 Schema](schemas/README.md)
+13. [垂直切片 002](docs/implementation-slice-002.md)
+14. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 
