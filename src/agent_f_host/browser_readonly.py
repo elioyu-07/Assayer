@@ -153,6 +153,8 @@ class BrowserLocatorRegistry:
 
 READONLY_PROBE_V1 = """() => {
   const clean = (value, limit = 240) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
+  const hashRoute = location.hash.startsWith('#/') ? location.hash.slice(1).split('?')[0] : '';
+  const safeRoute = hashRoute || location.pathname;
   const visible = (element) => {
     const style = getComputedStyle(element);
     const box = element.getBoundingClientRect();
@@ -164,7 +166,7 @@ READONLY_PROBE_V1 = """() => {
     const box = element.getBoundingClientRect();
     const role = clean(element.getAttribute('role') || (element.tagName === 'FORM' ? 'form' : 'region'), 64);
     const label = clean(element.getAttribute('aria-label') || element.querySelector('legend')?.textContent || element.textContent, 200);
-    const material = ['filter_region', role, label, location.pathname, index].join('|');
+    const material = ['filter_region', role, label, safeRoute, index].join('|');
     return {
       kind: 'filter_region', label: label || `filter-region-${index}`, role,
       locator_material: material, host_locator_id: `locator-browser-${index}`,
@@ -177,7 +179,7 @@ READONLY_PROBE_V1 = """() => {
     kind: 'safe_action', label: item.label, intent: 'inspect_filter_region', status: 'unprocessed'
   }));
   return {
-    visibleText: clean(document.body?.innerText, 100000), route: location.pathname + location.search,
+    visibleText: clean(document.body?.innerText, 100000), route: safeRoute,
     stateKind: document.querySelector('[role="dialog"]') ? 'dialog' : 'page', entrypoints, candidates,
     networkSummary: {status: 'unavailable_until_B05'}
   };

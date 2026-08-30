@@ -163,6 +163,10 @@ class LoginAdapter(Protocol):
     def authenticate(self, url: str, secret: LoginSecret) -> LoginResult: ...
 
 
+class AnonymousLoginAdapter(Protocol):
+    def authenticate_anonymous(self, url: str) -> LoginResult: ...
+
+
 @dataclass(frozen=True)
 class LoginOutcome:
     status: str
@@ -204,14 +208,38 @@ class LoginCoordinator:
         phases.append("credential_cleared" if cleared else "credential_clear_failed")
         return LoginOutcome("succeeded" if result else "failed", result, error_code, reason, tuple(phases), cleared)
 
+    def authenticate_anonymous(self, url: str, adapter: AnonymousLoginAdapter) -> LoginOutcome:
+        """Validate public-page bootstrap without inventing credential material."""
+        phases = ["anonymous_access", "authenticating"]
+        result = None
+        error_code = None
+        reason = None
+        try:
+            candidate = adapter.authenticate_anonymous(url)
+            error_code, reason = self._validate_result(candidate, None)
+            if error_code is None:
+                result = candidate
+                phases.append("succeeded")
+            else:
+                phases.append("failed")
+        except Exception:
+            error_code, reason = "INTERNAL_FAILURE", "匿名页面适配器执行失败"
+            phases.append("failed")
+        return LoginOutcome("succeeded" if result else "failed", result, error_code, reason,
+                            tuple(phases), True)
+
     @staticmethod
-    def _validate_result(result: object, secret: LoginSecret) -> tuple[str | None, str | None]:
+    def _validate_result(result: object, secret: LoginSecret | None) -> tuple[str | None, str | None]:
         if not isinstance(result, LoginResult) or result.status not in {"succeeded", "failed"}:
             return "INTERNAL_FAILURE", "登录适配器返回无效状态"
         if result.status == "failed":
             if result.current_page_state_id is not None or result.capabilities:
                 return "INTERNAL_FAILURE", "失败的登录结果包含页面事实"
-            return "LOGIN_FAILED", secret.redact(result.reason) or "登录失败"
+            if secret is not None:
+                reason = secret.redact(result.reason)
+            else:
+                reason = LoginCoordinator._sanitize_anonymous_reason(result.reason)
+            return "LOGIN_FAILED", reason or "匿名页面访问失败"
         if not isinstance(result.current_page_state_id, str) or not result.current_page_state_id:
             return "INTERNAL_FAILURE", "成功的登录结果缺少页面状态"
         capabilities = result.capabilities
@@ -220,12 +248,22 @@ class LoginCoordinator:
             return "INTERNAL_FAILURE", "成功的登录结果包含无效能力集合"
         return None, None
 
+    @staticmethod
+    def _sanitize_anonymous_reason(value: object) -> str:
+        if not isinstance(value, str):
+            return "匿名页面访问失败"
+        value = re.sub(r"(?i)(password|passwd|token|secret)=([^&\s]+)", r"\1=[REDACTED]", value)
+        return " ".join(value.split())[:512] or "匿名页面访问失败"
+
 
 class UnavailableLoginAdapter:
     """Default adapter; prevents accidental success before browser integration."""
 
     def authenticate(self, url: str, secret: LoginSecret) -> LoginResult:
         return LoginResult("failed", "浏览器登录适配器未配置")
+
+    def authenticate_anonymous(self, url: str) -> LoginResult:
+        return LoginResult("failed", "匿名页面适配器未配置")
 
 
 class DeterministicLoginAdapter:
@@ -236,6 +274,12 @@ class DeterministicLoginAdapter:
         self.reason = reason
 
     def authenticate(self, url: str, secret: LoginSecret) -> LoginResult:
+        return self._result()
+
+    def authenticate_anonymous(self, url: str) -> LoginResult:
+        return self._result()
+
+    def _result(self) -> LoginResult:
         if self.succeed:
             return LoginResult("succeeded", current_page_state_id="page-bootstrap-001", capabilities=("runtime", "dom", "interaction"))
         return LoginResult("failed", reason=self.reason)

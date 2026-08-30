@@ -172,11 +172,14 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
   "ruleRegistryVersion": "1.0.0",
   "outputDir": "/workspace/output",
   "browserProfile": "chromium-default",
+  "authMode": "credential",
   "credentialHandle": "cred-once-uuid"
 }
 ```
 
 `credentialHandle` 由 Host 本地安全输入通道生成，只能消费一次；它不是凭据值，且不得进入 Agent 长期上下文、日志或账本。具体边界见 [动作安全与凭据](action-safety-and-credentials.md)。
+
+公开、无需登录的测试页面使用 `authMode=anonymous`，此时不得携带 `credentialHandle`。省略 `authMode` 时保持兼容，按 `credential` 处理。
 
 成功结果至少包含：
 

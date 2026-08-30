@@ -17,3 +17,4 @@ mcp = ["mcp>=1.0,<2"]
 agent-f-harness = "agent_f_host.harness:main"
 agent-f-json = "agent_f_host.transport:main"
 agent-f-mcp = "agent_f_host.transport:mcp_main"
+agent-f = "agent_f_host.cli:main"

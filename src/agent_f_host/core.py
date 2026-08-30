@@ -7,6 +7,7 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, RefResolver
@@ -40,7 +41,8 @@ class HostCore:
                  action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None,
                  recovery_adapter: RecoveryAdapter | None = None, evidence_adapter: EvidenceAdapter | None = None,
                  evidence_sanitizer: EvidenceSanitizer | None = None, report_builder: DerivedReportBuilder | None = None,
-                 login_coordinator: LoginCoordinator | None = None):
+                 login_coordinator: LoginCoordinator | None = None,
+                 scan_id_factory: Callable[[], str] | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -77,6 +79,7 @@ class HostCore:
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
         self._login_coordinator = login_coordinator or LoginCoordinator()
+        self._scan_id_factory = scan_id_factory or (lambda: self._new_id("scan"))
         self._page_adapter = page_adapter or UnavailablePageAdapter()
         self._object_identity_adapter = object_identity_adapter or UnavailableObjectIdentityAdapter()
         self._action_adapter = action_adapter or UnavailableActionAdapter()
@@ -193,7 +196,7 @@ class HostCore:
                 scan = self._scan_from_row(self._store.get_scan(existing["scan_id"]))
                 return self._operation_response(request, scan, existing)
             scan = {
-                "scanId": self._new_id("scan"), "runId": self._new_id("run"), "runRevision": 0,
+                "scanId": self._scan_id_factory(), "runId": self._new_id("run"), "runRevision": 0,
                 "status": "authenticating", "loginStatus": "pending", "createdAt": self._now(),
                 "ruleRegistryDigest": self._rule_registry_digest, "currentPageStateId": None, "capabilitiesJson": "[]",
                 "outputDir": request["input"]["outputDir"], "entryUrl": request["input"]["url"],
@@ -203,10 +206,14 @@ class HostCore:
             self._store.insert_operation(operation)
             self._store.insert_bootstrap_key(request["idempotencyKey"], operation["operationId"], digest)
 
-        secret = self._credential_vault.consume(request["input"]["credentialHandle"])
-        if secret is None:
-            return self._finish_bootstrap_failure(request, scan, operation, "CREDENTIAL_CHANNEL_FAILED", "凭据句柄不存在、已过期或已消费")
-        outcome = self._login_coordinator.authenticate(request["input"]["url"], secret, self._login_adapter)
+        auth_mode = request["input"].get("authMode", "credential")
+        if auth_mode == "anonymous":
+            outcome = self._login_coordinator.authenticate_anonymous(request["input"]["url"], self._login_adapter)
+        else:
+            secret = self._credential_vault.consume(request["input"].get("credentialHandle", ""))
+            if secret is None:
+                return self._finish_bootstrap_failure(request, scan, operation, "CREDENTIAL_CHANNEL_FAILED", "凭据句柄不存在、已过期或已消费")
+            outcome = self._login_coordinator.authenticate(request["input"]["url"], secret, self._login_adapter)
         if outcome.status != "succeeded":
             return self._finish_bootstrap_failure(request, scan, operation, outcome.error_code or "LOGIN_FAILED", outcome.reason or "登录失败")
         login = outcome.result

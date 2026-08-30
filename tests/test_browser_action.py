@@ -26,6 +26,25 @@ class FakeContext:
     def route(self, pattern, handler): self.routes.append((pattern, handler))
 
 
+class FakeWebSocketRoute:
+    url = "wss://test.example.com/hmr"
+
+    def close(self):
+        raise AssertionError("synchronous WebSocket close must not be called from the route callback")
+
+    def connect_to_server(self):
+        raise AssertionError("blocked WebSocket must not connect to its server")
+
+
+class WebSocketContext(FakeContext):
+    def __init__(self):
+        super().__init__()
+        self.web_socket_routes = []
+
+    def route_web_socket(self, pattern, handler):
+        self.web_socket_routes.append((pattern, handler))
+
+
 class FakeLocator:
     def __init__(self, page):
         self.page = page
@@ -166,6 +185,18 @@ class BrowserNetworkGuardTest(unittest.TestCase):
             self.assertEqual(guard.drain_requests()[0].method, "GET")
             self.assertTrue(guard.drain_requests()[0].attributable)
         session.close()
+
+    def test_websocket_route_blocks_without_sync_close_or_server_connect(self):
+        context = WebSocketContext()
+        guard = BrowserNetworkGuard("https://test.example.com")
+        guard.install(context)
+        self.assertEqual(len(context.web_socket_routes), 1)
+        context.web_socket_routes[0][1](FakeWebSocketRoute())
+        request = guard.drain_requests()[0]
+        decision = guard.drain_decisions()[0]
+        self.assertEqual(request.transport, "websocket")
+        self.assertEqual(decision.outcome, "blocked")
+        self.assertEqual(guard.summary()["blockedRequests"], 1)
 
     def test_post_cross_origin_and_websocket_are_aborted_before_send(self):
         session, context, guard = self.make()

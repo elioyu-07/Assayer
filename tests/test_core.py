@@ -136,6 +136,28 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(second["status"], "failed")
         self.assertEqual(second["error"]["code"], "CREDENTIAL_CHANNEL_FAILED")
 
+    def test_anonymous_bootstrap_requires_no_credential_handle(self):
+        core = HostCore(login_adapter=DeterministicLoginAdapter(), page_adapter=DeterministicPageAdapter(),
+                        object_identity_adapter=DeterministicObjectIdentityAdapter())
+        self.cores.append(core)
+        request = {"protocolVersion":"1.0","requestId":"anonymous-start","agentTurnId":"turn-anonymous",
+                   "tool":"start_audit","idempotencyKey":"anonymous-start",
+                   "input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out",
+                            "browserProfile":"default","authMode":"anonymous"}}
+        result = core.handle(request)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["loginStatus"], "succeeded")
+
+    def test_anonymous_bootstrap_rejects_credential_handle(self):
+        core = self.make_core()
+        request = {"protocolVersion":"1.0","requestId":"anonymous-secret","agentTurnId":"turn-anonymous",
+                   "tool":"start_audit","idempotencyKey":"anonymous-secret",
+                   "input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out",
+                            "browserProfile":"default","authMode":"anonymous","credentialHandle":"cred-001"}}
+        with self.assertRaises(HostError) as caught:
+            core.handle(request)
+        self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
     def test_bootstrap_clears_consumed_secret_after_success(self):
         vault = CredentialVault()
         secret = LoginSecret("test-user", "secret")

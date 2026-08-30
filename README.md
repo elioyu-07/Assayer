@@ -1,6 +1,6 @@
 # agent-f
 
-agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质量审计垂直智能体。项目当前已完成**第十一条 Host Core 垂直切片**和全部 14 项设计/核心/Harness 任务；真实浏览器适配器仍未接入。
+agent-f 是面向测试/预发布 Web 站点的前端质量审计垂直智能体。Host Core、真实 Chromium 适配器、JSON/MCP 传输和“给 URL 即运行”的入口已经贯通，不依赖 Codex 桌面客户端的内置浏览器连接。
 
 ## 当前状态
 
@@ -9,7 +9,13 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 - 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
 - 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
 - Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定首个 `filter_region`；
-- 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09 已完成；B07c 自动敏感区域识别与像素脱敏暂缓。
+- 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09、B10 已完成；B07c 自动敏感区域识别与像素脱敏暂缓。
+
+公开页面可直接执行真实只读试跑：
+
+```bash
+agent-f audit 'http://localhost:8081/#/lease-mock' --output-dir ./agent-f-output
+```
 
 真实浏览器路径可以在受控测试数据环境生成对象级 PNG Raw Visual，并明确记录 `sanitizationStatus=not_performed`；它不能伪装成已脱敏图片，仍禁止据此提交正式 `issue_found`。自动敏感区域识别与像素脱敏属于后续 B07c。确定性 Harness 中的截图只用于契约与回归测试。
 
@@ -24,14 +30,14 @@ PYTHONPATH=src python3 -m agent_f_host --output-dir ./audit-output
 通用 JSON CLI 使用 JSON Lines（每行一个完整协议封套）：
 
 ```bash
-agent-f-json --stdio < requests.jsonl
+agent-f-json --url 'http://localhost:8081/#/lease-mock' --stdio < requests.jsonl
 ```
 
 MCP 通过可选依赖提供本地 stdio Server：
 
 ```bash
 pip install 'agent-f-host[mcp]'
-agent-f-mcp
+agent-f-mcp --url 'http://localhost:8081/#/lease-mock'
 ```
 
 需要同时验证问题、Raw Visual 和独立问题截图链路时：
@@ -73,7 +79,11 @@ PYTHONPATH=src python3 -m agent_f_host --output-dir ./audit-issue-output --resul
 27. [垂直切片 015](docs/implementation-slice-015.md)
 28. [垂直切片 016](docs/implementation-slice-016.md)
 29. [垂直切片 017](docs/implementation-slice-017.md)
-30. [数据 Schema](schemas/README.md)
+30. [垂直切片 018](docs/implementation-slice-018.md)
+31. [垂直切片 019](docs/implementation-slice-019.md)
+32. [垂直切片 020](docs/implementation-slice-020.md)
+33. [垂直切片 021](docs/implementation-slice-021.md)
+34. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 

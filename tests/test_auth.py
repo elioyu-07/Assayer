@@ -32,6 +32,19 @@ class ExplodingAuthAdapter:
         raise RuntimeError("password leaked in exception text")
 
 
+class AnonymousAdapter:
+    def __init__(self, result=None):
+        self.result = result or LoginResult(
+            "succeeded", current_page_state_id="page-anonymous-001",
+            capabilities=("runtime", "dom"),
+        )
+        self.calls = 0
+
+    def authenticate_anonymous(self, url):
+        self.calls += 1
+        return self.result
+
+
 class AuthenticationBoundaryTest(unittest.TestCase):
     def test_secret_repr_never_contains_values_and_clear_is_terminal(self):
         secret = LoginSecret("alice@example.com", "correct-horse")
@@ -108,6 +121,20 @@ class AuthenticationBoundaryTest(unittest.TestCase):
         self.assertEqual(adapter.observed, ("https://test.example.com", "alice", "password"))
         self.assertTrue(outcome.secret_cleared)
         self.assertTrue(adapter.secret_ref.is_cleared)
+
+    def test_anonymous_access_has_no_credential_phase_or_secret(self):
+        adapter = AnonymousAdapter()
+        outcome = LoginCoordinator().authenticate_anonymous("https://test.example.com", adapter)
+        self.assertEqual(outcome.status, "succeeded")
+        self.assertEqual(outcome.phases, ("anonymous_access", "authenticating", "succeeded"))
+        self.assertTrue(outcome.secret_cleared)
+        self.assertEqual(adapter.calls, 1)
+
+    def test_anonymous_failure_redacts_credential_assignments(self):
+        adapter = AnonymousAdapter(LoginResult("failed", reason="token=abc page unavailable"))
+        outcome = LoginCoordinator().authenticate_anonymous("https://test.example.com", adapter)
+        self.assertEqual(outcome.error_code, "LOGIN_FAILED")
+        self.assertNotIn("token=abc", outcome.reason)
 
     def test_failed_login_redacts_secret_values_and_clears(self):
         adapter = ReadingLoginAdapter(LoginResult("failed", reason="alice password=password token=abc"))

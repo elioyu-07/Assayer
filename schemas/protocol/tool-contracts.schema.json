@@ -28,8 +28,13 @@
     },
     "startAuditInput": {
       "type": "object", "additionalProperties": false,
-      "required": ["url", "ruleRegistryVersion", "outputDir", "browserProfile", "credentialHandle"],
-      "properties": { "url": { "type": "string", "format": "uri", "pattern": "^https?://" }, "sourcePath": { "type": "string", "minLength": 1 }, "ruleRegistryVersion": { "$ref": "../common.schema.json#/$defs/semanticVersion" }, "outputDir": { "type": "string", "minLength": 1 }, "browserProfile": { "type": "string", "minLength": 1 }, "credentialHandle": { "$ref": "#/$defs/id" } }
+      "required": ["url", "ruleRegistryVersion", "outputDir", "browserProfile"],
+      "properties": { "url": { "type": "string", "format": "uri", "pattern": "^https?://" }, "sourcePath": { "type": "string", "minLength": 1 }, "ruleRegistryVersion": { "$ref": "../common.schema.json#/$defs/semanticVersion" }, "outputDir": { "type": "string", "minLength": 1 }, "browserProfile": { "type": "string", "minLength": 1 }, "authMode": { "enum": ["credential", "anonymous"] }, "credentialHandle": { "$ref": "#/$defs/id" } },
+      "allOf": [
+        { "if": { "properties": { "authMode": { "const": "anonymous" } }, "required": ["authMode"] },
+          "then": { "not": { "required": ["credentialHandle"] } },
+          "else": { "required": ["credentialHandle"] } }
+      ]
     },
     "startAuditOutput": {
       "type": "object", "unevaluatedProperties": false,

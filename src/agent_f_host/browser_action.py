@@ -134,9 +134,11 @@ class BrowserNetworkGuard:
         with self._lock:
             self._requests.append(network)
             self._decisions.append(decision)
-        close = getattr(route, "close", None)
-        if callable(close):
-            close()
+        # Deliberately do not call ``close()`` from this synchronous Playwright
+        # callback: that waits on the same dispatcher and can deadlock page
+        # navigation.  Returning without ``connect_to_server()`` makes
+        # Playwright expose a local mock socket; page messages are discarded
+        # and no server handshake or frame is sent.
 
     def _network_request(self, request: object) -> NetworkRequest:
         headers = getattr(request, "headers", {}) or {}

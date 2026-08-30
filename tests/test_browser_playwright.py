@@ -7,8 +7,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from agent_f_host import (BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
-                          HostCore, LoginResult, LoginSecret,
+from agent_f_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
+                          HostCore, HostError, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
                           create_recoverable_browser_adapter_bundle)
 
@@ -18,6 +18,13 @@ PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
 <label>Order number <input name='order-number'></label>
 <button type='button'>Query</button><button type='reset'>Reset</button>
 </form></main></body></html>"""
+
+WEBSOCKET_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>WebSocket Orders</title></head>
+<body><main><form role='search' aria-label='Order filters'><button type='button'>Query</button></form></main>
+<script>window.auditSocket = new WebSocket(`ws://${location.host}/hmr`);</script></body></html>"""
+
+HASH_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Hash Orders</title></head>
+<body><main><form role='search' aria-label='Hash filters'><button type='button'>Query</button></form></main></body></html>"""
 
 
 def action_page(path):
@@ -43,6 +50,7 @@ class SiteHandler(BaseHTTPRequestHandler):
     get_actions = 0
     post_actions = 0
     cross_actions = 0
+    websocket_handshakes = 0
     server_port = 0
 
     def do_GET(self):
@@ -58,6 +66,13 @@ class SiteHandler(BaseHTTPRequestHandler):
         elif self.path == "/action-cross":
             type(self).cross_actions += 1
             body = b"cross"
+        elif self.path == "/websocket-page":
+            body = WEBSOCKET_PAGE
+        elif self.path == "/hash-app":
+            body = HASH_PAGE
+        elif self.path == "/hmr":
+            type(self).websocket_handshakes += 1
+            body = b"websocket must be intercepted"
         else:
             body = PAGE
         self.send_response(200)
@@ -188,6 +203,74 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     core.close()
         finally:
             session.close()
+
+    def test_real_url_runtime_assembles_anonymous_browser_core(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(f"{origin}/orders", output)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            try:
+                invalid = {
+                    "protocolVersion": "1.0", "requestId": "runtime-invalid", "agentTurnId": "runtime-invalid",
+                    "tool": "start_audit", "idempotencyKey": "runtime-invalid",
+                    "input": {"url": f"{origin}/orders", "ruleRegistryVersion": "1.0.0", "outputDir": output,
+                              "browserProfile": "default", "authMode": "credential", "credentialHandle": "credential-invalid"},
+                }
+                with self.assertRaises(HostError) as caught:
+                    runtime.handle(invalid)
+                self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+                result = runtime.probe(f"{origin}/orders")
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["result"]["route"], "/orders")
+                self.assertEqual(len(result["result"]["candidateRefs"]), 1)
+                self.assertEqual(result["result"]["objectVerification"]["rebindStatus"], "matched")
+                screenshot = runtime.core._store.get_screenshot(result["result"]["evidence"]["screenshotRef"])
+                self.assertEqual(screenshot["status"], "captured")
+                self.assertEqual(screenshot["sanitizationStatus"], "not_performed")
+                self.assertEqual(runtime.session.scan_id, result["result"]["scanId"])
+            finally:
+                runtime.close()
+            self.assertEqual(runtime.session.state, "closed")
+
+    def test_real_url_runtime_blocks_websocket_without_navigation_deadlock(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        SiteHandler.websocket_handshakes = 0
+        profile = BrowserProfile(navigation_timeout_ms=3_000, operation_timeout_ms=3_000)
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(f"{origin}/websocket-page", output, profile=profile)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            started_at = time.monotonic()
+            try:
+                result = runtime.probe(f"{origin}/websocket-page")
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["result"]["route"], "/websocket-page")
+                self.assertLess(time.monotonic() - started_at, 3.0)
+                self.assertEqual(SiteHandler.websocket_handshakes, 0)
+                self.assertGreaterEqual(runtime.bundle.network_guard.summary()["blockedRequests"], 1)
+            finally:
+                runtime.close()
+
+    def test_real_url_runtime_reports_hash_route_without_hash_query(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        url = f"{origin}/hash-app#/lease-mock?token=secret"
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(url, output)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            try:
+                result = runtime.probe(url)
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["result"]["route"], "/lease-mock")
+                stored = runtime.core._store.get_page_state(result["result"]["pageStateId"])
+                self.assertNotIn("token", json.dumps(stored))
+                self.assertNotIn("secret", json.dumps(stored))
+            finally:
+                runtime.close()
 
     def test_real_chromium_navigation_timeout_invalidates_session(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"

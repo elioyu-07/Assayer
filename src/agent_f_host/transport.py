@@ -128,8 +128,13 @@ def create_mcp_server(core: HostCore):
     return server
 
 
-def mcp_main() -> int:
-    core = HostCore()
+def mcp_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="agent-f real-browser MCP stdio server")
+    parser.add_argument("--url", required=True, help="本次 Host 允许访问的真实 URL")
+    parser.add_argument("--output-dir", default="./agent-f-output")
+    args = parser.parse_args(argv)
+    from .browser_runtime import BrowserHostRuntime
+    core = BrowserHostRuntime(args.url, args.output_dir)
     try:
         create_mcp_server(core).run(transport="stdio")
     finally:
@@ -140,10 +145,16 @@ def mcp_main() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="agent-f JSON-lines Host transport")
     parser.add_argument("--stdio", action="store_true", help="从 stdin 读取 JSON 请求并向 stdout 输出响应")
+    parser.add_argument("--url", help="可选：组装此 URL 的真实 Chromium Host")
+    parser.add_argument("--output-dir", default="./agent-f-output")
     args = parser.parse_args(argv)
     if not args.stdio:
         parser.error("必须指定 --stdio")
-    core = HostCore()
+    if args.url:
+        from .browser_runtime import BrowserHostRuntime
+        core = BrowserHostRuntime(args.url, args.output_dir)
+    else:
+        core = HostCore()
     try:
         JsonLineTransport(core).serve()
     finally:
