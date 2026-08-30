@@ -9,6 +9,7 @@ from .browser_action import BrowserNetworkGuard, BrowserSafeActionAdapter
 from .browser_readonly import (BrowserLocatorRegistry, BrowserObjectIdentityAdapter,
                                BrowserReadOnlyPageAdapter, ReadonlyBrowserPage)
 from .browser_session import BrowserSession
+from .browser_evidence import BrowserEvidenceAdapter
 from .object_identity import ObjectVerification
 from .recovery import RECOVERY_DIMENSIONS, RecoveryAttempt, RecoveryCheck
 from dataclasses import dataclass
@@ -230,6 +231,7 @@ class RecoverableBrowserAdapterBundle:
     action: BrowserSafeActionAdapter
     recovery: BrowserRecoveryAdapter
     network_guard: BrowserNetworkGuard
+    evidence: BrowserEvidenceAdapter
 
 
 def create_recoverable_browser_adapter_bundle(
@@ -247,4 +249,5 @@ def create_recoverable_browser_adapter_bundle(
     identity = BrowserObjectIdentityAdapter(session, locator_registry=registry, refresh=page.refresh_locators)
     action = BrowserSafeActionAdapter(session, page, guard, locator_registry=registry)
     recovery = BrowserRecoveryAdapter(session, page, identity, action, guard, policy=policy)
-    return RecoverableBrowserAdapterBundle(page, identity, action, recovery, guard)
+    evidence = BrowserEvidenceAdapter(session, page, identity, network_guard=guard, policy=policy)
+    return RecoverableBrowserAdapterBundle(page, identity, action, recovery, guard, evidence)

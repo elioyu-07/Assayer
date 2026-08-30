@@ -581,14 +581,18 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "UNKNOWN_REFERENCE")
 
     def test_capture_sanitizes_sensitive_payload(self):
-        capture = EvidenceCapture(payload={"password":"secret-value", "headers":{"Authorization":"Bearer abc"}, "text":"token=xyz"})
+        capture = EvidenceCapture(payload={"password":"secret-value", "accessToken":"nested-secret", "headers":{"Authorization":"Bearer abc"}, "text":"token=xyz email test@example.com phone 13812345678 id 123456789012"})
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
         started = bootstrap(core)["result"]
         object_id, _ = self.begin_case(core, started)
         result = self.capture_evidence(core, started, object_id, revision=2)
         payload = core._store.get_evidence(result["result"]["evidenceId"])["payload"]["content"]
         self.assertEqual(payload["password"], "[REDACTED]")
+        self.assertEqual(payload["accessToken"], "[REDACTED]")
         self.assertNotIn("Bearer abc", str(payload))
+        self.assertNotIn("test@example.com", str(payload))
+        self.assertNotIn("13812345678", str(payload))
+        self.assertNotIn("123456789012", str(payload))
 
     def test_capture_evidence_is_idempotent_after_restart(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -626,6 +626,8 @@ class HostCore:
                 raise ValueError("Raw Visual 必须生成 runtime_visual Evidence")
             if not data.get("includeRawVisual", False) and captured.kind == "runtime_visual":
                 raise ValueError("runtime_visual Evidence 必须显式请求 Raw Visual")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
         except ValueError as error:
             return self._finish_operation_failure(request, scan, operation, "SANITIZATION_FAILED", str(error))
         except Exception:

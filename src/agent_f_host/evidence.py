@@ -75,13 +75,18 @@ class EvidenceSanitizer:
             result = {}
             for key, item in value.items():
                 name = str(key)
-                result[name] = "[REDACTED]" if name.lower() in self.SENSITIVE_KEYS else self.sanitize(item)
+                normalized = name.lower().replace("_", "").replace("-", "")
+                sensitive = name.lower() in self.SENSITIVE_KEYS or any(token.replace("-", "") in normalized for token in self.SENSITIVE_KEYS)
+                result[name] = "[REDACTED]" if sensitive else self.sanitize(item)
             return result
         if isinstance(value, (list, tuple)):
             return [self.sanitize(item) for item in value]
         if isinstance(value, str):
             value = re.sub(r"(?i)bearer\s+[a-z0-9._~+/=-]+", "Bearer [REDACTED]", value)
             value = re.sub(r"(?i)(password|passwd|token|secret)=([^&\s]+)", r"\1=[REDACTED]", value)
+            value = re.sub(r"(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b", "[REDACTED_EMAIL]", value)
+            value = re.sub(r"(?<!\d)1[3-9]\d{9}(?!\d)", "[REDACTED_PHONE]", value)
+            value = re.sub(r"(?<!\d)\d{8,19}(?!\d)", "[REDACTED_NUMBER]", value)
             return value
         if value is None or isinstance(value, (bool, int, float)):
             return value

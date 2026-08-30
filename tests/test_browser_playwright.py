@@ -7,7 +7,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from agent_f_host import (BrowserProfile, BrowserSession, CredentialVault,
                           HostCore, LoginResult, LoginSecret,
                           PlaywrightBrowserBackend,
-                          create_readonly_browser_adapters,
                           create_recoverable_browser_adapter_bundle)
 
 
@@ -110,14 +109,15 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 session.open()
             except Exception as error:
                 self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
-            page_adapter, identity_adapter = create_readonly_browser_adapters(session, allowed_origin=origin)
+            bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             vault = CredentialVault()
             vault.put("credential-live", LoginSecret("local-user", "local-password"))
             with tempfile.TemporaryDirectory() as output:
                 core = HostCore(
                     credential_vault=vault,
-                    login_adapter=LocalNavigationLoginAdapter(page_adapter, f"{origin}/orders?ticket=secret"),
-                    page_adapter=page_adapter, object_identity_adapter=identity_adapter,
+                    login_adapter=LocalNavigationLoginAdapter(bundle.page, f"{origin}/orders?ticket=secret"),
+                    page_adapter=bundle.page, object_identity_adapter=bundle.identity,
+                    evidence_adapter=bundle.evidence,
                 )
                 try:
                     started = core.handle({
@@ -144,12 +144,35 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     stored = core._store.get_page_state(started["currentPageStateId"])
                     self.assertEqual(stored["url"], f"{origin}/orders")
                     self.assertNotIn("ticket", json.dumps(stored))
+                    object_id = verified["result"]["objectId"]
+                    evidence = core.handle({
+                        "protocolVersion": "1.0", "requestId": "live-evidence", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-live-4", "tool": "capture_evidence",
+                        "idempotencyKey": "live-evidence", "expectedRunRevision": 1,
+                        "input": {"pageStateId": started["currentPageStateId"], "objectId": object_id,
+                                  "includeRawVisual": False},
+                    })
+                    self.assertEqual(evidence["status"], "ok")
+                    persisted = core._store.get_evidence(evidence["result"]["evidenceId"])
+                    self.assertEqual(persisted["kind"], "runtime_dom")
+                    self.assertNotIn("secret", json.dumps(persisted))
+                    self.assertNotIn("ticket", json.dumps(persisted))
+                    rejected = core.handle({
+                        "protocolVersion": "1.0", "requestId": "live-visual", "scanId": started["scanId"],
+                        "runId": started["runId"], "agentTurnId": "turn-live-5", "tool": "capture_evidence",
+                        "idempotencyKey": "live-visual", "expectedRunRevision": 2,
+                        "input": {"pageStateId": started["currentPageStateId"], "objectId": object_id,
+                                  "includeRawVisual": True},
+                    })
+                    self.assertEqual(rejected["status"], "rejected")
+                    self.assertEqual(rejected["error"]["code"], "SCREENSHOT_ADAPTER_UNAVAILABLE")
+                    self.assertEqual(core._store.list_entities("screenshots", started["scanId"]), [])
                 finally:
                     core.close()
         finally:
             session.close()
 
-    def _run_action(self, page_name, action_type="expand", restore=False, return_case=False):
+    def _run_action(self, page_name, action_type="expand", restore=False, return_case=False, capture=False, return_evidence=False):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         session = BrowserSession(f"scan-{page_name}", BrowserProfile(), backend=PlaywrightBrowserBackend())
         try:
@@ -202,16 +225,28 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                         "input": {"pageStateId": started["currentPageStateId"], "caseId": case["caseId"],
                                   "objectId": object_id, "type": action_type, "intent": "观察筛选区", "parameters": {}},
                     })
+                    persisted_evidence = None
+                    if capture:
+                        result = core.handle({
+                            "protocolVersion": "1.0", "requestId": f"{page_name}-evidence", "scanId": started["scanId"],
+                            "runId": started["runId"], "agentTurnId": "turn-action-6", "tool": "capture_evidence",
+                            "idempotencyKey": f"{page_name}-evidence", "expectedRunRevision": result["runRevision"],
+                            "input": {"pageStateId": started["currentPageStateId"], "objectId": object_id,
+                                      "caseId": case["caseId"], "includeRawVisual": False},
+                        })
+                        persisted_evidence = core._store.get_evidence(result["result"]["evidenceId"])
                     if restore:
                         result = core.handle({
                             "protocolVersion": "1.0", "requestId": f"{page_name}-restore", "scanId": started["scanId"],
                             "runId": started["runId"], "agentTurnId": "turn-action-6", "tool": "restore_case",
-                            "idempotencyKey": f"{page_name}-restore", "expectedRunRevision": 3,
+                            "idempotencyKey": f"{page_name}-restore", "expectedRunRevision": result["runRevision"],
                             "input": {"caseId": case["caseId"], "pageStateId": started["currentPageStateId"],
                                       "objectId": object_id, "fallback": "refresh_and_replay_safe_entrypoints"},
                         })
                     if return_case:
                         return result, core._store.get_case(case["caseId"])
+                    if return_evidence:
+                        return result, persisted_evidence
                     return result
                 finally:
                     core.close()
@@ -260,6 +295,13 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"]["finalStatus"], "restored")
         self.assertEqual([item["method"] for item in case["recovery"]["attempts"]], ["targeted_inverse", "refresh_replay"])
+
+    def test_real_chromium_structured_evidence_binds_case_without_visual(self):
+        result, evidence = self._run_action("action-get", capture=True, return_evidence=True)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(evidence["kind"], "runtime_dom")
+        self.assertTrue(evidence.get("caseRef"))
+        self.assertNotIn("screenshotRefs", evidence)
 
 
 if __name__ == "__main__":
