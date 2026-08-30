@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/protocol/envelope.schema.json",
+  "title": "agent-f Protocol Envelopes",
+  "oneOf": [
+    { "$ref": "#/$defs/bootstrapRequest" },
+    { "$ref": "#/$defs/sessionRequest" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "protocolVersion": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$" },
+    "nonEmpty": { "type": "string", "minLength": 1 },
+    "bootstrapRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "agentTurnId", "tool", "idempotencyKey", "input"],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" }, "requestId": { "$ref": "#/$defs/id" },
+        "agentTurnId": { "$ref": "#/$defs/id" }, "tool": { "const": "start_audit" },
+        "idempotencyKey": { "$ref": "#/$defs/nonEmpty" }, "input": { "type": "object" }
+      }
+    },
+    "sessionRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "scanId", "runId", "agentTurnId", "tool", "idempotencyKey", "expectedRunRevision", "input"],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" }, "requestId": { "$ref": "#/$defs/id" },
+        "scanId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" }, "agentTurnId": { "$ref": "#/$defs/id" },
+        "tool": { "$ref": "#/$defs/nonEmpty" }, "idempotencyKey": { "$ref": "#/$defs/nonEmpty" },
+        "expectedRunRevision": { "type": "integer", "minimum": 0 }, "input": { "type": "object" }
+      }
+    },
+    "response": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "scanId", "runId", "runRevision", "status", "evidenceRefs", "diagnosticRefs"],
+      "properties": {
+        "protocolVersion": { "$ref": "#/$defs/protocolVersion" }, "requestId": { "$ref": "#/$defs/id" },
+        "scanId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" },
+        "runRevision": { "type": "integer", "minimum": 0 }, "status": { "enum": ["ok", "rejected", "failed"] },
+        "result": {}, "error": { "$ref": "#/$defs/error" },
+        "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } },
+        "diagnosticRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/id" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "ok" } }, "required": ["status"] }, "then": { "required": ["result"] } },
+        { "if": { "properties": { "status": { "enum": ["rejected", "failed"] } }, "required": ["status"] }, "then": { "required": ["error"] } }
+      ]
+    },
+    "error": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "message", "retryable", "requiredNextStep"],
+      "properties": { "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" }, "message": { "$ref": "#/$defs/nonEmpty" }, "retryable": { "type": "boolean" }, "requiredNextStep": { "$ref": "#/$defs/nonEmpty" } }
+    }
+  }
+}

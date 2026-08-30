@@ -4,7 +4,7 @@
   "title": "Evidence",
   "type": "object",
   "additionalProperties": false,
-  "required": ["evidenceId", "scanId", "pageStateRef", "objectRef", "kind", "capturedAt", "integrityDigest", "sanitized", "payload"],
+  "required": ["evidenceId", "scanId", "pageStateRef", "objectRef", "kind", "capturedAt", "capturedAtRevision", "collectorVersion", "sanitizationPolicyVersion", "normalizationAlgorithmVersion", "integrityDigest", "sanitized", "payload"],
   "properties": {
     "evidenceId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -13,6 +13,10 @@
     "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "kind": { "enum": ["runtime_dom", "runtime_visual", "runtime_interaction", "network_observation", "source", "location", "diagnostic"] },
     "capturedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "capturedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "collectorVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+    "sanitizationPolicyVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+    "normalizationAlgorithmVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
     "integrityDigest": { "$ref": "common.schema.json#/$defs/sha256" },
     "sanitized": { "type": "boolean", "const": true },
     "sourceBinding": {

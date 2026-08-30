@@ -20,7 +20,7 @@
     "rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ruleId", "version", "status", "name", "owner", "document", "objectKinds", "requiredCapabilities", "coverageContract", "defaultSeverity", "allowedSeverities", "regressionSuite", "contentDigest"],
+      "required": ["ruleId", "version", "status", "name", "owner", "document", "objectKinds", "requiredCapabilities", "capabilityMissingOutcome", "coverageContract", "coverageDimensions", "directConfirmationConditions", "defaultSeverity", "allowedSeverities", "regressionSuite", "contentDigest"],
       "properties": {
         "ruleId": { "$ref": "common.schema.json#/$defs/ruleId" },
         "version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
@@ -30,7 +30,10 @@
         "document": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "objectKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
         "requiredCapabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["runtime", "dom", "interaction", "network", "source", "visual", "location"] } },
+        "capabilityMissingOutcome": { "const": "needs_review" },
         "coverageContract": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "coverageDimensions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "directConfirmationConditions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
         "defaultSeverity": { "$ref": "common.schema.json#/$defs/severity" },
         "allowedSeverities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/severity" } },
         "regressionSuite": { "$ref": "common.schema.json#/$defs/nonEmptyString" },

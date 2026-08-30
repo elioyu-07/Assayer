@@ -4,7 +4,7 @@
   "title": "AuditObject",
   "type": "object",
   "additionalProperties": false,
-  "required": ["objectId", "scanId", "pageStateRef", "kind", "status", "runtimeObserved", "identity", "location", "potentialRules", "assessmentRefs", "observedAt"],
+  "required": ["objectId", "scanId", "pageStateRef", "kind", "status", "runtimeObserved", "identity", "rebindStatus", "lastVerifiedAtRevision", "location", "potentialRules", "assessmentRefs", "observedAt"],
   "properties": {
     "objectId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -17,15 +17,18 @@
     "identity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["hostLocatorId", "fingerprint"],
+      "required": ["hostLocatorId", "fingerprint", "algorithmVersion"],
       "properties": {
         "hostLocatorId": { "$ref": "common.schema.json#/$defs/entityId" },
         "fingerprint": { "$ref": "common.schema.json#/$defs/sha256" },
+        "algorithmVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
         "role": { "type": "string" },
         "accessibleName": { "type": "string" },
         "visibleText": { "type": "string" }
       }
     },
+    "rebindStatus": { "enum": ["matched", "not_found", "ambiguous", "changed"] },
+    "lastVerifiedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
     "location": {
       "type": "object",
       "additionalProperties": false,

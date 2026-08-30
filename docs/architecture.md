@@ -1,5 +1,14 @@
 # agent-f 顶层架构
 
+| 元信息 | 内容 |
+|---|---|
+| 文档版本 | 1.1.0-draft |
+| 日期 | 2026-08-30 |
+| 状态 | 设计收敛中 |
+| Owner | agent-f 维护者 |
+
+架构原则中的系统不变量以 [设计治理与系统不变量](design-governance.md) 为准，领域和算法细节分别见 [领域模型](domain-model-and-lifecycle.md)、[身份与恢复](identity-and-recovery.md)、[动作安全](action-safety-and-credentials.md) 和 [证据完整性](evidence-and-decision-integrity.md)。
+
 ## 1. 文档目的
 
 本文档定义 agent-f 第一版的顶层工程架构，承接 [产品契约](product-contract.md)，回答以下问题：
@@ -14,13 +23,13 @@
 
 ## 2. 架构目标
 
-agent-f 的架构必须同时满足四个目标：
+agent-f 的架构必须同时满足五个目标：
 
 1. **Agent 自主调查**：由 Agent 选择对象、生成反向 Case、补充证据并完成语义判断；
 2. **Host 安全执行**：所有浏览器、源码、网络、截图和持久化操作均由 Host 执行和约束；
 3. **证据先于结论**：Agent 只能引用 Host 已验证的对象和证据，不能凭空创建正式问题；
-4. **对象级可追溯**：正式问题必须回到真实页面中的待检查对象、适用规范和独立病灶截图。
-5. **规范可持续扩展**：当前 14 条规范只是第一版注册内容；新增规范不得要求重写核心调查循环、账本或报告协议。
+4. **对象级可追溯**：正式问题必须回到真实页面中的待检查对象、适用规范和独立病灶截图；
+5. **规范可持续扩展**：当前规则只是第一版注册内容；新增规范不得要求重写核心调查循环、账本或报告协议。
 
 核心原则是：
 
@@ -65,11 +74,11 @@ Codex Runtime 承载 Agent、Skill 和 MCP 调用。Audit Host 是 agent-f 自�
 负责维护：
 
 - Agent 审计流程；
-- 14 条有效规范；
+- 当前规则注册表中的有效规范；
 - 每条规范的适用对象、反向 Case 原则、通过条件、问题条件、反例和覆盖要求；
 - Agent 行为边界、输出约束和术语。
 
-`SKILL.md` 只保存总流程和路由规则；每条规范使用独立文件，Agent 只在需要时加载当前对象相关规范。
+`SKILL.md` 只保存总流程和路由规则；每条规范使用独立文件，Agent 只在需要时加载当前对象相关规范。规则文件格式见 [规则契约](rule-contract.md)。
 
 该层不执行浏览器操作，不保存运行事实，也不能绕过 Host 安全策略。
 
@@ -115,7 +124,7 @@ Host 是确定性执行面，由以下逻辑能力组成：
 | 完整性校验 | 校验对象、规范、证据、截图和判定引用属于同一审计链 |
 | 账本与报告 | 保存完整审计记录，生成问题报告、覆盖证明和运行诊断 |
 
-Host 可以拒绝 Agent 请求，但不能自行把候选升级为正式问题。
+Host 可以拒绝 Agent 请求，但不能自行把候选升级为正式问题。Case、PendingDecision 和正式判定的事务边界见 [领域模型](domain-model-and-lifecycle.md) 与 [证据完整性](evidence-and-decision-integrity.md)。
 
 ### 4.6 持久化与输出层
 
@@ -186,28 +195,26 @@ Host 可以拒绝 Agent 请求，但不能自行把候选升级为正式问题�
 ```mermaid
 flowchart TD
     A[Host 提供一个对象的精简证据包] --> B[Agent 判断适用规范]
-    B --> C[Agent 选择最低覆盖维度并生成反向 Case]
+    B --> C[Agent begin_case 生成 Case 与恢复基线]
     C --> D{Host 安全校验}
     D -- 拒绝 --> E[记录 blocked / 补源码证据 / needs_review]
     D -- 允许 --> F[执行 Case 并同步保存前后状态与候选截图]
     F --> G[Agent 检查证据是否充分]
     G -- 不足 --> H[请求定向补证或追加 Case]
     H --> D
-    G -- 充分 --> I[Agent 提交固定状态判定]
+    G -- 充分 --> I[prepare_decision 创建 PendingDecision]
     I --> J{Host 完整性校验}
-    J -- 失败 --> K[拒绝落账并返回缺口]
-    J -- 通过 --> L[写入对象账本]
-    L --> M{issue_found?}
-    M -- 是 --> N[生成独立病灶截图和问题项]
-    M -- 否 --> O[保留非问题状态]
-    N --> P[定向恢复 Case 现场并验证]
-    O --> P
-    P --> Q{恢复结果}
-    Q -- restored --> R[继续下一个 Case 或对象]
-    Q -- uncertain / failed --> S[刷新并重放安全入口]
+    J -- 失败 --> K[拒绝准备并返回缺口]
+    J -- 通过 --> L[定向恢复 Case 现场并验证]
+    L -- restored --> M[commit_decision 原子写入 Assessment]
+    M --> N{issue_found?}
+    N -- 是 --> O[同步派生 Issue]
+    N -- 否 --> R[保留非问题状态并继续]
+    O --> R[继续下一个 Case 或对象]
+    L -- uncertain / failed --> S[刷新并重放安全入口]
     S --> T{兜底恢复成功?}
-    T -- 是 --> R
-    T -- 否 --> U[restore_failed / 停止当前对象]
+    T -- 是 --> M
+    T -- 否 --> U[restore_failed / PendingDecision 失效]
 ```
 
 每条规范定义自己的最低覆盖维度。Agent 可以选择具体 Case，但未覆盖最低维度时不得输出 `scanned_no_issue`。
@@ -471,13 +478,10 @@ Codex
 
 进入编码前，必须继续完成：
 
-1. Host MCP/CLI 工具的输入、输出、错误和拒绝协议；
-2. `ScanRun`、`PageState`、`AuditObject`、`RuleAssessment`、`ReverseCase`、`Evidence`、`Issue` 和 `Screenshot` 的 JSON Schema；
-3. 对象稳定身份和页面状态身份规则；
-4. 证据包裁剪、版本和完整性校验规则；
-5. Agent 调查循环的停止、重规划和覆盖证明协议；
-6. 每条规范独立文件的标准模板；
-7. 一个本地测试页面上的最小端到端垂直切片。
-8. 规则注册表 Schema、规则生命周期和新增规则验证门槛。
+1. 按 [设计验收与追溯](verification-and-traceability.md) 关闭全部阻塞条款；
+2. 把协议中的 Bootstrap、Case、PendingDecision 和 Operation 查询落到协议 Schema；
+3. 把身份、恢复、安全和证据算法版本写入账本 Schema；
+4. 完成 FUA-10 的垂直切片前纸面验收；
+5. 运行设计一致性复核并由 Owner 将治理状态更新为 `implementation-ready`。
 
 第一版垂直切片应优先证明：Agent 能通过 Host 安全地调查一个页面对象，生成反向 Case，引用真实证据完成判定，并输出与病灶对位的截图。

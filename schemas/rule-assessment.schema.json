@@ -4,10 +4,12 @@
   "title": "RuleAssessment",
   "type": "object",
   "additionalProperties": false,
-  "required": ["assessmentId", "scanId", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "decidedAt"],
+  "required": ["assessmentId", "scanId", "preparationOperationRef", "commitOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "conclusionValidity", "decidedAt", "committedAtRevision"],
   "properties": {
     "assessmentId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "preparationOperationRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "commitOperationRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
     "applicable": { "type": "boolean" },
@@ -24,7 +26,7 @@
       }
     },
     "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
-    "caseRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "caseRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "severity": { "$ref": "common.schema.json#/$defs/severity" },
     "title": { "type": "string", "minLength": 1 },
@@ -32,7 +34,10 @@
     "recommendation": { "type": "string", "minLength": 1 },
     "reasonText": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "blocker": { "$ref": "common.schema.json#/$defs/reason" },
-    "decidedAt": { "$ref": "common.schema.json#/$defs/timestamp" }
+    "conclusionValidity": { "$ref": "common.schema.json#/$defs/conclusionValidity" },
+    "invalidatedBy": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "decidedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "committedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" }
   },
   "allOf": [
     {
@@ -60,6 +65,10 @@
     {
       "if": { "properties": { "result": { "const": "noise" } }, "required": ["result"] },
       "then": { "required": ["reasonText"] }
+    },
+    {
+      "if": { "properties": { "conclusionValidity": { "const": "invalidated" } }, "required": ["conclusionValidity"] },
+      "then": { "required": ["invalidatedBy"] }
     }
   ]
 }

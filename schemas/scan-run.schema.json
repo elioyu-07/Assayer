@@ -9,6 +9,8 @@
     "runId",
     "protocolVersion",
     "skillVersion",
+    "runRevision",
+    "algorithms",
     "status",
     "auditMode",
     "entryUrl",
@@ -24,6 +26,19 @@
     "runId": { "$ref": "common.schema.json#/$defs/entityId" },
     "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
     "skillVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "runRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "algorithms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pageIdentity", "objectIdentity", "recoveryPolicy", "sanitizationPolicy", "normalization"],
+      "properties": {
+        "pageIdentity": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "objectIdentity": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "recoveryPolicy": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "sanitizationPolicy": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "normalization": { "$ref": "common.schema.json#/$defs/algorithmVersion" }
+      }
+    },
     "status": {
       "enum": ["created", "authenticating", "exploring", "auditing", "finalizing", "completed", "partial", "failed"]
     },
@@ -50,6 +65,11 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    },
+    "safetyBudgets": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1 },
+      "propertyNames": { "enum": ["navigationMs", "operationMs", "networkQuietMs", "targetedRecoveryMs", "refreshReplayMs", "sourceInspectionMs", "agentTurnMs"] }
     },
     "coverageProof": {
       "type": "object",

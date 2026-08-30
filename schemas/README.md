@@ -8,6 +8,7 @@
 - `scan-run.schema.json`：一次扫描的输入边界、冻结规则集合、状态和覆盖证明。
 - `page-state.schema.json`：可复盘的页面/弹窗/抽屉/Tab/详情/编辑状态。
 - `audit-object.schema.json`：真实运行页面中发现的待检查对象。
+- `operation.schema.json`：Host 请求的幂等执行记录和结果已知性。
 - `rule-assessment.schema.json`：一个对象 × 一条规则的固定五态判定。
 - `reverse-case.schema.json`：Agent 规划、Host 安全执行的反向 Case，以及动作前基线、反向动作、定向恢复、验证结果和刷新兜底记录。
 - `evidence.schema.json`：Host 生成的不可变、已脱敏证据。
@@ -15,6 +16,8 @@
 - `issue.schema.json`：由 `issue_found` 产生的正式问题项。
 - `rule-registry.schema.json`：可扩展、可版本化的规则注册表。
 - `audit-ledger.schema.json`：把上述实体聚合为完整审计账本。
+
+`audit-ledger.schema.json` 描述的聚合账本是唯一运行事实源。主问题报告、`page-element-judgement.json`、诊断 Markdown 和 HTML 都必须由账本确定性派生，不能反向修改账本。
 
 ## Schema 与 Host 语义校验的边界
 
@@ -28,6 +31,23 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 6. 登录失败或运行中断时，正式问题结论必须标记为无效；
 7. 规则 ID 不得复用，规则语义变化必须使用新版本；扫描期间注册表快照冻结。
 8. Case 恢复中，定向尝试为 `uncertain` 或 `failed` 时必须存在后续刷新重放尝试；最终只有全部必检项为 `match` 的 `restored` 才允许继续调查。
+9. Operation 的 `idempotencyKey` 在 Scan 内唯一；同键请求摘要必须一致，`result_unknown` 不允许盲目重放。
+10. Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
+11. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
+12. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
+
+## 摘要与规范化
+
+- 所有 JSON 摘要使用 UTF-8 和确定性序列化：对象键排序，数组保留语义顺序；
+- 实体摘要排除自身 digest 字段、随机实体 ID、写入时间和本地路径等非事实字段；
+- 规则 `contentDigest` 摘要规则文件原始 UTF-8 字节；
+- 注册表 `digest` 摘要移除顶层 `digest` 后的规范化注册表；
+- Screenshot digest 摘要最终不可变图片字节；
+- 具体算法版本和设计约束见 `docs/evidence-and-decision-integrity.md`。
+
+## 协议与账本的边界
+
+协议请求、响应和 PendingDecision 是运行时交互对象，不等于最终账本实体。Operation 保存幂等执行事实；PendingDecision 只存在于提交事务完成前，不进入最终正式账本。协议封套的第一版机器约束见 `schemas/protocol/envelope.schema.json`；工具专用 Schema 在字段稳定后继续拆分。
 
 ## 扩展规则
 

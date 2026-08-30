@@ -9,7 +9,7 @@
 
 协议同时适用于 MCP 和 CLI。MCP/CLI 只是传输适配层，必须调用同一套 Host Core，不得各自实现浏览器操作、安全判断、证据生成或落账逻辑。
 
-本文档定义“消息和边界”，不定义具体 Python 类、MCP SDK 用法或浏览器驱动细节。
+本文档定义“消息和边界”，不定义具体 Python 类、MCP SDK 用法或浏览器驱动细节。领域状态、恢复屏障、安全拦截和证据事务分别以 [领域模型](domain-model-and-lifecycle.md)、[身份与恢复](identity-and-recovery.md)、[动作安全](action-safety-and-credentials.md) 和 [证据完整性](evidence-and-decision-integrity.md) 为准。
 
 ## 2. 核心原则
 
@@ -41,9 +41,28 @@ Host：校验判定并落账
 
 Host 不主动给 Agent 下业务结论；Host 只返回事实、能力结果、拒绝原因和完整性校验结果。Agent 不直接访问浏览器、文件系统、网络或完整源码仓库。
 
-## 4. 公共消息封套
+## 4. 消息封套
 
-每一次 MCP 调用和 CLI JSON 请求都使用同一封套：
+### 4.1 Bootstrap 封套
+
+`start_audit` 调用前尚不存在 Scan，使用 Bootstrap 封套：
+
+```json
+{
+  "protocolVersion": "1.0",
+  "requestId": "req-uuid",
+  "agentTurnId": "turn-uuid",
+  "tool": "start_audit",
+  "idempotencyKey": "bootstrap:request-uuid",
+  "input": {}
+}
+```
+
+Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成功响应创建并返回这些值；同一幂等键重复请求返回同一启动 Operation 和结果。
+
+### 4.2 Session 封套
+
+除 `start_audit` 外的工具使用 Session 封套：
 
 ```json
 {
@@ -54,12 +73,12 @@ Host 不主动给 Agent 下业务结论；Host 只返回事实、能力结果、
   "agentTurnId": "turn-uuid",
   "tool": "inspect_object",
   "idempotencyKey": "scan-uuid:turn-uuid:inspect_object:obj-123",
-  "expectedStateVersion": 18,
+  "expectedRunRevision": 18,
   "input": {}
 }
 ```
 
-### 4.1 封套字段
+### 4.3 封套字段
 
 | 字段 | 要求 |
 |---|---|
@@ -69,10 +88,10 @@ Host 不主动给 Agent 下业务结论；Host 只返回事实、能力结果、
 | `agentTurnId` | 标识一次 Agent 决策回合 |
 | `tool` | 必须是注册工具名 |
 | `idempotencyKey` | 同一逻辑请求重试时保持不变；Host 返回相同结果，不重复执行有副作用的动作 |
-| `expectedStateVersion` | Agent 看到的页面/账本版本；过期时返回 `STALE_STATE`，不执行动作 |
+| `expectedRunRevision` | Agent 看到的全局运行 revision；状态变更请求过期时返回 `STALE_STATE`，不执行动作 |
 | `input` | 工具专用结构化参数 |
 
-Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 和新的 `stateVersion`。
+Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 和当前 `runRevision`。读取请求不递增 revision；成功改变浏览器或账本事实的 Operation 只递增一次。
 
 ## 5. 统一响应格式
 
@@ -84,7 +103,7 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
   "requestId": "req-uuid",
   "scanId": "scan-uuid",
   "runId": "run-uuid",
-  "stateVersion": 19,
+  "runRevision": 19,
   "status": "ok",
   "result": {},
   "evidenceRefs": ["ev-001"],
@@ -100,13 +119,13 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
   "requestId": "req-uuid",
   "scanId": "scan-uuid",
   "runId": "run-uuid",
-  "stateVersion": 19,
+  "runRevision": 19,
   "status": "rejected",
   "error": {
     "code": "ACTION_BLOCKED",
     "message": "潜在写操作未获 Host 安全策略放行",
     "retryable": false,
-    "requiredNextStep": "inspect_source_or_record_needs_review"
+    "requiredNextStep": "inspect_source_or_prepare_needs_review"
   },
   "evidenceRefs": [],
   "diagnosticRefs": ["diag-044"]
@@ -119,7 +138,7 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
 |---|---|---|
 | `INVALID_REQUEST` | 参数或 Schema 不合法 | 修正请求，不重试原请求 |
 | `UNKNOWN_TOOL` | 工具不存在或未启用 | 不得猜测替代工具 |
-| `STALE_STATE` | 页面/账本版本已变化 | 重新 `inspect_page` 或 `inspect_object` |
+| `STALE_STATE` | 全局运行 revision 已变化 | 重新 `inspect_page` 或 `inspect_object` |
 | `UNKNOWN_REFERENCE` | 对象、Case、证据或截图 ID 不存在 | 不能创造替代 ID |
 | `ACTION_BLOCKED` | 动作被安全策略阻断 | 补源码/页面证据或记录 `needs_review` |
 | `NAVIGATION_BLOCKED` | 跨站或非允许导航 | 记录跳过原因 |
@@ -128,6 +147,11 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
 | `INVALID_DECISION` | 判定状态、规范或字段不符合契约 | 修正后重新提交 |
 | `RUN_TERMINAL` | 扫描已完成、partial 或 failed | 不再发送普通工具请求 |
 | `INTERNAL_FAILURE` | Host 内部故障 | 按 `retryable` 决定重试或终止 |
+| `INVALID_LIFECYCLE_TRANSITION` | 当前实体状态不允许该工具 | 重新读取状态或停止该路径 |
+| `IDEMPOTENCY_CONFLICT` | 相同幂等键对应不同请求摘要 | 生成新幂等键并重新规划 |
+| `OPERATION_RESULT_UNKNOWN` | 动作结果尚无法确认 | 调用 `get_operation`，不得重放动作 |
+| `REQUEST_BLOCKED` | 潜在写请求已在发送前阻断 | 恢复 Case 或记录 `needs_review` |
+| `SANITIZATION_FAILED` | 证据无法可靠脱敏 | 不保存证据，补证或 `needs_review` |
 
 ## 6. 工具目录
 
@@ -141,13 +165,14 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
 {
   "url": "https://test.example.com/orders",
   "sourcePath": "/workspace/app",
-  "ruleRegistryVersion": "2026-08-30",
+  "ruleRegistryVersion": "1.0.0",
   "outputDir": "/workspace/output",
-  "browserProfile": "chromium-default"
+  "browserProfile": "chromium-default",
+  "credentialHandle": "cred-once-uuid"
 }
 ```
 
-凭据通过 Host 的安全输入通道提供，不作为普通 `input` 字段传入 Agent 调用。
+`credentialHandle` 由 Host 本地安全输入通道生成，只能消费一次；它不是凭据值，且不得进入 Agent 长期上下文、日志或账本。具体边界见 [动作安全与凭据](action-safety-and-credentials.md)。
 
 成功结果至少包含：
 
@@ -156,7 +181,8 @@ Host 响应也必须带回 `protocolVersion`、`requestId`、`scanId`、`runId` 
 - `currentPageStateId`；
 - `ruleRegistryDigest`；
 - `capabilities`；
-- `stateVersion`。
+- `runRevision`；
+- 身份、恢复、脱敏和摘要算法版本。
 
 失败时只返回登录失败诊断，不创建页面问题结论。
 
@@ -196,9 +222,27 @@ Host 不把候选对象直接当作正式待检查对象。
 - 可见文本、ARIA、结构上下文和关联对象；
 - Host 推荐的适用规范；
 - 已有运行态、请求、源码和截图证据引用；
-- 对象当前状态版本。
+- 对象最近验证时的 `runRevision` 和身份算法版本。
 
-### 6.4 `perform_action`
+### 6.4 `begin_case`
+
+围绕一个 Host 已验证对象和一条冻结规则创建 Case，并在任何动作前保存恢复基线。
+
+输入：
+
+```json
+{
+  "objectId": "obj-123",
+  "rule": {"ruleId": "FUA-10", "version": "1.0.0"},
+  "kind": "observation",
+  "purpose": "确认筛选区是否同时具有查询和重置能力",
+  "plannedCoverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"]
+}
+```
+
+Host 校验对象、规则、能力和当前生命周期，原子返回 `caseId`、恢复基线引用、Case 状态和新的 `runRevision`。同一对象同一规则同时只能有一个执行中的 Case。
+
+### 6.5 `perform_action`
 
 执行受控浏览器动作。
 
@@ -216,10 +260,11 @@ Host 不把候选对象直接当作正式待检查对象。
 每个请求必须包含：
 
 - 当前 `pageStateId`；
+- 当前 `caseId`；
 - 目标 `objectId`；
 - 动作类型和结构化参数；
 - Agent 说明动作意图；
-- `expectedStateVersion`；
+- `expectedRunRevision`；
 - 幂等键。
 
 安全规则：
@@ -228,9 +273,9 @@ Host 不把候选对象直接当作正式待检查对象。
 - Agent 的意图声明不能放行 Host 判定为潜在写操作的请求；
 - Host 无法判断时拒绝；
 - 编辑页可以打开和填写合成值，但保存/提交永远阻断；
-- 动作完成后 Host 返回前后页面状态和请求观察。
+- 动作完成后 Host 返回 `operationId`、前后页面状态和请求观察；结果未知时只能调用 `get_operation`。
 
-### 6.5 `restore_case`
+### 6.6 `restore_case`
 
 结束一个 Case 后调用。Host 不接受 Agent 自行拼接的 selector 或反向脚本，只依据本次 Case 已记录的动作日志和恢复基线执行。
 
@@ -241,7 +286,7 @@ Host 不把候选对象直接当作正式待检查对象。
   "caseId": "case-003",
   "pageStateId": "page-004",
   "objectId": "obj-123",
-  "expectedStateVersion": 27,
+  "expectedRunRevision": 27,
   "fallback": "refresh_and_replay_safe_entrypoints"
 }
 ```
@@ -258,7 +303,7 @@ Host 的恢复顺序固定为：
 
 结果判定必须是机械的：全部必检项为 `match` 才是 `restored`；没有已确认差异但存在 `unknown` 时是 `uncertain`；出现关键 `mismatch`、反向动作失败、写请求或对象丢失时是 `failed`。局部视觉结果只能补证，不能覆盖结构检查失败。
 
-### 6.6 `inspect_source`
+### 6.7 `inspect_source`
 
 只围绕当前运行页面对象查找源码归属和实现证据。
 
@@ -274,45 +319,48 @@ Host 的恢复顺序固定为：
 
 Host 必须建立页面 → route → 组件 → handler/API 的归属链。无法唯一绑定时返回 `sourceBindingStatus: "unverified"`，不得用名称相似文件替代。
 
-### 6.7 `capture_evidence`
+### 6.8 `capture_evidence`
 
-在当前 Case 或对象状态下保存页面状态、对象位置和截图。
+在当前 Case 或对象状态下保存页面状态、对象位置或 Raw Visual。正式 IssueScreenshot 在 `prepare_decision(issue_found)` 中从同一问题现场派生。
 
 输入必须引用当前 `pageStateId`、`objectId` 和可选 `caseId`，不能传入任意 selector 作为事实。
 
 结果至少包含：
 
 - `evidenceId`；
-- `screenshotId`；
+- 可选 Raw Visual `screenshotRef`；
 - 当前对象定位和 bounding box；
 - 截图是否成功、截图方法和失败原因；
 - 页面状态和对象状态版本。
 
-同一对象对应多个问题时，每个问题项必须调用一次独立截图流程，不复用一张未框选的通用页面图作为多个问题截图。
+同一对象对应多个问题时，每个 PendingDecision 必须派生自己的 IssueScreenshot，不复用一张未框选的通用页面图作为多个问题截图。
 
-### 6.8 `record_decision`
+### 6.9 `prepare_decision`
 
-提交一个“对象 × 规范”的审计结果。
+提交一个“对象 × 规范”的临时判定。该工具不写入正式 Assessment 或 Issue；它验证引用、覆盖和语义字段，并创建 `PendingDecision`。`issue_found` 时 Host 同步生成或验证独立 IssueScreenshot。
 
 输入：
 
 ```json
 {
   "objectId": "obj-123",
-  "ruleId": "FUA-02",
-  "ruleVersion": "1.0.0",
+  "rule": {"ruleId": "FUA-02", "version": "1.0.0"},
   "result": "issue_found",
   "reasonText": "必填字段在当前页面没有可见标识",
   "evidenceRefs": ["ev-001", "ev-002"],
   "caseRefs": ["case-003"],
-  "screenshotId": "shot-003",
-  "severity": "P1"
+  "rawVisualRef": "shot-raw-003",
+  "severity": "P1",
+  "title": "必填字段缺少可见标识",
+  "message": "当前必填字段没有可见必填标识。",
+  "impact": "用户可能在提交后才知道字段必填。",
+  "recommendation": "在字段标签附近增加一致的必填标识。"
 }
 ```
 
 Host 校验：
 
-- `objectId`、`ruleId`、版本、Case、证据和截图均存在且属于当前扫描；
+- `objectId`、规则引用、Case、证据和截图均存在且属于当前扫描；
 - 规范已启用且适用于该对象；
 - `issue_found` 有页面病灶截图；
 - `scanned_no_issue` 已满足该规范最低覆盖要求；
@@ -321,7 +369,24 @@ Host 校验：
 - `noise` 有噪声原因；
 - 一个对象违反多条规范时，按规范分别提交，不合并成无规范的问题。
 
-### 6.9 `complete_audit`
+成功结果返回 `pendingDecisionId`、可选 `screenshotRef` 和当前 `runRevision`。
+
+### 6.10 `commit_decision`
+
+在所有引用 Case 已经 `completed/restored` 后提交 PendingDecision。输入只包含 `pendingDecisionId`；Host 必须重新校验对象身份、规则冻结、证据、截图、覆盖和 revision，并在同一事务内：
+
+- 写入不可变 RuleAssessment；
+- `issue_found` 时派生一条一对一 Issue；
+- 更新对象处理状态；
+- 递增一次 `runRevision`。
+
+Case 未恢复、PendingDecision 已失效或 Scan 已进入终态时拒绝提交。
+
+### 6.11 `get_operation`
+
+查询一个 Host Operation 的已知状态，不执行或重放原动作。输入 `operationId`，返回请求摘要、`accepted/running/succeeded/rejected/failed_known/result_unknown` 状态和可用结果引用。
+
+### 6.12 `complete_audit`
 
 提交 Agent 的覆盖证明并请求 Host 结束扫描。
 
@@ -354,16 +419,17 @@ inspect_page
   → inspect_object
   → 判断适用规范
   → 加载对应 Skill 规则
-  → 生成满足最低覆盖要求的反向 Case
+  → begin_case
   → perform_action / inspect_source
   → capture_evidence
   → 判断证据是否足够
-       ├─ 不足：申请补证或 needs_review
-       ├─ 噪声：record_decision(noise)
-       ├─ 不适用：record_decision(not_applicable)
-       ├─ 无问题：record_decision(scanned_no_issue)
-       └─ 有问题：record_decision(issue_found)
+       ├─ 不足：补证或 prepare_decision(needs_review)
+       ├─ 噪声：prepare_decision(noise)
+       ├─ 不适用：prepare_decision(not_applicable)
+       ├─ 无问题：prepare_decision(scanned_no_issue)
+       └─ 有问题：prepare_decision(issue_found)
   → restore_case（定向恢复并验证，必要时刷新兜底）
+  → commit_decision
   → 继续下一个对象
 ```
 
@@ -378,11 +444,11 @@ inspect_page
 
 ### 7.2 状态过期和重试
 
-- Host 每次改变页面或账本后递增 `stateVersion`；
+- Host 每次成功改变浏览器或账本事实后递增全局 `runRevision`；
 - Agent 使用旧版本请求动作时，Host 返回 `STALE_STATE`；
 - Agent 必须重新读取当前状态，不得直接重放旧 selector；
 - 使用相同 `idempotencyKey` 的重复请求不得重复执行动作；
-- 读取类请求可有限重试；动作执行请求在结果未知时不得盲目重试，必须先查询动作结果。
+- 读取类请求可有限重试；动作执行请求在结果未知时不得盲目重试，必须先调用 `get_operation` 查询动作结果。
 - `restore_case` 的定向反向动作也必须具备幂等性；恢复结果未知时先查询恢复状态，不得盲目重复点击或输入。
 
 ### 7.3 探索停止

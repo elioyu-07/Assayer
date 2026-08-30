@@ -4,7 +4,7 @@
   "title": "PageState",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pageStateId", "scanId", "url", "origin", "stateKind", "stateVersion", "observedAt", "domDigest", "safeEntrypoints", "objectRefs"],
+  "required": ["pageStateId", "scanId", "url", "origin", "stateKind", "observedAtRevision", "observedAt", "domDigest", "identity", "safeEntrypoints", "objectRefs"],
   "properties": {
     "pageStateId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -14,9 +14,18 @@
     "route": { "type": "string" },
     "title": { "type": "string" },
     "stateKind": { "enum": ["page", "dialog", "drawer", "tab", "detail", "edit", "unknown"] },
-    "stateVersion": { "type": "integer", "minimum": 0 },
+    "observedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
     "observedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
     "domDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithmVersion", "materialDigest"],
+      "properties": {
+        "algorithmVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "materialDigest": { "$ref": "common.schema.json#/$defs/sha256" }
+      }
+    },
     "snapshotEvidenceRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "safeEntrypoints": {
       "type": "array",

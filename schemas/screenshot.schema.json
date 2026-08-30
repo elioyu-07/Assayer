@@ -4,15 +4,19 @@
   "title": "Screenshot",
   "type": "object",
   "additionalProperties": false,
-  "required": ["screenshotId", "scanId", "pageStateRef", "objectRef", "status", "capturedAt"],
+  "required": ["screenshotId", "scanId", "pageStateRef", "objectRef", "kind", "status", "capturedAt", "capturedAtRevision", "sanitizationPolicyVersion"],
   "properties": {
     "screenshotId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
     "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "kind": { "enum": ["raw_visual", "issue"] },
     "status": { "enum": ["captured", "not_located", "ambiguous", "rejected"] },
     "capturedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "capturedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "sanitizationPolicyVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+    "rawVisualRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "path": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "digest": { "$ref": "common.schema.json#/$defs/sha256" },
     "imageType": { "enum": ["png", "jpeg", "webp"] },
@@ -27,6 +31,10 @@
       "if": { "properties": { "status": { "const": "captured" } }, "required": ["status"] },
       "then": { "required": ["path", "digest", "imageType", "width", "height", "problemBoundingBox", "annotation"] },
       "else": { "required": ["failureReason"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "issue" } }, "required": ["kind"] },
+      "then": { "required": ["rawVisualRef", "problemBoundingBox", "annotation"] }
     }
   ]
 }

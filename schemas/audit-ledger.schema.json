@@ -4,7 +4,7 @@
   "title": "AuditLedger",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "createdAt", "scan", "ruleRegistry", "pageStates", "objects", "assessments", "cases", "evidence", "screenshots", "issues"],
+  "required": ["schemaVersion", "createdAt", "scan", "ruleRegistry", "pageStates", "objects", "operations", "assessments", "cases", "evidence", "screenshots", "issues"],
   "properties": {
     "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
     "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
@@ -12,6 +12,7 @@
     "ruleRegistry": { "$ref": "rule-registry.schema.json" },
     "pageStates": { "type": "array", "items": { "$ref": "page-state.schema.json" } },
     "objects": { "type": "array", "items": { "$ref": "audit-object.schema.json" } },
+    "operations": { "type": "array", "items": { "$ref": "operation.schema.json" } },
     "assessments": { "type": "array", "items": { "$ref": "rule-assessment.schema.json" } },
     "cases": { "type": "array", "items": { "$ref": "reverse-case.schema.json" } },
     "evidence": { "type": "array", "items": { "$ref": "evidence.schema.json" } },
