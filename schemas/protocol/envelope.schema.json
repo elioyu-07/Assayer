@@ -29,7 +29,8 @@
         "scanId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" }, "agentTurnId": { "$ref": "#/$defs/id" },
         "tool": { "$ref": "#/$defs/nonEmpty" }, "idempotencyKey": { "$ref": "#/$defs/nonEmpty" },
         "expectedRunRevision": { "type": "integer", "minimum": 0 }, "input": { "type": "object" }
-      }
+      },
+      "not": { "properties": { "tool": { "const": "start_audit" } }, "required": ["tool"] }
     },
     "response": {
       "type": "object", "additionalProperties": false,
