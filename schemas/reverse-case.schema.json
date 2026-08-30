@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/reverse-case.schema.json",
+  "title": "ReverseCase",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["caseId", "scanId", "objectRef", "rule", "kind", "purpose", "status", "plannedAt", "actions", "recovery"],
+  "properties": {
+    "caseId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "kind": { "enum": ["negative", "boundary", "invalid", "exception", "happy_prerequisite", "observation"] },
+    "purpose": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "syntheticInputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fieldRef", "valueClass"],
+        "properties": {
+          "fieldRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "valueClass": { "enum": ["valid", "empty", "malformed", "boundary_low", "boundary_high", "oversized", "special_characters", "synthetic_other"] },
+          "valueDescription": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "status": { "enum": ["planned", "safety_check", "executing", "evidence_captured", "restoring", "completed", "blocked", "restore_failed", "invalidated"] },
+    "plannedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "startedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "endedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["actionId", "type", "intent", "safetyOutcome", "atStateVersion"],
+        "properties": {
+          "actionId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "type": { "$ref": "#/$defs/actionType" },
+          "targetObjectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "intent": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "parameters": { "type": "object" },
+          "safetyOutcome": { "enum": ["allowed", "blocked", "not_attempted"] },
+          "blockReason": { "$ref": "common.schema.json#/$defs/reason" },
+          "atStateVersion": { "type": "integer", "minimum": 0 },
+          "beforeStateEvidenceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "$ref": "common.schema.json#/$defs/entityId" }
+          },
+          "recoveryMode": { "enum": ["inverse", "noop", "refresh_only"] },
+          "inverseAction": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type"],
+            "properties": {
+              "type": { "$ref": "#/$defs/actionType" },
+              "targetObjectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+              "parameters": { "type": "object" }
+            }
+          },
+          "resultEvidenceRefs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "common.schema.json#/$defs/entityId" }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "safetyOutcome": { "const": "blocked" } }, "required": ["safetyOutcome"] },
+            "then": { "required": ["blockReason"] }
+          },
+          {
+            "if": { "properties": { "safetyOutcome": { "const": "allowed" } }, "required": ["safetyOutcome"] },
+            "then": { "required": ["beforeStateEvidenceRefs", "recoveryMode"] }
+          },
+          {
+            "if": { "properties": { "recoveryMode": { "const": "inverse" } }, "required": ["recoveryMode"] },
+            "then": { "required": ["inverseAction"] }
+          }
+        ]
+      }
+    },
+    "beforePageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "afterPageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "evidenceRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "finalStatus", "attempts"],
+      "properties": {
+        "policy": { "const": "targeted_then_refresh" },
+        "baselinePageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+        "finalStatus": { "enum": ["not_started", "restored", "uncertain", "failed"] },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["method", "outcome", "checks"],
+            "properties": {
+              "method": { "enum": ["targeted_inverse", "refresh_replay"] },
+              "outcome": { "enum": ["restored", "uncertain", "failed"] },
+              "checks": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["dimension", "outcome"],
+                  "properties": {
+                    "dimension": { "enum": ["url_route", "page_layer", "active_tab", "overlay_state", "control_state", "object_identity", "pending_requests", "write_request", "local_visual"] },
+                    "outcome": { "enum": ["match", "mismatch", "unknown"] },
+                    "expected": {},
+                    "observed": {},
+                    "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } }
+                  }
+                }
+              },
+              "reason": { "$ref": "common.schema.json#/$defs/reason" }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "outcome": { "const": "restored" } }, "required": ["outcome"] },
+                "then": { "properties": { "checks": { "items": { "properties": { "outcome": { "const": "match" } } } } } }
+              },
+              {
+                "if": { "properties": { "outcome": { "const": "uncertain" } }, "required": ["outcome"] },
+                "then": {
+                  "properties": {
+                    "checks": {
+                      "contains": { "properties": { "outcome": { "const": "unknown" } }, "required": ["outcome"] },
+                      "items": { "properties": { "outcome": { "enum": ["match", "unknown"] } } }
+                    }
+                  }
+                }
+              },
+              {
+                "if": { "properties": { "outcome": { "const": "failed" } }, "required": ["outcome"] },
+                "then": { "required": ["reason"] }
+              }
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "finalStatus": { "enum": ["restored", "uncertain", "failed"] } }, "required": ["finalStatus"] },
+          "then": { "properties": { "attempts": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "finalStatus": { "enum": ["uncertain", "failed"] } }, "required": ["finalStatus"] },
+          "then": { "properties": { "attempts": { "contains": { "properties": { "method": { "const": "refresh_replay" } }, "required": ["method"] } } } }
+        },
+        {
+          "if": { "properties": { "finalStatus": { "const": "restored" } }, "required": ["finalStatus"] },
+          "then": { "properties": { "attempts": { "contains": { "properties": { "outcome": { "const": "restored" } }, "required": ["outcome"] } } } }
+        }
+      ]
+    },
+    "restoreReason": { "$ref": "common.schema.json#/$defs/reason" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "enum": ["blocked", "restore_failed", "invalidated"] } }, "required": ["status"] },
+      "then": { "required": ["endedAt", "restoreReason"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "completed" } }, "required": ["status"] },
+      "then": {
+        "required": ["startedAt", "endedAt", "beforePageStateRef", "afterPageStateRef"],
+        "properties": {
+          "recovery": {
+            "required": ["baselinePageStateRef"],
+            "properties": { "finalStatus": { "const": "restored" } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "actionType": {
+      "enum": ["scroll", "focus", "expand", "collapse", "switch_tab", "open_detail", "close_detail", "open_edit", "close_overlay", "input_synthetic_value", "restore_value", "refresh"]
+    }
+  }
+}

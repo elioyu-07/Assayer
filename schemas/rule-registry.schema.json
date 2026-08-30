@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/rule-registry.schema.json",
+  "title": "RuleRegistry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["registryId", "registryVersion", "digest", "createdAt", "rules"],
+  "properties": {
+    "registryId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "registryVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "digest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/rule" }
+    }
+  },
+  "$defs": {
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "version", "status", "name", "owner", "document", "objectKinds", "requiredCapabilities", "coverageContract", "defaultSeverity", "allowedSeverities", "regressionSuite", "contentDigest"],
+      "properties": {
+        "ruleId": { "$ref": "common.schema.json#/$defs/ruleId" },
+        "version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "status": { "enum": ["draft", "owner_approved", "validated", "enabled", "deprecated"] },
+        "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "owner": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "document": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "objectKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "requiredCapabilities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["runtime", "dom", "interaction", "network", "source", "visual", "location"] } },
+        "coverageContract": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "defaultSeverity": { "$ref": "common.schema.json#/$defs/severity" },
+        "allowedSeverities": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/severity" } },
+        "regressionSuite": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "contentDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+        "examples": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["positive", "negative", "regression"],
+          "properties": {
+            "positive": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+            "negative": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+            "regression": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
+          }
+        }
+      }
+    }
+  }
+}

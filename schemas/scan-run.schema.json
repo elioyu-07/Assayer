@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/scan-run.schema.json",
+  "title": "ScanRun",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "scanId",
+    "runId",
+    "protocolVersion",
+    "skillVersion",
+    "status",
+    "auditMode",
+    "entryUrl",
+    "startedAt",
+    "loginStatus",
+    "ruleRegistryDigest",
+    "frozenRules",
+    "coverageProof",
+    "conclusionsValid"
+  ],
+  "properties": {
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "protocolVersion": { "$ref": "common.schema.json#/$defs/protocolVersion" },
+    "skillVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "status": {
+      "enum": ["created", "authenticating", "exploring", "auditing", "finalizing", "completed", "partial", "failed"]
+    },
+    "auditMode": { "enum": ["runtime_only", "runtime_with_source"] },
+    "entryUrl": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "allowedOrigins": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "format": "uri" }
+    },
+    "sourceRoot": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "startedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "endedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "loginStatus": { "enum": ["pending", "succeeded", "failed"] },
+    "ruleRegistryDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "frozenRules": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/ruleRef" }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    },
+    "coverageProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["visitedPageStateRefs", "processedObjectRefs", "processedEntrypointRefs", "skippedEntrypoints", "ruleSummaries", "completionReason"],
+      "properties": {
+        "visitedPageStateRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "processedObjectRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "processedEntrypointRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "skippedEntrypoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["entrypointId", "reason"],
+            "properties": {
+              "entrypointId": { "$ref": "common.schema.json#/$defs/entityId" },
+              "reason": { "$ref": "common.schema.json#/$defs/reason" }
+            }
+          }
+        },
+        "ruleSummaries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rule", "assessmentCount", "resultCounts", "coverageComplete"],
+            "properties": {
+              "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+              "assessmentCount": { "type": "integer", "minimum": 0 },
+              "resultCounts": {
+                "type": "object",
+                "propertyNames": { "enum": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"] },
+                "additionalProperties": { "type": "integer", "minimum": 0 }
+              },
+              "coverageComplete": { "type": "boolean" },
+              "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "unprocessedEntrypointRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "completionReason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "terminalReason": { "$ref": "common.schema.json#/$defs/reason" },
+    "conclusionsValid": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "auditMode": { "const": "runtime_with_source" } }, "required": ["auditMode"] },
+      "then": { "required": ["sourceRoot"] },
+      "else": { "not": { "required": ["sourceRoot"] } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["completed", "partial", "failed"] } }, "required": ["status"] },
+      "then": { "required": ["endedAt", "terminalReason"] }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+      "then": { "properties": { "conclusionsValid": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["completed", "partial"] } }, "required": ["status"] },
+      "then": {
+        "properties": {
+          "loginStatus": { "const": "succeeded" },
+          "conclusionsValid": { "const": true }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "loginStatus": { "const": "failed" } }, "required": ["loginStatus"] },
+      "then": {
+        "properties": {
+          "status": { "const": "failed" },
+          "conclusionsValid": { "const": false }
+        }
+      }
+    }
+  ]
+}

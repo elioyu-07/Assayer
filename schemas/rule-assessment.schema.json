@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/rule-assessment.schema.json",
+  "title": "RuleAssessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assessmentId", "scanId", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "decidedAt"],
+  "properties": {
+    "assessmentId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "applicable": { "type": "boolean" },
+    "result": { "$ref": "common.schema.json#/$defs/decisionResult" },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredDimensions", "coveredDimensions", "complete"],
+      "properties": {
+        "requiredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "coveredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "complete": { "type": "boolean" },
+        "coverageNote": { "type": "string" }
+      }
+    },
+    "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "caseRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "severity": { "$ref": "common.schema.json#/$defs/severity" },
+    "title": { "type": "string", "minLength": 1 },
+    "impact": { "type": "string", "minLength": 1 },
+    "recommendation": { "type": "string", "minLength": 1 },
+    "reasonText": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "blocker": { "$ref": "common.schema.json#/$defs/reason" },
+    "decidedAt": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "result": { "const": "issue_found" } }, "required": ["result"] },
+      "then": {
+        "required": ["severity", "title", "impact", "recommendation", "screenshotRef"],
+        "properties": {
+          "applicable": { "const": true },
+          "evidenceRefs": { "minItems": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "result": { "const": "scanned_no_issue" } }, "required": ["result"] },
+      "then": { "properties": { "applicable": { "const": true }, "coverage": { "properties": { "complete": { "const": true } } } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "not_applicable" } }, "required": ["result"] },
+      "then": { "properties": { "applicable": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "result": { "const": "needs_review" } }, "required": ["result"] },
+      "then": { "required": ["blocker"] }
+    },
+    {
+      "if": { "properties": { "result": { "const": "noise" } }, "required": ["result"] },
+      "then": { "required": ["reasonText"] }
+    }
+  ]
+}

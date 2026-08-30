@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/page-state.schema.json",
+  "title": "PageState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pageStateId", "scanId", "url", "origin", "stateKind", "stateVersion", "observedAt", "domDigest", "safeEntrypoints", "objectRefs"],
+  "properties": {
+    "pageStateId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "parentPageStateId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "url": { "type": "string", "format": "uri", "pattern": "^https?://" },
+    "origin": { "type": "string", "format": "uri" },
+    "route": { "type": "string" },
+    "title": { "type": "string" },
+    "stateKind": { "enum": ["page", "dialog", "drawer", "tab", "detail", "edit", "unknown"] },
+    "stateVersion": { "type": "integer", "minimum": 0 },
+    "observedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "domDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "snapshotEvidenceRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "safeEntrypoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entrypointId", "label", "intent", "status"],
+        "properties": {
+          "entrypointId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "label": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "intent": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "status": { "enum": ["unprocessed", "processed", "skipped", "blocked"] },
+          "targetPageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+          "reason": { "$ref": "common.schema.json#/$defs/reason" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "status": { "enum": ["skipped", "blocked"] } }, "required": ["status"] },
+            "then": { "required": ["reason"] }
+          }
+        ]
+      }
+    },
+    "objectRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    }
+  }
+}

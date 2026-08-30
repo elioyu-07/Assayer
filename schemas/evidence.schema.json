@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/evidence.schema.json",
+  "title": "Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["evidenceId", "scanId", "pageStateRef", "objectRef", "kind", "capturedAt", "integrityDigest", "sanitized", "payload"],
+  "properties": {
+    "evidenceId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "kind": { "enum": ["runtime_dom", "runtime_visual", "runtime_interaction", "network_observation", "source", "location", "diagnostic"] },
+    "capturedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "integrityDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "sanitized": { "type": "boolean", "const": true },
+    "sourceBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["verified", "unverified", "not_applicable"] },
+        "location": { "$ref": "common.schema.json#/$defs/sourceLocation" },
+        "bindingReason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "screenshotRefs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadType", "content"],
+      "properties": {
+        "payloadType": { "enum": ["text", "json", "dom_fragment", "network_summary", "image_metadata", "diagnostic"] },
+        "content": {}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "source" } }, "required": ["kind"] },
+      "then": { "required": ["sourceBinding"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "runtime_visual" } }, "required": ["kind"] },
+      "then": { "required": ["screenshotRefs"] }
+    }
+  ]
+}

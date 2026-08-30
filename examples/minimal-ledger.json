@@ -1,0 +1,181 @@
+{
+  "schemaVersion": "1.0.0",
+  "createdAt": "2026-08-30T10:00:00Z",
+  "scan": {
+    "scanId": "scan-001",
+    "runId": "run-001",
+    "protocolVersion": "1.0",
+    "skillVersion": "1.0.0",
+    "status": "completed",
+    "auditMode": "runtime_only",
+    "entryUrl": "https://test.example.com/orders",
+    "allowedOrigins": ["https://test.example.com"],
+    "startedAt": "2026-08-30T09:00:00Z",
+    "endedAt": "2026-08-30T10:00:00Z",
+    "loginStatus": "succeeded",
+    "ruleRegistryDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frozenRules": [
+      { "ruleId": "FUA-10", "version": "1.0.0" }
+    ],
+    "capabilities": ["runtime", "dom", "interaction", "visual"],
+    "coverageProof": {
+      "visitedPageStateRefs": ["page-001"],
+      "processedObjectRefs": ["obj-001"],
+      "processedEntrypointRefs": [],
+      "skippedEntrypoints": [],
+      "ruleSummaries": [
+        {
+          "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+          "assessmentCount": 1,
+          "resultCounts": { "scanned_no_issue": 1 },
+          "coverageComplete": true
+        }
+      ],
+      "unprocessedEntrypointRefs": [],
+      "completionReason": "入口页面中的列表筛选区已完成规则覆盖。"
+    },
+    "terminalReason": { "code": "COVERAGE_COMPLETE", "message": "覆盖证明通过。" },
+    "conclusionsValid": true
+  },
+  "ruleRegistry": {
+    "registryId": "registry-001",
+    "registryVersion": "1.0.0",
+    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "createdAt": "2026-08-30T08:00:00Z",
+    "rules": [
+      {
+        "ruleId": "FUA-10",
+        "version": "1.0.0",
+        "status": "enabled",
+        "name": "列表筛选必须同时提供查询和重置",
+        "owner": "product-owner",
+        "document": "rules/FUA-10.md",
+        "objectKinds": ["filter_region"],
+        "requiredCapabilities": ["runtime", "dom", "interaction"],
+        "coverageContract": "rules/FUA-10.md#coverage",
+        "defaultSeverity": "P2",
+        "allowedSeverities": ["P1", "P2", "P3"],
+        "regressionSuite": "fixtures/rules/FUA-10",
+        "contentDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "examples": {
+          "positive": ["同时存在查询和重置"],
+          "negative": ["存在筛选条件但没有重置"],
+          "regression": ["筛选区仅有查询按钮"]
+        }
+      }
+    ]
+  },
+  "pageStates": [
+    {
+      "pageStateId": "page-001",
+      "scanId": "scan-001",
+      "url": "https://test.example.com/orders",
+      "origin": "https://test.example.com",
+      "route": "/orders",
+      "title": "订单列表",
+      "stateKind": "page",
+      "stateVersion": 1,
+      "observedAt": "2026-08-30T09:01:00Z",
+      "domDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "safeEntrypoints": [],
+      "objectRefs": ["obj-001"]
+    }
+  ],
+  "objects": [
+    {
+      "objectId": "obj-001",
+      "scanId": "scan-001",
+      "pageStateRef": "page-001",
+      "kind": "filter_region",
+      "status": "decided",
+      "runtimeObserved": true,
+      "identity": {
+        "hostLocatorId": "loc-001",
+        "fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "role": "region",
+        "accessibleName": "订单筛选"
+      },
+      "location": {
+        "boundingBox": { "x": 20, "y": 80, "width": 640, "height": 120 },
+        "visible": true,
+        "viewportWidth": 1280,
+        "viewportHeight": 800
+      },
+      "potentialRules": [{ "ruleId": "FUA-10", "version": "1.0.0" }],
+      "assessmentRefs": ["assessment-001"],
+      "observedAt": "2026-08-30T09:02:00Z"
+    }
+  ],
+  "assessments": [
+    {
+      "assessmentId": "assessment-001",
+      "scanId": "scan-001",
+      "objectRef": "obj-001",
+      "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+      "applicable": true,
+      "result": "scanned_no_issue",
+      "coverage": {
+        "requiredDimensions": ["filter_present", "query_action", "reset_action"],
+        "coveredDimensions": ["filter_present", "query_action", "reset_action"],
+        "complete": true
+      },
+      "evidenceRefs": ["evidence-001"],
+      "caseRefs": ["case-001"],
+      "reasonText": "筛选区同时存在查询和重置能力。",
+      "decidedAt": "2026-08-30T09:05:00Z"
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "case-001",
+      "scanId": "scan-001",
+      "objectRef": "obj-001",
+      "rule": { "ruleId": "FUA-10", "version": "1.0.0" },
+      "kind": "observation",
+      "purpose": "观察筛选区的查询和重置入口。",
+      "status": "completed",
+      "plannedAt": "2026-08-30T09:03:00Z",
+      "startedAt": "2026-08-30T09:03:30Z",
+      "endedAt": "2026-08-30T09:04:00Z",
+      "actions": [],
+      "beforePageStateRef": "page-001",
+      "afterPageStateRef": "page-001",
+      "evidenceRefs": ["evidence-001"],
+      "recovery": {
+        "policy": "targeted_then_refresh",
+        "baselinePageStateRef": "page-001",
+        "finalStatus": "restored",
+        "attempts": [
+          {
+            "method": "targeted_inverse",
+            "outcome": "restored",
+            "checks": [
+              { "dimension": "object_identity", "outcome": "match" },
+              { "dimension": "pending_requests", "outcome": "match", "expected": 0, "observed": 0 }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "evidenceId": "evidence-001",
+      "scanId": "scan-001",
+      "pageStateRef": "page-001",
+      "objectRef": "obj-001",
+      "caseRef": "case-001",
+      "kind": "runtime_dom",
+      "capturedAt": "2026-08-30T09:04:00Z",
+      "integrityDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "sanitized": true,
+      "payload": {
+        "payloadType": "dom_fragment",
+        "content": { "hasQuery": true, "hasReset": true }
+      }
+    }
+  ],
+  "screenshots": [],
+  "issues": [],
+  "diagnostics": []
+}

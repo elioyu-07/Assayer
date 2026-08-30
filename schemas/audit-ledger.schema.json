@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/audit-ledger.schema.json",
+  "title": "AuditLedger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "createdAt", "scan", "ruleRegistry", "pageStates", "objects", "assessments", "cases", "evidence", "screenshots", "issues"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "scan": { "$ref": "scan-run.schema.json" },
+    "ruleRegistry": { "$ref": "rule-registry.schema.json" },
+    "pageStates": { "type": "array", "items": { "$ref": "page-state.schema.json" } },
+    "objects": { "type": "array", "items": { "$ref": "audit-object.schema.json" } },
+    "assessments": { "type": "array", "items": { "$ref": "rule-assessment.schema.json" } },
+    "cases": { "type": "array", "items": { "$ref": "reverse-case.schema.json" } },
+    "evidence": { "type": "array", "items": { "$ref": "evidence.schema.json" } },
+    "screenshots": { "type": "array", "items": { "$ref": "screenshot.schema.json" } },
+    "issues": { "type": "array", "items": { "$ref": "issue.schema.json" } },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["diagnosticId", "severity", "message", "createdAt"],
+        "properties": {
+          "diagnosticId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "severity": { "enum": ["info", "warning", "error", "fatal"] },
+          "code": { "type": "string" },
+          "message": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+          "details": { "type": "object" }
+        }
+      }
+    }
+  }
+}

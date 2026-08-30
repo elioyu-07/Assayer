@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/issue.schema.json",
+  "title": "Issue",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["issueId", "scanId", "assessmentRef", "objectRef", "rule", "result", "evidenceRefs", "screenshotRef", "severity", "title", "message", "impact", "recommendation", "createdAt"],
+  "properties": {
+    "issueId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "assessmentRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "result": { "const": "issue_found" },
+    "evidenceRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    },
+    "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "severity": { "$ref": "common.schema.json#/$defs/severity" },
+    "title": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "message": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "impact": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "recommendation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "createdAt": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

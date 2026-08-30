@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/screenshot.schema.json",
+  "title": "Screenshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["screenshotId", "scanId", "pageStateRef", "objectRef", "status", "capturedAt"],
+  "properties": {
+    "screenshotId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pageStateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "status": { "enum": ["captured", "not_located", "ambiguous", "rejected"] },
+    "capturedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "path": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "digest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "imageType": { "enum": ["png", "jpeg", "webp"] },
+    "width": { "type": "integer", "exclusiveMinimum": 0 },
+    "height": { "type": "integer", "exclusiveMinimum": 0 },
+    "problemBoundingBox": { "$ref": "common.schema.json#/$defs/boundingBox" },
+    "annotation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "failureReason": { "$ref": "common.schema.json#/$defs/reason" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "captured" } }, "required": ["status"] },
+      "then": { "required": ["path", "digest", "imageType", "width", "height", "problemBoundingBox", "annotation"] },
+      "else": { "required": ["failureReason"] }
+    }
+  ]
+}
