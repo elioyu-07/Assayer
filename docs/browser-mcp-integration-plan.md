@@ -67,7 +67,7 @@
 
 B07 拆分为 B07a、B07b 与 B07c：B07a/B07b 已完成，B07c 暂缓。B07b 只证明“能安全捕获并绑定原始对象图片”，不证明图片已脱敏；在 B07c 完成前，真实路径仍不能生成正式 `issue_found`。B08 已完成 JSON/MCP 传输，B09 已完成发布级故障注入，B10 已完成真实 URL 产品装配；传输层、产品入口和故障处理均不能绕过截图或脱敏门禁。
 
-B01–B12 证明的是 Host、浏览器和协议执行面。LLM 语义控制面按 [LLM Agent 调查层实施计划](llm-agent-integration-plan.md)的 C01–C07 推进；C01 已完成设计基线。当前 `BrowserHostRuntime.audit` 从产品语义上属于 smoke，C05 才把正式 `audit` 切换为 Codex Agent 驱动。
+B01–B12 证明的是 Host、浏览器和协议执行面。LLM 语义控制面按 [LLM Agent 调查层实施计划](llm-agent-integration-plan.md)的 C01–C07 推进；C01–C02 已完成，后续 22 个工作包见 [C03–C07 后续执行计划](implementation-plan-c03-c07.md)。当前 `BrowserHostRuntime.audit` 从产品语义上属于 smoke，C05 才把正式 `audit` 切换为 Codex Agent 驱动。
 
 ## 5. B07 拆分与脱敏状态决策
 

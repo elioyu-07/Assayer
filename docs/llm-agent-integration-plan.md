@@ -2,7 +2,7 @@
 
 | 元信息 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0-draft |
+| 文档版本 | 1.1.0 |
 | 日期 | 2026-08-31 |
 | 状态 | C01–C02 已完成；C03–C07 待实施 |
 | Owner | Agent Runtime / Host Core |
@@ -11,7 +11,7 @@
 
 本阶段把已经跑通的真实 Host 生命周期接入 Codex LLM 调查控制面。完成后，正式 `assayer audit` 由 Agent 根据冻结规则自主选择对象、规划 Case、补证和提交结论；确定性运行器只作为 `smoke` 与 CI oracle。
 
-权威调查循环见 [LLM 调查编排设计](llm-agent-orchestration.md)。
+权威调查循环见 [LLM 调查编排设计](llm-agent-orchestration.md)。C03–C07 的 22 个可执行工作包、依赖和逐项验收门槛见 [C03–C07 后续执行计划](implementation-plan-c03-c07.md)；该文档是后续子任务状态的权威清单。
 
 ## 2. 有序任务
 
@@ -38,6 +38,8 @@ C01
 ```
 
 C02 先固定协议，C03 才能实现动作与 Evidence；C04 只能消费已稳定的 Host 能力。C05 负责产品装配，不能提前把尚未闭环的 Skill 包装成正式入口。
+
+当前唯一 ready 工作包是 `C03a 可引用控件与列表发现`。后续任务不得跳过 C03a 的真实引用、失效和无 selector 泄露验收。
 
 ## 4. C07 最低样本矩阵
 

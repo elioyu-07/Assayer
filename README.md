@@ -14,6 +14,7 @@ Assayer 是面向测试/预发布 Web 站点的前端质量审计垂直智能体
 - Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定每个可判定的 `filter_region`；
 - 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09、B10、B11、B12 已完成；B12 已把真实 URL 接入通用 Host Case/Evidence/恢复/判定/账本全链路；B07c 自动敏感区域识别与像素脱敏暂缓；
 - B12 的 `BrowserHostRuntime.audit` 是确定性 smoke runner，不包含 LLM 自主对象选择、Case 规划、补证和语义判定；LLM 调查层按 [C01–C07 实施计划](docs/llm-agent-integration-plan.md)推进，C01–C02 已完成。
+- 后续已拆解为 [C03–C07 的 22 个执行工作包](docs/implementation-plan-c03-c07.md)；当前下一步是 C03a“可引用控件与列表发现”。
 
 公开页面当前可执行真实只读 smoke 试跑：
 
