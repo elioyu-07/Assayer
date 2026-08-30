@@ -17,6 +17,7 @@ from .browser_readonly import (BrowserLocatorRegistry,
                                ReadonlyBrowserPage)
 from .browser_session import BrowserSession, BrowserSessionFailure
 from .errors import HostError
+from .page import EntrypointExecution
 
 
 class BrowserNetworkGuard:
@@ -267,6 +268,53 @@ class BrowserSafeActionAdapter:
             page.reload(wait_until="domcontentloaded")
         else:
             raise HostError("ACTION_BLOCKED", "该浏览器动作尚未接入安全执行器")
+
+
+class BrowserEntrypointAdapter:
+    """Activate only Host-discovered tab entrypoints through fixed locators."""
+
+    TAB_LOCATOR_ID = re.compile(r"^tab-browser-(\d+)$")
+    TAB_SELECTOR = '[role="tab"], a[class*="tabs__item"], button[class*="tabs__item"], .tabs button, .tab'
+
+    def __init__(self, session: BrowserSession, page_adapter: BrowserReadOnlyPageAdapter,
+                 guard: BrowserNetworkGuard):
+        self._session = session
+        self._page = page_adapter
+        self._guard = guard
+
+    def explore(self, entrypoint: dict, page_state: dict, operation_id: str) -> EntrypointExecution:
+        if entrypoint.get("kind") != "tab":
+            return EntrypointExecution("unavailable", diagnostic="当前只支持探索 tab 入口")
+        match = self.TAB_LOCATOR_ID.fullmatch(entrypoint.get("hostLocatorId", ""))
+        if not match:
+            return EntrypointExecution("result_unknown", diagnostic="入口 locator 不是 Host 浏览器句柄")
+
+        def operation(context):
+            page = self._page.page_for_context(context)
+            tabs = page.locator(self.TAB_SELECTOR)
+            count = min(tabs.count(), 64)
+            expected = " ".join(str(entrypoint.get("label", "")).split())
+            matches = []
+            for index in range(count):
+                tab = tabs.nth(index)
+                label = tab.get_attribute("aria-label") or tab.inner_text()
+                if " ".join(str(label or "").split())[:120] == expected:
+                    matches.append(tab)
+            if len(matches) != 1:
+                return EntrypointExecution("result_unknown", diagnostic="Tab 入口无法按标签唯一重新绑定")
+            with self._guard.operation(operation_id, lambda req: self._guard.policy.classify_request(req, page_state.get("origin", ""))):
+                matches[0].click()
+                page.wait_for_timeout(self._session.profile.network_idle_window_ms)
+            requests = self._guard.drain_requests()
+            decisions = self._guard.drain_decisions()
+            for decision in decisions:
+                if decision.outcome == "blocked":
+                    return EntrypointExecution("request_blocked", requests=requests, diagnostic=decision.reason, page_changed=True)
+                if decision.outcome in {"unknown", "already_sent"}:
+                    return EntrypointExecution("result_unknown", requests=requests, diagnostic=decision.reason, page_changed=True)
+            return EntrypointExecution("succeeded", requests=requests, page_changed=True)
+
+        return self._session.run_serial(operation)
 
 
 @dataclass(frozen=True)

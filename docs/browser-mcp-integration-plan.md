@@ -4,7 +4,7 @@
 |---|---|
 | 文档版本 | 1.0.0-draft |
 | 日期 | 2026-08-30 |
-| 状态 | B01–B10 已完成（B07c 脱敏增强按决策暂缓） |
+| 状态 | B01–B11 已完成（B07c 脱敏增强按决策暂缓） |
 | Owner | Host Core / Security Owner |
 
 ## 1. 目标与完成定义
@@ -62,6 +62,7 @@
 | B08 | 通用 JSON CLI 与 MCP 传输 | JSON Lines invoke、可选 SDK stdio MCP tools、Scan/Core 路由、协议一致性测试 | 同一请求两种传输产生等价响应；凭据值不经过 MCP/命令参数 |
 | B09 | 发布级集成与故障注入 | 本地测试站点、浏览器 E2E、超时/崩溃/冲突测试、确定性韧性扫描、运行手册 | 已完成（垂直切片 020）；安全门槛通过，产物无 HTML |
 | B10 | 真实 URL 可运行闭环 | anonymous 模式、BrowserHostRuntime、`agent-f audit/serve`、真实 JSON/MCP 装配 | 已完成（垂直切片 021）；给定公开 URL 可自动启动 Chromium 并进入同一 Host 协议，Session 与 Scan 生命周期闭合 |
+| B11 | 页面探索与真实数据审计 | `explore_entrypoint`、固定 Tab 识别/切换、同源只读 XHR 窗口、结构摘要与有界遍历 | 已完成（垂直切片 022）；给定 URL 可遍历 Host 发现的 Tab；同源只读数据不被误杀；页面状态保留真实结构、错误和 Evidence；写/跨源/WebSocket 仍阻断 |
 
 B07 拆分为 B07a、B07b 与 B07c：B07a/B07b 已完成，B07c 暂缓。B07b 只证明“能安全捕获并绑定原始对象图片”，不证明图片已脱敏；在 B07c 完成前，真实路径仍不能生成正式 `issue_found`。B08 已完成 JSON/MCP 传输，B09 已完成发布级故障注入，B10 已完成真实 URL 产品装配；传输层、产品入口和故障处理均不能绕过截图或脱敏门禁。
 

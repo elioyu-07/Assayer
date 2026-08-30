@@ -22,6 +22,7 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
     return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
   };
   const clean = (value, limit = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
+  const safeRoute = location.hash.startsWith('#/') ? location.hash.slice(1).split('?')[0] : location.pathname;
   const semanticAction = (value) => {
     const label = clean(value, 80).toLowerCase();
     if (/(reset|clear|重置|清空|恢复默认)/.test(label)) return 'reset';
@@ -31,14 +32,14 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
   const regions = [...document.querySelectorAll('[role="search"], form, [data-testid*="filter" i], [class*="filter" i]')]
     .filter(visible).slice(0, 128);
   const target = regions[targetIndex] || null;
-  if (!target) return {status: 'not_found', route: location.pathname};
+  if (!target) return {status: 'not_found', route: safeRoute};
   const role = clean(target.getAttribute('role') || (target.tagName === 'FORM' ? 'form' : 'region'), 64);
   const label = clean(target.getAttribute('aria-label') || target.querySelector('legend')?.textContent || target.textContent, 200);
   const controls = [...target.querySelectorAll('input, select, textarea, button, [aria-expanded], [role="tab"]')].slice(0, 128);
   return {
-    status: 'matched', route: location.pathname,
+    status: 'matched', route: safeRoute,
     stateKind: document.querySelector('[role="dialog"]') ? 'dialog' : 'page',
-    identityMaterial: ['filter_region', role, clean(label), location.pathname, targetIndex].join('|'),
+    identityMaterial: ['filter_region', role, clean(label), safeRoute, targetIndex].join('|'),
     object: {role, accessibleNamePresent: Boolean(label), accessibleNameLength: label.length, visibleTextLength: clean(target.innerText, 1000).length},
     controls: controls.map((item) => ({
       semanticAction: semanticAction(item.getAttribute('aria-label') || item.innerText || ''),
@@ -62,16 +63,17 @@ SCREENSHOT_PROBE_V1 = """({targetIndex}) => {
     return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
   };
   const clean = (value, limit = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
+  const safeRoute = location.hash.startsWith('#/') ? location.hash.slice(1).split('?')[0] : location.pathname;
   const regions = [...document.querySelectorAll('[role="search"], form, [data-testid*="filter" i], [class*="filter" i]')]
     .filter(visible).slice(0, 128);
   const target = regions[targetIndex] || null;
-  if (!target) return {status: 'not_found', route: location.pathname};
+  if (!target) return {status: 'not_found', route: safeRoute};
   const role = clean(target.getAttribute('role') || (target.tagName === 'FORM' ? 'form' : 'region'), 64);
   const label = clean(target.getAttribute('aria-label') || target.querySelector('legend')?.textContent || target.textContent, 200);
   const box = target.getBoundingClientRect();
   return {
-    status: 'matched', route: location.pathname,
-    identityMaterial: ['filter_region', role, clean(label), location.pathname, targetIndex].join('|'),
+    status: 'matched', route: safeRoute,
+    identityMaterial: ['filter_region', role, clean(label), safeRoute, targetIndex].join('|'),
     boundingBox: {x: box.x, y: box.y, width: box.width, height: box.height},
     viewportWidth: innerWidth, viewportHeight: innerHeight
   };

@@ -26,6 +26,14 @@ WEBSOCKET_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>WebSocket Or
 HASH_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Hash Orders</title></head>
 <body><main><form role='search' aria-label='Hash filters'><button type='button'>Query</button></form></main></body></html>"""
 
+TAB_PAGE = b"""<!doctype html><html><head><title>Tab App</title></head><body>
+<nav><a class='lease-tabs__item active' onclick='show(0)'>Overview</a><a class='lease-tabs__item' onclick='show(1)'>Details</a></nav>
+<main id='content'>Loading</main><script>
+const tabs=[...document.querySelectorAll('.lease-tabs__item')];
+function show(index){tabs.forEach((tab,i)=>tab.classList.toggle('active',i===index));if(index===1){fetch('/tab-data').then(r=>r.text()).then(v=>content.innerHTML=`<form role="search" aria-label="Detail filters"><label>${v}<input></label><button type="button">Query</button></form>`);}}
+fetch('/startup-data').then(r=>r.text()).then(v=>content.textContent=v);
+</script></body></html>"""
+
 
 def action_page(path):
     if "action-route-page" in path:
@@ -51,6 +59,8 @@ class SiteHandler(BaseHTTPRequestHandler):
     post_actions = 0
     cross_actions = 0
     websocket_handshakes = 0
+    startup_reads = 0
+    tab_reads = 0
     server_port = 0
 
     def do_GET(self):
@@ -70,6 +80,14 @@ class SiteHandler(BaseHTTPRequestHandler):
             body = WEBSOCKET_PAGE
         elif self.path == "/hash-app":
             body = HASH_PAGE
+        elif self.path == "/tab-app":
+            body = TAB_PAGE
+        elif self.path == "/startup-data":
+            type(self).startup_reads += 1
+            body = b"Loaded overview data"
+        elif self.path == "/tab-data":
+            type(self).tab_reads += 1
+            body = b"Loaded detail data"
         elif self.path == "/hmr":
             type(self).websocket_handshakes += 1
             body = b"websocket must be intercepted"
@@ -269,6 +287,31 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 stored = runtime.core._store.get_page_state(result["result"]["pageStateId"])
                 self.assertNotIn("token", json.dumps(stored))
                 self.assertNotIn("secret", json.dumps(stored))
+            finally:
+                runtime.close()
+
+    def test_real_url_runtime_loads_readonly_xhr_and_explores_tabs(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        SiteHandler.startup_reads = 0
+        SiteHandler.tab_reads = 0
+        with tempfile.TemporaryDirectory() as output:
+            try:
+                runtime = BrowserHostRuntime(f"{origin}/tab-app", output)
+            except Exception as error:
+                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            try:
+                result = runtime.probe(f"{origin}/tab-app")
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["result"]["summary"]["visitedPageStates"], 2)
+                self.assertEqual(result["result"]["summary"]["tabsDiscovered"], 2)
+                self.assertEqual(result["result"]["summary"]["evidenceCount"], 1)
+                self.assertEqual([page["activeTab"] for page in result["result"]["pages"]], ["Overview", "Details"])
+                self.assertIn("Loaded overview data", result["result"]["pages"][0]["visibleTextPreview"])
+                self.assertIn("Loaded detail data", result["result"]["pages"][1]["visibleTextPreview"])
+                self.assertEqual(SiteHandler.startup_reads, 1)
+                self.assertEqual(SiteHandler.tab_reads, 1)
+                self.assertEqual(result["result"]["summary"]["observedWrites"], 0)
+                self.assertEqual(result["result"]["summary"]["unknownRequests"], 0)
             finally:
                 runtime.close()
 

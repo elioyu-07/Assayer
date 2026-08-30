@@ -209,6 +209,10 @@ class SQLiteStore:
         rows = self._conn.execute("SELECT entity_json FROM entrypoints WHERE page_state_id=? ORDER BY entrypoint_id", (page_state_id,)).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def get_entrypoint(self, entrypoint_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM entrypoints WHERE entrypoint_id=?", (entrypoint_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
     def get_candidates(self, page_state_id: str) -> list[dict]:
         rows = self._conn.execute("SELECT entity_json FROM page_candidates WHERE page_state_id=? ORDER BY candidate_id", (page_state_id,)).fetchall()
         return [json.loads(row[0]) for row in rows]

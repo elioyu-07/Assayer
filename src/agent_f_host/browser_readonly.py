@@ -103,6 +103,8 @@ class BrowserSnapshot:
     network_summary: dict | None = None
     route: str | None = None
     state_kind: str = "page"
+    structure_summary: dict | None = None
+    active_tab: str | None = None
 
 
 class BrowserLocatorRegistry:
@@ -160,9 +162,11 @@ READONLY_PROBE_V1 = """() => {
     const box = element.getBoundingClientRect();
     return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
   };
-  const regions = [...document.querySelectorAll('[role="search"], form, [data-testid*="filter" i], [class*="filter" i]')]
-    .filter(visible).slice(0, 128);
-  const candidates = regions.map((element, index) => {
+  const regionSelector = '[role="search"], form, [data-testid*="filter" i], [class*="filter" i]';
+  const allRegions = [...document.querySelectorAll(regionSelector)].filter(visible).slice(0, 512);
+  const regions = allRegions.map((element, index) => ({element, index}))
+    .filter(({element}) => !allRegions.some((other) => other !== element && other.contains(element))).slice(0, 128);
+  const candidates = regions.map(({element, index}) => {
     const box = element.getBoundingClientRect();
     const role = clean(element.getAttribute('role') || (element.tagName === 'FORM' ? 'form' : 'region'), 64);
     const label = clean(element.getAttribute('aria-label') || element.querySelector('legend')?.textContent || element.textContent, 200);
@@ -175,12 +179,30 @@ READONLY_PROBE_V1 = """() => {
       viewport_width: innerWidth, viewport_height: innerHeight
     };
   });
-  const entrypoints = candidates.map((item) => ({
+  const filterEntrypoints = candidates.map((item) => ({
     kind: 'safe_action', label: item.label, intent: 'inspect_filter_region', status: 'unprocessed'
   }));
+  const tabSelector = '[role="tab"], a[class*="tabs__item"], button[class*="tabs__item"], .tabs button, .tab';
+  const tabs = [...document.querySelectorAll(tabSelector)].filter(visible).slice(0, 64);
+  const tabEntrypoints = tabs.map((element) => ({
+    kind: 'tab', label: clean(element.getAttribute('aria-label') || element.innerText || element.textContent, 120),
+    intent: 'switch_tab',
+    status: element.getAttribute('aria-selected') === 'true' || /(^|\\s)(active|is-active|selected)(\\s|$)/.test(String(element.className)) || element.getAttribute('data-active') === 'true' ? 'processed' : 'unprocessed',
+    hostLocatorId: `tab-browser-${tabs.indexOf(element)}`
+  })).filter((item) => item.label);
+  const active = tabs.find((element) => element.getAttribute('aria-selected') === 'true' ||
+    /(^|\\s)(active|is-active|selected)(\\s|$)/.test(String(element.className)) || element.getAttribute('data-active') === 'true') || null;
+  const activeTab = active ? clean(active.getAttribute('aria-label') || active.innerText || active.textContent, 120) : null;
+  const visibleCount = (selector) => [...document.querySelectorAll(selector)].filter(visible).length;
+  const errorTexts = [...document.querySelectorAll('[role="alert"], .el-message--error, [class*="error" i]')]
+    .filter(visible).map((element) => clean(element.innerText || element.textContent, 160)).filter(Boolean).slice(0, 32);
   return {
     visibleText: clean(document.body?.innerText, 100000), route: safeRoute,
-    stateKind: document.querySelector('[role="dialog"]') ? 'dialog' : 'page', entrypoints, candidates,
+    stateKind: visibleCount('[role="dialog"], dialog[open]') ? 'dialog' : (activeTab ? 'tab' : 'page'),
+    activeTab, entrypoints: [...tabEntrypoints, ...filterEntrypoints], candidates,
+    structureSummary: {tabs: tabs.length, buttons: visibleCount('button'), fields: visibleCount('input, select, textarea'),
+      tables: visibleCount('table, [role="grid"]'), dialogs: visibleCount('[role="dialog"], dialog[open]'),
+      links: visibleCount('a'), errorCount: errorTexts.length, errorTexts},
     networkSummary: {status: 'unavailable_until_B05'}
   };
 }"""
@@ -309,12 +331,15 @@ class BrowserReadOnlyPageAdapter:
             network_summary=value.get("networkSummary") if isinstance(value.get("networkSummary"), dict) else {},
             route=value.get("route") if isinstance(value.get("route"), str) else None,
             state_kind=value.get("stateKind") if isinstance(value.get("stateKind"), str) else "page",
+            structure_summary=value.get("structureSummary") if isinstance(value.get("structureSummary"), dict) else {},
+            active_tab=value.get("activeTab") if isinstance(value.get("activeTab"), str) else None,
         )
         if self._network_summary_provider is not None:
             snapshot = BrowserSnapshot(
                 visible_text=snapshot.visible_text, entrypoints=snapshot.entrypoints,
                 candidates=snapshot.candidates, network_summary=self._network_summary_provider(),
                 route=snapshot.route, state_kind=snapshot.state_kind,
+                structure_summary=snapshot.structure_summary, active_tab=snapshot.active_tab,
             )
         return snapshot
 
@@ -326,12 +351,20 @@ class BrowserReadOnlyPageAdapter:
         self.locator_registry.replace(page_state_id, tuple(item[1] for item in materialized))
         snapshot_route = urlparse(snapshot.route).path if snapshot.route else route
         safe_route = snapshot_route if snapshot_route.startswith("/") else route
-        identity_material = "|".join((origin, safe_route, snapshot.state_kind, str(title)))
+        identity_material = "|".join((origin, safe_route, snapshot.state_kind, snapshot.active_tab or "", str(title)))
         return PageObservation(
             url=url, origin=origin, route=safe_route, title=str(title), state_kind=snapshot.state_kind,
             dom_material=dom, identity_material=identity_material, visible_text=snapshot.visible_text,
             entrypoints=entries, candidates=candidates, network_summary=snapshot.network_summary,
+            structure_summary=snapshot.structure_summary, active_tab=snapshot.active_tab,
         )
+
+    def settle_readonly(self) -> None:
+        """Keep the caller-owned network operation open for one bounded quiet window."""
+        def operation(context):
+            page = self._get_page(context)
+            page.wait_for_timeout(self._session.profile.network_idle_window_ms)
+        self._session.run_serial(operation)
 
     @staticmethod
     def _entrypoint(item: dict) -> EntrypointObservation:
@@ -345,7 +378,8 @@ class BrowserReadOnlyPageAdapter:
             raise HostError("INTERNAL_FAILURE", "只读探针入口状态无效")
         return EntrypointObservation(item["kind"], item["label"], item["intent"], status=status,
                                      reason_code=item.get("reason_code", "NOT_YET_EXPLORED"),
-                                     reason_message=item.get("reason_message", "入口尚未探索。"))
+                                     reason_message=item.get("reason_message", "入口尚未探索。"),
+                                     host_locator_id=item.get("hostLocatorId") if isinstance(item.get("hostLocatorId"), str) else None)
 
     @staticmethod
     def _candidate(item: dict) -> tuple[CandidateObservation, tuple[str, ObjectMatch]]:

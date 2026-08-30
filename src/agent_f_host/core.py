@@ -13,8 +13,9 @@ from urllib.parse import urlparse
 from jsonschema import Draft202012Validator, RefResolver
 
 from .auth import CredentialVault, LoginAdapter, LoginCoordinator, UnavailableLoginAdapter
+from .browser_session import BrowserSessionFailure
 from .errors import HostError
-from .page import ReadOnlyPageAdapter, UnavailablePageAdapter
+from .page import EntrypointAdapter, ReadOnlyPageAdapter, UnavailableEntrypointAdapter, UnavailablePageAdapter
 from .object_identity import ObjectIdentityAdapter, UnavailableObjectIdentityAdapter
 from .action_safety import (ActionExecution, ActionSafetyPolicy,
                             SafeActionAdapter, UnavailableActionAdapter)
@@ -25,7 +26,7 @@ from .store import SQLiteStore
 
 
 TOOL_KINDS = {
-    "start_audit": "bootstrap", "inspect_page": "read", "inspect_object": "read",
+    "start_audit": "bootstrap", "inspect_page": "read", "explore_entrypoint": "browser_action", "inspect_object": "read",
     "begin_case": "lifecycle", "perform_action": "browser_action", "restore_case": "recovery",
     "inspect_source": "read", "capture_evidence": "read", "prepare_decision": "decision_preparation",
     "commit_decision": "decision_commit", "complete_audit": "lifecycle",
@@ -42,7 +43,8 @@ class HostCore:
                  recovery_adapter: RecoveryAdapter | None = None, evidence_adapter: EvidenceAdapter | None = None,
                  evidence_sanitizer: EvidenceSanitizer | None = None, report_builder: DerivedReportBuilder | None = None,
                  login_coordinator: LoginCoordinator | None = None,
-                 scan_id_factory: Callable[[], str] | None = None):
+                 scan_id_factory: Callable[[], str] | None = None,
+                 entrypoint_adapter: EntrypointAdapter | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -80,6 +82,7 @@ class HostCore:
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
         self._login_coordinator = login_coordinator or LoginCoordinator()
         self._scan_id_factory = scan_id_factory or (lambda: self._new_id("scan"))
+        self._entrypoint_adapter = entrypoint_adapter or UnavailableEntrypointAdapter()
         self._page_adapter = page_adapter or UnavailablePageAdapter()
         self._object_identity_adapter = object_identity_adapter or UnavailableObjectIdentityAdapter()
         self._action_adapter = action_adapter or UnavailableActionAdapter()
@@ -137,6 +140,7 @@ class HostCore:
             self._assert_same_digest(existing, self._request_digest(request), "幂等键对应不同请求摘要")
             if existing["status"] == "running":
                 if tool == "inspect_page": return self._inspect_page(request, scan, existing)
+                if tool == "explore_entrypoint": return self._explore_entrypoint(request, scan, existing)
                 if tool == "inspect_object": return self._inspect_object(request, scan, existing)
                 if tool == "begin_case": return self._begin_case(request, scan, existing)
                 if tool == "capture_evidence": return self._capture_evidence(request, scan, existing)
@@ -146,11 +150,13 @@ class HostCore:
             return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"} and (tool != "complete_audit" or scan["status"] == "completed"):
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision", "complete_audit"}
+        implemented = tool in {"inspect_page", "explore_entrypoint", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision", "complete_audit"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
                 return self._inspect_page(request, scan, operation)
+            if operation["status"] == "running" and tool == "explore_entrypoint":
+                return self._explore_entrypoint(request, scan, operation)
             if operation["status"] == "running" and tool == "inspect_object":
                 return self._inspect_object(request, scan, operation)
             if operation["status"] == "running" and tool == "begin_case":
@@ -166,6 +172,8 @@ class HostCore:
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
+        if tool == "explore_entrypoint":
+            return self._explore_entrypoint(request, scan, operation)
         if tool == "inspect_object":
             return self._inspect_object(request, scan, operation)
         if tool == "begin_case":
@@ -282,15 +290,18 @@ class HostCore:
             self._store.update_operation(operation)
         return self._response(request, scan, "ok", result=result, operation=operation)
 
-    def _materialize_page(self, scan, page_state_id, observed):
+    def _materialize_page(self, scan, page_state_id, observed, parent_page_state_id=None):
         revision = scan["runRevision"]
         entrypoints = []
         embedded = []
         for index, item in enumerate(observed.entrypoints):
             entrypoint_id = self._stable_id("entrypoint", page_state_id, str(index), item.kind, item.label)
             reason = {"code":item.reason_code,"message":item.reason_message}
-            entrypoints.append({"entrypointId":entrypoint_id,"scanId":scan["scanId"],"pageStateRef":page_state_id,
-                                "kind":item.kind,"label":item.label,"status":item.status,"discoveredAtRevision":revision,"reason":reason})
+            entrypoint = {"entrypointId":entrypoint_id,"scanId":scan["scanId"],"pageStateRef":page_state_id,
+                          "kind":item.kind,"label":item.label,"status":item.status,"discoveredAtRevision":revision,"reason":reason}
+            if item.host_locator_id:
+                entrypoint["hostLocatorId"] = item.host_locator_id
+            entrypoints.append(entrypoint)
             embedded.append({"entrypointId":entrypoint_id,"label":item.label,"intent":item.intent,"status":item.status,"reason":reason})
         candidates = []
         for item in observed.candidates:
@@ -306,7 +317,10 @@ class HostCore:
                 "observedAt":self._now(),"domDigest":self._digest(observed.dom_material),
                 "identity":{"algorithmVersion":"1.0.0","materialDigest":self._digest(observed.identity_material)},
                 "safeEntrypoints":embedded,"objectRefs":[]}
-        inspection = {"visibleText":observed.visible_text,"networkSummary":observed.network_summary or {}}
+        if parent_page_state_id:
+            page["parentPageStateId"] = parent_page_state_id
+        inspection = {"visibleText":observed.visible_text,"networkSummary":observed.network_summary or {},
+                      "structureSummary":observed.structure_summary or {},"activeTab":observed.active_tab}
         return page, inspection, entrypoints, candidates
 
     def _inspect_page_result(self, request, scan, operation, page, inspection, entrypoints, candidates):
@@ -320,7 +334,75 @@ class HostCore:
             result["visibleText"] = inspection.get("visibleText", "")
         if "networkSummary" in include:
             result["networkSummary"] = inspection.get("networkSummary", {})
+        if inspection.get("structureSummary") is not None:
+            result["structureSummary"] = inspection.get("structureSummary", {})
+        if inspection.get("activeTab"):
+            result["activeTab"] = inspection["activeTab"]
         return result
+
+    def _explore_entrypoint(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        previous_id = data["pageStateId"]
+        if previous_id != scan.get("currentPageStateId"):
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "入口来源不是当前活动 PageState")
+        entrypoint = next((item for item in self._store.get_entrypoints(previous_id)
+                           if item["entrypointId"] == data["entrypointId"]), None)
+        if not entrypoint or entrypoint.get("scanId") != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Entrypoint 不存在于当前页面")
+        operation_id = operation.get("operation_id") or operation["operationId"]
+        try:
+            execution = self._entrypoint_adapter.explore(entrypoint, self._store.get_page_state(previous_id), operation_id)
+        except BrowserSessionFailure:
+            return self._finish_operation_failure(request, scan, operation, "BROWSER_SESSION_FAILED", "入口探索时浏览器 Session 失败")
+        except Exception:
+            return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "入口探索适配器执行失败")
+        if execution.status == "unavailable":
+            return self._finish_operation_failure(request, scan, operation, "ACTION_ADAPTER_UNAVAILABLE", execution.diagnostic or "入口探索不可用")
+        if execution.status != "succeeded":
+            code = "REQUEST_BLOCKED" if execution.status == "request_blocked" and not execution.page_changed else "BROWSER_SESSION_FAILED"
+            return self._finish_operation_failure(request, scan, operation, code, execution.diagnostic or "入口探索结果无法证明")
+        next_id = self._new_id("page")
+        scan["runRevision"] += 1
+        scan["currentPageStateId"] = next_id
+        try:
+            observed = self._page_adapter.observe(next_id)
+            if observed.active_tab != entrypoint.get("label"):
+                raise HostError("BROWSER_SESSION_FAILED", "Tab 切换后活动入口与目标不一致")
+            page, inspection, entrypoints, candidates = self._materialize_page(scan, next_id, observed, previous_id)
+            self._validate_entity(self._page_state_validator, page, "PageState")
+            for item in entrypoints:
+                self._validate_entity(self._entrypoint_validator, item, "Entrypoint")
+            for item in candidates:
+                self._validate_entity(self._candidate_validator, item, "PageCandidate")
+        except Exception:
+            return self._finish_operation_failure(request, scan, operation, "BROWSER_SESSION_FAILED", "入口切换后无法建立可信 PageState")
+        request_observations = []
+        for index, network in enumerate(execution.requests):
+            decision = self._action_policy.classify_request(network, page.get("origin", ""))
+            parsed = urlparse(network.url)
+            safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else parsed.path
+            item = {"observationId":self._stable_id("request", operation_id, str(index)),"scanId":scan["scanId"],
+                    "operationId":operation_id,"method":network.method.upper(),"url":safe_url,
+                    "transport":network.transport,"sent":network.sent,"outcome":decision.outcome,
+                    "code":decision.code,"reason":decision.reason}
+            self._validate_entity(self._request_observation_validator, item, "RequestObservation")
+            request_observations.append(item)
+        result = {"operationId":operation_id,"runRevision":scan["runRevision"],"entrypointId":entrypoint["entrypointId"],
+                  "previousPageStateId":previous_id,"pageStateId":next_id,
+                  "candidateRefs":[item["candidateId"] for item in candidates],
+                  "entrypointRefs":[item["entrypointId"] for item in entrypoints],"route":page.get("route", ""),
+                  "title":page.get("title", ""),"structureSummary":inspection.get("structureSummary", {}),
+                  "networkSummary":inspection.get("networkSummary", {}),"visibleText":inspection.get("visibleText", "")}
+        if inspection.get("activeTab"):
+            result["activeTab"] = inspection["activeTab"]
+        operation.update({"status":"succeeded","resultJson":json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        with self._store.transaction():
+            self._store.insert_page_inspection(page, inspection, entrypoints, candidates)
+            for item in request_observations:
+                self._store.insert_request_observation(item)
+            self._store.update_scan(scan)
+            self._store.update_operation(operation)
+        return self._response(request, scan, "ok", result=result, operation=operation)
 
     def _inspect_object(self, request: dict, scan: dict, operation: dict) -> dict:
         source_kind = "candidate" if "candidateId" in request["input"] else "audit_object"
@@ -1358,7 +1440,7 @@ class HostCore:
             raise HostError("UNKNOWN_TOOL", f"未知工具: {request['tool']}")
 
     def _validate_tool_input(self, tool: str, value: dict) -> None:
-        name = {"start_audit":"startAuditInput","inspect_page":"inspectPageInput","inspect_object":"inspectObjectInput",
+        name = {"start_audit":"startAuditInput","inspect_page":"inspectPageInput","explore_entrypoint":"exploreEntrypointInput","inspect_object":"inspectObjectInput",
                 "begin_case":"beginCaseInput","perform_action":"performActionInput","restore_case":"restoreCaseInput",
                 "inspect_source":"inspectSourceInput","capture_evidence":"captureEvidenceInput","prepare_decision":"prepareDecisionInput",
                 "commit_decision":"commitDecisionInput","get_operation":"getOperationInput","complete_audit":"completeAuditInput"}[tool]
@@ -1367,7 +1449,7 @@ class HostCore:
             raise HostError("INVALID_REQUEST", errors[0].message, next_step="fix_tool_input")
 
     def _validate_tool_output(self, tool: str, value: dict) -> None:
-        name = {"start_audit":"startAuditOutput","inspect_page":"inspectPageOutput","inspect_object":"inspectObjectOutput",
+        name = {"start_audit":"startAuditOutput","inspect_page":"inspectPageOutput","explore_entrypoint":"exploreEntrypointOutput","inspect_object":"inspectObjectOutput",
                 "begin_case":"beginCaseOutput","perform_action":"performActionOutput","restore_case":"restoreCaseOutput",
                 "inspect_source":"inspectSourceOutput","capture_evidence":"captureEvidenceOutput","prepare_decision":"prepareDecisionOutput",
                 "commit_decision":"commitDecisionOutput","get_operation":"getOperationOutput","complete_audit":"completeAuditOutput"}[tool]

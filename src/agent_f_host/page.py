@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from .action_safety import NetworkRequest
+
 from .errors import HostError
 
 
@@ -14,6 +16,7 @@ class EntrypointObservation:
     status: str = "unprocessed"
     reason_code: str = "NOT_YET_EXPLORED"
     reason_message: str = "入口尚未探索。"
+    host_locator_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,25 @@ class PageObservation:
     entrypoints: tuple[EntrypointObservation, ...] = ()
     candidates: tuple[CandidateObservation, ...] = ()
     network_summary: dict | None = None
+    structure_summary: dict | None = None
+    active_tab: str | None = None
+
+
+@dataclass(frozen=True)
+class EntrypointExecution:
+    status: str  # succeeded, request_blocked, result_unknown, unavailable
+    requests: tuple[NetworkRequest, ...] = ()
+    diagnostic: str | None = None
+    page_changed: bool = False
+
+
+class EntrypointAdapter(Protocol):
+    def explore(self, entrypoint: dict, page_state: dict, operation_id: str) -> EntrypointExecution: ...
+
+
+class UnavailableEntrypointAdapter:
+    def explore(self, entrypoint, page_state, operation_id):
+        return EntrypointExecution("unavailable", diagnostic="页面入口探索适配器未配置")
 
 
 class ReadOnlyPageAdapter(Protocol):

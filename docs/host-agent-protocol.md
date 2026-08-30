@@ -217,6 +217,12 @@ Bootstrap 请求不得伪造 `scanId`、`runId` 或 `expectedRunRevision`。成�
 
 Host 不把候选对象直接当作正式待检查对象。Candidate 只保存在运行存储中；只有后续 `inspect_object(candidateId)` 唯一验证成功后才能生成 AuditObject。
 
+#### 6.2.1 `explore_entrypoint`
+
+只探索当前 PageState 中由 Host 固定探针发现的安全入口。B11 首版只支持 `kind=tab`；请求只能传 `pageStateId` 和 `entrypointId`，不得携带 selector、脚本、URL 或任意点击参数。
+
+成功切换后 Host 创建新的不可变 PageState，记录 `parentPageStateId`，更新 Scan 的 `currentPageStateId` 并递增一次 `runRevision`。切换期间只允许可归因的同源 GET/HEAD/OPTIONS；写、跨源和主动传输仍在发送前阻断。响应返回新 PageState 的候选、入口、活动 Tab、结构摘要和网络摘要。
+
 ### 6.3 `inspect_object`
 
 读取一个已验证对象的局部上下文。
@@ -424,6 +430,7 @@ Host 最终校验：
 
 ```text
 inspect_page
+  → explore_entrypoint（若存在未处理的安全 Tab）
   → 选择一个 Host 已验证对象
   → inspect_object
   → 判断适用规范

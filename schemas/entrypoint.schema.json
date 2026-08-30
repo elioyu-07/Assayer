@@ -14,6 +14,7 @@
     "label": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "status": { "enum": ["discovered", "processed", "skipped", "unprocessed"] },
     "discoveredAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "hostLocatorId": { "type": "string", "pattern": "^tab-browser-[0-9]{1,3}$" },
     "reason": { "$ref": "common.schema.json#/$defs/reason" }
   },
   "allOf": [{ "if": { "properties": { "status": { "enum": ["skipped", "unprocessed"] } }, "required": ["status"] }, "then": { "required": ["reason"] } }]

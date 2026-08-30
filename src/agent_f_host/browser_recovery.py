@@ -5,7 +5,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from .action_safety import ActionSafetyPolicy
-from .browser_action import BrowserNetworkGuard, BrowserSafeActionAdapter
+from .browser_action import BrowserEntrypointAdapter, BrowserNetworkGuard, BrowserSafeActionAdapter
 from .browser_readonly import (BrowserLocatorRegistry, BrowserObjectIdentityAdapter,
                                BrowserReadOnlyPageAdapter, ReadonlyBrowserPage)
 from .browser_session import BrowserSession
@@ -232,6 +232,7 @@ class RecoverableBrowserAdapterBundle:
     recovery: BrowserRecoveryAdapter
     network_guard: BrowserNetworkGuard
     evidence: BrowserEvidenceAdapter
+    entrypoint: BrowserEntrypointAdapter
 
 
 def create_recoverable_browser_adapter_bundle(
@@ -250,4 +251,5 @@ def create_recoverable_browser_adapter_bundle(
     action = BrowserSafeActionAdapter(session, page, guard, locator_registry=registry)
     recovery = BrowserRecoveryAdapter(session, page, identity, action, guard, policy=policy)
     evidence = BrowserEvidenceAdapter(session, page, identity, network_guard=guard, policy=policy)
-    return RecoverableBrowserAdapterBundle(page, identity, action, recovery, guard, evidence)
+    entrypoint = BrowserEntrypointAdapter(session, page, guard)
+    return RecoverableBrowserAdapterBundle(page, identity, action, recovery, guard, evidence, entrypoint)

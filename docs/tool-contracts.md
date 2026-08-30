@@ -6,6 +6,7 @@
 |---|---|---|---|
 | `start_audit` | `startAuditInput` | `startAuditOutput` | `bootstrap` |
 | `inspect_page` | `inspectPageInput` | `inspectPageOutput` | `read` |
+| `explore_entrypoint` | `exploreEntrypointInput` | `exploreEntrypointOutput` | `browser_action` |
 | `inspect_object` | `inspectObjectInput` | `inspectObjectOutput` | `read` |
 | `begin_case` | `beginCaseInput` | `beginCaseOutput` | `lifecycle` |
 | `perform_action` | `performActionInput` | `performActionOutput` | `browser_action` |

@@ -12,16 +12,24 @@ from .browser_recovery import create_recoverable_browser_adapter_bundle
 from .browser_session import BrowserProfile, BrowserSession
 from .core import HostCore
 from .errors import HostError
+from .action_safety import ActionSafetyPolicy
+from .evidence import EvidenceSanitizer
 
 
 class AnonymousBrowserLoginAdapter:
     """Navigate to a public URL; no credential value crosses the Core boundary."""
 
-    def __init__(self, page):
+    def __init__(self, page, guard=None):
         self._page = page
+        self._guard = guard
 
     def authenticate_anonymous(self, url):
-        self._page.navigate(url)
+        if self._guard is None:
+            self._page.navigate(url)
+        else:
+            with self._guard.operation("bootstrap", lambda req: ActionSafetyPolicy().classify_request(req, self._guard.allowed_origin)):
+                self._page.navigate(url)
+                self._page.settle_readonly()
         return LoginResult("succeeded", current_page_state_id="page-bootstrap-001",
                            capabilities=("runtime", "dom", "interaction", "visual"))
 
@@ -43,16 +51,18 @@ class BrowserHostRuntime:
         try:
             self.bundle = create_recoverable_browser_adapter_bundle(self.session, allowed_origin=origin)
             self.core = HostCore(
-                login_adapter=AnonymousBrowserLoginAdapter(self.bundle.page),
+                login_adapter=AnonymousBrowserLoginAdapter(self.bundle.page, self.bundle.network_guard),
                 page_adapter=self.bundle.page, object_identity_adapter=self.bundle.identity,
                 action_adapter=self.bundle.action, recovery_adapter=self.bundle.recovery,
                 evidence_adapter=self.bundle.evidence,
                 scan_id_factory=lambda: scan_id,
+                entrypoint_adapter=self.bundle.entrypoint,
             )
         except Exception:
             self.session.close()
             raise
         self._store = self.core._store
+        self._sanitizer = EvidenceSanitizer()
         self._bootstrap_key = None
 
     def handle(self, request: dict) -> dict:
@@ -102,28 +112,79 @@ class BrowserHostRuntime:
             "protocolVersion": "1.0", "requestId": "runtime-page", "scanId": scan["scanId"], "runId": scan["runId"],
             "agentTurnId": "runtime-turn-2", "tool": "inspect_page", "idempotencyKey": "runtime-page",
             "expectedRunRevision": scan["runRevision"],
-            "input": {"pageStateId": scan["currentPageStateId"], "include": ["route", "objects", "safeEntrypoints", "networkSummary"]},
+            "input": {"pageStateId": scan["currentPageStateId"], "include": ["route", "visibleText", "objects", "safeEntrypoints", "networkSummary"]},
         })
         if page.get("status") != "ok":
             return page
         result = {"scanId": scan["scanId"], "runId": scan["runId"], "runRevision": page["runRevision"],
                   "pageStateId": page["result"]["pageStateId"], "candidateRefs": page["result"]["candidateRefs"],
                   "entrypointRefs": page["result"]["entrypointRefs"], "route": page["result"].get("route"),
-                  "title": page["result"].get("title")}
-        if page["result"]["candidateRefs"]:
-            verified = self.handle({
-                "protocolVersion": "1.0", "requestId": "runtime-object", "scanId": scan["scanId"], "runId": scan["runId"],
-                "agentTurnId": "runtime-turn-3", "tool": "inspect_object", "idempotencyKey": "runtime-object",
-                "expectedRunRevision": page["runRevision"], "input": {"candidateId": page["result"]["candidateRefs"][0]},
-            })
-            result["objectVerification"] = verified.get("result", verified)
-            if verified.get("status") == "ok" and verified.get("result", {}).get("objectId"):
-                evidence = self.handle({
-                    "protocolVersion": "1.0", "requestId": "runtime-evidence", "scanId": scan["scanId"], "runId": scan["runId"],
-                    "agentTurnId": "runtime-turn-4", "tool": "capture_evidence", "idempotencyKey": "runtime-evidence",
-                    "expectedRunRevision": verified["runRevision"],
-                    "input": {"pageStateId": scan["currentPageStateId"], "objectId": verified["result"]["objectId"], "includeRawVisual": True},
+                  "title": page["result"].get("title"), "activeTab": page["result"].get("activeTab"),
+                  "structureSummary": page["result"].get("structureSummary", {}),
+                  "networkSummary": page["result"].get("networkSummary", {}), "pages": []}
+        visited_tabs = set()
+        current_page = page
+        current_revision = page["runRevision"]
+        for _ in range(16):
+            active_tab = current_page["result"].get("activeTab")
+            if active_tab:
+                visited_tabs.add(active_tab)
+            candidates = current_page["result"]["candidateRefs"]
+            page_result = {"pageStateId": current_page["result"]["pageStateId"], "route": current_page["result"].get("route"),
+                           "title": current_page["result"].get("title"), "activeTab": active_tab,
+                           "candidateRefs": candidates, "entrypointRefs": current_page["result"]["entrypointRefs"],
+                           "structureSummary": current_page["result"].get("structureSummary", {}),
+                           "networkSummary": current_page["result"].get("networkSummary", {}),
+                           "visibleTextPreview": self._sanitizer.sanitize(current_page["result"].get("visibleText", ""))[:2000]}
+            if candidates:
+                suffix = len(result["pages"])
+                verified = self.handle({
+                "protocolVersion": "1.0", "requestId": f"runtime-object-{suffix}", "scanId": scan["scanId"], "runId": scan["runId"],
+                "agentTurnId": "runtime-turn-3", "tool": "inspect_object", "idempotencyKey": f"runtime-object-{suffix}",
+                    "expectedRunRevision": current_revision, "input": {"candidateId": candidates[0]},
                 })
-                result["evidence"] = evidence.get("result", evidence)
+                page_result["objectVerification"] = verified.get("result", verified)
+                if suffix == 0:
+                    result["objectVerification"] = page_result["objectVerification"]
+                if verified.get("status") == "ok" and verified.get("result", {}).get("objectId"):
+                    evidence = self.handle({
+                    "protocolVersion": "1.0", "requestId": f"runtime-evidence-{suffix}", "scanId": scan["scanId"], "runId": scan["runId"],
+                    "agentTurnId": "runtime-turn-4", "tool": "capture_evidence", "idempotencyKey": f"runtime-evidence-{suffix}",
+                    "expectedRunRevision": verified["runRevision"],
+                        "input": {"pageStateId": current_page["result"]["pageStateId"], "objectId": verified["result"]["objectId"], "includeRawVisual": True},
+                    })
+                    page_result["evidence"] = evidence.get("result", evidence)
+                    if suffix == 0:
+                        result["evidence"] = page_result["evidence"]
+                    current_revision = evidence["runRevision"]
+            result["pages"].append(page_result)
+            entries = [self._store.get_entrypoint(ref) for ref in current_page["result"]["entrypointRefs"]]
+            tab_entries = [entry for entry in entries if entry and entry.get("kind") == "tab"
+                           and entry.get("label") not in visited_tabs and entry.get("status") != "processed"]
+            if not tab_entries:
+                break
+            next_entry = tab_entries[0]
+            explored = self.handle({
+                "protocolVersion": "1.0", "requestId": f"runtime-tab-{len(result['pages'])}", "scanId": scan["scanId"], "runId": scan["runId"],
+                "agentTurnId": "runtime-turn-tabs", "tool": "explore_entrypoint", "idempotencyKey": f"runtime-tab-{len(result['pages'])}",
+                "expectedRunRevision": current_revision, "input": {"pageStateId": current_page["result"]["pageStateId"], "entrypointId": next_entry["entrypointId"]},
+            })
+            if explored.get("status") != "ok":
+                result["explorationError"] = explored.get("error", explored)
+                break
+            current_page = explored
+            current_revision = explored["runRevision"]
+            scan = {**scan, "runRevision": explored["runRevision"], "currentPageStateId": explored["result"]["pageStateId"]}
+        evidence_refs = [item["evidence"]["evidenceId"] for item in result["pages"] if item.get("evidence", {}).get("evidenceId")]
+        result["runRevision"] = current_revision
+        result["summary"] = {
+            "visitedPageStates": len(result["pages"]),
+            "tabsDiscovered": max((item.get("structureSummary", {}).get("tabs", 0) for item in result["pages"]), default=0),
+            "ruleCandidateCount": sum(len(item.get("candidateRefs", [])) for item in result["pages"]),
+            "evidenceCount": len(evidence_refs),
+            "pagesWithVisibleErrors": sum(1 for item in result["pages"] if item.get("structureSummary", {}).get("errorCount", 0) > 0),
+            "observedWrites": sum(item.get("networkSummary", {}).get("observedWrites", 0) for item in result["pages"]),
+            "unknownRequests": sum(item.get("networkSummary", {}).get("unknownRequests", 0) for item in result["pages"]),
+        }
         return {"protocolVersion": "1.0", "requestId": "runtime-probe", "status": "ok", "result": result,
-                "evidenceRefs": [], "diagnosticRefs": []}
+                "evidenceRefs": evidence_refs, "diagnosticRefs": []}

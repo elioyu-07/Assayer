@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from agent_f_host import ActionExecution, BrowserSessionFailure, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from agent_f_host.page import EntrypointExecution, EntrypointObservation, PageObservation
 
 
 class ExplodingLoginAdapter:
@@ -54,6 +55,29 @@ class FailingIssueStore(SQLiteStore):
         raise RuntimeError("injected issue persistence failure")
 
 
+class SwitchingPageAdapter:
+    active_tab = "总览"
+
+    def observe(self, page_state_id):
+        return PageObservation(
+            url="https://test.example.com/app", origin="https://test.example.com", route="/app",
+            title="App", state_kind="tab", dom_material=f"<main>{self.active_tab}</main>",
+            identity_material=f"/app|tab|{self.active_tab}", visible_text=self.active_tab,
+            active_tab=self.active_tab, structure_summary={"tabs": 2, "buttons": 0, "fields": 0, "tables": 0},
+            entrypoints=(
+                EntrypointObservation("tab", "总览", "switch_tab", status="processed" if self.active_tab == "总览" else "unprocessed", host_locator_id="tab-browser-0"),
+                EntrypointObservation("tab", "明细", "switch_tab", status="processed" if self.active_tab == "明细" else "unprocessed", host_locator_id="tab-browser-1"),
+            ), network_summary={"pendingReadRequests": 0, "observedWrites": 0},
+        )
+
+
+class SwitchingEntrypointAdapter:
+    def __init__(self, page): self.page = page
+    def explore(self, entrypoint, page_state, operation_id):
+        self.page.active_tab = entrypoint["label"]
+        return EntrypointExecution("succeeded", page_changed=True)
+
+
 def bootstrap(core, key="boot-001"):
     return core.handle({"protocolVersion":"1.0","requestId":"req-001","agentTurnId":"turn-001","tool":"start_audit","idempotencyKey":key,"input":{"url":"https://test.example.com","ruleRegistryVersion":"1.0.0","outputDir":"/tmp/out","browserProfile":"default","credentialHandle":"cred-001"}})
 
@@ -73,10 +97,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None, evidence_adapter=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None, evidence_adapter=None, entrypoint_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", LoginSecret("test-user", "secret"))
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter if page_adapter is not None else DeterministicPageAdapter(), object_identity_adapter=identity_adapter if identity_adapter is not None else DeterministicObjectIdentityAdapter(), action_adapter=action_adapter, recovery_adapter=recovery_adapter, evidence_adapter=evidence_adapter)
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter if page_adapter is not None else DeterministicPageAdapter(), object_identity_adapter=identity_adapter if identity_adapter is not None else DeterministicObjectIdentityAdapter(), action_adapter=action_adapter, recovery_adapter=recovery_adapter, evidence_adapter=evidence_adapter, entrypoint_adapter=entrypoint_adapter)
         self.cores.append(core)
         return core
 
@@ -157,6 +181,26 @@ class HostCoreTest(unittest.TestCase):
         with self.assertRaises(HostError) as caught:
             core.handle(request)
         self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
+    def test_explore_entrypoint_creates_new_current_page_state(self):
+        page_adapter = SwitchingPageAdapter()
+        core = self.make_core(page_adapter=page_adapter, entrypoint_adapter=SwitchingEntrypointAdapter(page_adapter))
+        started = bootstrap(core)["result"]
+        inspected = core.handle(session(started, input={"pageStateId": started["currentPageStateId"],
+                                                        "include": ["route", "safeEntrypoints"]}))["result"]
+        detail = next(core._store.get_entrypoint(ref) for ref in inspected["entrypointRefs"]
+                      if core._store.get_entrypoint(ref)["label"] == "明细")
+        explored = core.handle(session(started, tool="explore_entrypoint", key="explore-detail", revision=1,
+                                       input={"pageStateId": started["currentPageStateId"],
+                                              "entrypointId": detail["entrypointId"]}))
+        self.assertEqual(explored["status"], "ok")
+        self.assertEqual(explored["result"]["activeTab"], "明细")
+        self.assertEqual(explored["runRevision"], 2)
+        self.assertNotEqual(explored["result"]["pageStateId"], started["currentPageStateId"])
+        stored = core._store.get_page_state(explored["result"]["pageStateId"])
+        self.assertEqual(stored["parentPageStateId"], started["currentPageStateId"])
+        current = core._store.get_scan(started["scanId"])
+        self.assertEqual(current["current_page_state_id"], explored["result"]["pageStateId"])
 
     def test_bootstrap_clears_consumed_secret_after_success(self):
         vault = CredentialVault()
