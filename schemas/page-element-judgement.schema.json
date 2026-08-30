@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/page-element-judgement.schema.json",
+  "title": "PageElementJudgement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sourceLedger", "sourceLedgerDigest", "scanId", "pages"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "sourceLedger": { "const": "audit-ledger.json" },
+    "sourceLedgerDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pageStateId", "url", "route", "title", "stateKind", "objects"],
+        "properties": {
+          "pageStateId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "url": { "type": "string" },
+          "route": { "type": "string" },
+          "title": { "type": "string" },
+          "stateKind": { "type": "string" },
+          "objects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["objectId", "kind", "status", "potentialRules", "assessments"],
+              "properties": {
+                "objectId": { "$ref": "common.schema.json#/$defs/entityId" },
+                "kind": { "type": "string" },
+                "status": { "type": "string" },
+                "potentialRules": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/ruleRef" } },
+                "assessments": { "type": "array", "items": { "type": "object", "required": ["assessmentId", "rule", "result", "conclusionValidity"] } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

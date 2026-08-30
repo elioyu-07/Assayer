@@ -19,6 +19,7 @@ from .action_safety import (ActionExecution, ActionSafetyPolicy,
                             SafeActionAdapter, UnavailableActionAdapter)
 from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, RecoveryCheck, UnavailableRecoveryAdapter
 from .evidence import EvidenceAdapter, EvidenceSanitizer, UnavailableEvidenceAdapter
+from .reporting import DerivedReportBuilder
 from .store import SQLiteStore
 
 
@@ -38,7 +39,7 @@ class HostCore:
                  page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None,
                  action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None,
                  recovery_adapter: RecoveryAdapter | None = None, evidence_adapter: EvidenceAdapter | None = None,
-                 evidence_sanitizer: EvidenceSanitizer | None = None):
+                 evidence_sanitizer: EvidenceSanitizer | None = None, report_builder: DerivedReportBuilder | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -70,6 +71,7 @@ class HostCore:
         self._issue_validator = entity_validator("issue.schema.json")
         self._scan_run_validator = entity_validator("scan-run.schema.json")
         self._ledger_validator = entity_validator("audit-ledger.schema.json")
+        self._derived_output_validators = {"issues.json": entity_validator("derived-issues.schema.json"), "page-element-judgement.json": entity_validator("page-element-judgement.schema.json"), "run-diagnostics.json": entity_validator("run-diagnostics.schema.json")}
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
@@ -80,6 +82,7 @@ class HostCore:
         self._recovery_adapter = recovery_adapter or UnavailableRecoveryAdapter()
         self._evidence_adapter = evidence_adapter or UnavailableEvidenceAdapter()
         self._evidence_sanitizer = evidence_sanitizer or EvidenceSanitizer()
+        self._report_builder = report_builder or DerivedReportBuilder()
         registry_path = root.parent / "rules" / "registry.json"
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
         self._rule_registry = registry
@@ -1013,8 +1016,8 @@ class HostCore:
         with self._store.transaction():
             self._store.update_scan(scan); self._store.update_operation(operation)
         try:
-            ledger_path = self._export_ledger(scan, proof, summaries, terminal, status)
-            operation_result["ledgerPath"] = ledger_path
+            artifact_paths = self._export_ledger(scan, proof, summaries, terminal, status)
+            operation_result.update({"ledgerPath": "audit-ledger.json", "artifactPaths": artifact_paths})
             operation["resultJson"] = json.dumps(operation_result, ensure_ascii=False, separators=(",", ":"))
             with self._store.transaction():
                 self._store.update_operation(operation)
@@ -1024,7 +1027,7 @@ class HostCore:
             return self._response(request, scan, "failed", error=HostError("LEDGER_EXPORT_FAILED", str(error)), operation=operation)
         return self._response(request, scan, "ok", result=operation_result, operation=operation)
 
-    def _export_ledger(self, scan: dict, proof: dict, summaries: list[dict], terminal: dict, status: str) -> str:
+    def _export_ledger(self, scan: dict, proof: dict, summaries: list[dict], terminal: dict, status: str) -> list[str]:
         ended_at = self._now(); entry_url = scan.get("entryUrl") or "https://unknown.invalid"; parsed = urlparse(entry_url)
         scan_entity = {"scanId": scan["scanId"], "runId": scan["runId"], "protocolVersion": "1.0", "skillVersion": "1.0.0", "runRevision": scan["runRevision"], "algorithms": {"pageIdentity": "1.0.0", "objectIdentity": "1.0.0", "recoveryPolicy": "1.0.0", "sanitizationPolicy": "1.0.0", "normalization": "1.0.0"}, "status": status, "auditMode": "runtime_only", "entryUrl": entry_url, "allowedOrigins": [f"{parsed.scheme}://{parsed.netloc}"], "startedAt": scan["createdAt"], "endedAt": ended_at, "loginStatus": scan["loginStatus"], "ruleRegistryDigest": scan["ruleRegistryDigest"], "frozenRules": [{"ruleId": r["ruleId"], "version": r["version"]} for r in self._rule_registry.get("rules", []) if r.get("status") == "enabled"], "capabilities": json.loads(scan["capabilitiesJson"]), "coverageProof": proof, "terminalReason": terminal, "conclusionsValid": status != "failed"}
         self._validate_entity(self._scan_run_validator, scan_entity, "ScanRun")
@@ -1053,18 +1056,40 @@ class HostCore:
                 elif ref in unprocessed: embedded["status"] = "unprocessed"
         ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
         self._validate_entity(self._ledger_validator, ledger, "AuditLedger")
-        output = Path(scan["outputDir"]) / "audit-ledger.json"; output.parent.mkdir(parents=True, exist_ok=True); content = json.dumps(ledger, ensure_ascii=False, indent=2).encode("utf-8")
-        if output.exists():
-            if output.read_bytes() != content: raise ValueError("审计账本文件内容冲突")
-        else:
-            descriptor, temporary_name = tempfile.mkstemp(prefix=".audit-ledger-", dir=output.parent)
-            temporary = Path(temporary_name)
-            try:
-                with os.fdopen(descriptor, "wb") as stream: stream.write(content); stream.flush(); os.fsync(stream.fileno())
-                os.link(temporary, output)
-            finally:
-                temporary.unlink(missing_ok=True)
-        return "audit-ledger.json"
+        artifacts = {"audit-ledger.json": (json.dumps(ledger, ensure_ascii=False, indent=2) + "\n").encode("utf-8")}
+        derived = self._report_builder.render(ledger)
+        for name, validator in self._derived_output_validators.items():
+            if name not in derived: raise ValueError(f"缺少派生 JSON 产物: {name}")
+            self._validate_entity(validator, json.loads(derived[name]), name)
+        artifacts.update(derived)
+        self._publish_artifacts(scan["outputDir"], artifacts)
+        return sorted(artifacts)
+
+    @staticmethod
+    def _publish_artifacts(output_dir: str, artifacts: dict[str, bytes]) -> None:
+        root = Path(output_dir); root.mkdir(parents=True, exist_ok=True)
+        targets = {}
+        for relative, content in artifacts.items():
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts or path.name != relative:
+                raise ValueError("派生产物路径无效")
+            target = root / path; targets[target] = content
+            if target.exists() and target.read_bytes() != content:
+                raise ValueError(f"派生产物内容冲突: {relative}")
+        created = []
+        try:
+            for target, content in targets.items():
+                if target.exists(): continue
+                descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", dir=root)
+                temporary = Path(temporary_name)
+                try:
+                    with os.fdopen(descriptor, "wb") as stream: stream.write(content); stream.flush(); os.fsync(stream.fileno())
+                    os.link(temporary, target); created.append(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        except Exception:
+            for target in created: target.unlink(missing_ok=True)
+            raise
 
     def _materialize_issue_screenshot(self, scan: dict, raw: dict, operation_id: str, revision: int) -> dict:
         screenshot_id = self._stable_id("screenshot", operation_id, "issue")

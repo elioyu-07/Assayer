@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from agent_f_host import ActionExecution, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -806,6 +806,13 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(ledger["scan"]["status"], "completed")
             self.assertEqual(ledger["scan"]["coverageProof"]["processedObjectRefs"], [object_id])
             self.assertEqual(len(ledger["assessments"]), 1)
+            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log"}
+            self.assertEqual(set(result["result"]["artifactPaths"]), expected)
+            self.assertTrue(all((Path(tmp) / name).exists() for name in expected))
+            self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).iterdir()))
+            issues = json.loads((Path(tmp) / "issues.json").read_text())
+            self.assertEqual(issues["issues"], [])
+            self.assertEqual(DerivedReportBuilder().render(ledger), DerivedReportBuilder().render(ledger))
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])
 
@@ -846,6 +853,54 @@ class HostCoreTest(unittest.TestCase):
         result = core.handle(session(started, tool="complete_audit", key="complete-with-pending", revision=5,
                                      input=self.completion_input(core, started, object_id)))
         self.assertEqual(result["error"]["code"], "DECISION_PENDING")
+
+    def test_derived_issue_report_contains_only_ledger_issue_facts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            case_id = case_result["result"]["caseId"]
+            evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+            self.restore_case(core, started, object_id, case_id, revision=3)
+            prepared = core.handle(session(started, tool="prepare_decision", key="report-prepare", revision=4,
+                                           input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])))
+            committed = core.handle(session(started, tool="commit_decision", key="report-commit", revision=5,
+                                            input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+            entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
+            complete_input = {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],"processedEntrypointRefs":[entrypoint_id],"skippedEntrypoints":[],"ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.0.0"},"assessmentCount":1,"resultCounts":{"issue_found":1},"coverageComplete":True}],"unprocessedEntrypointRefs":[],"completionReason":"问题和覆盖均已确认"}
+            core.handle(session(started, tool="complete_audit", key="report-complete", revision=6, input=complete_input))
+            report = json.loads((Path(tmp) / "issues.json").read_text())
+            self.assertEqual(len(report["issues"]), 1)
+            self.assertEqual(report["issues"][0]["issueId"], committed["result"]["issueId"])
+            self.assertEqual(report["issues"][0]["screenshotRef"], prepared["result"]["screenshotRef"])
+            summary = (Path(tmp) / "audit-summary.md").read_text()
+            self.assertIn("筛选区缺少重置", summary)
+
+    def test_failed_scan_view_hides_formally_recorded_issue(self):
+        ledger = json.loads(Path("examples/issue-ledger.json").read_text())
+        ledger["scan"]["status"] = "failed"
+        ledger["scan"]["conclusionsValid"] = False
+        rendered = DerivedReportBuilder().render(ledger)
+        issues = json.loads(rendered["issues.json"])
+        self.assertEqual(issues["issues"], [])
+        self.assertEqual(issues["invalidatedIssueRefs"], [ledger["issues"][0]["issueId"]])
+
+    def test_report_bundle_conflict_rolls_back_new_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, _ = self.committed_no_issue(core, started)
+            (Path(tmp) / "issues.json").write_text("conflict")
+            result = core.handle(session(started, tool="complete_audit", key="report-conflict", revision=6,
+                                         input=self.completion_input(core, started, object_id)))
+            self.assertEqual(result["error"]["code"], "LEDGER_EXPORT_FAILED")
+            self.assertEqual((Path(tmp) / "issues.json").read_text(), "conflict")
+            self.assertFalse((Path(tmp) / "audit-ledger.json").exists())
+            self.assertFalse((Path(tmp) / "audit-summary.md").exists())
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))

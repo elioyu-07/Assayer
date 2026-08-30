@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/run-diagnostics.schema.json",
+  "title": "RunDiagnostics",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "sourceLedger", "sourceLedgerDigest", "scanId", "runId", "scanStatus", "conclusionsValid", "terminalReason", "coverageProof", "assessmentResultCounts", "failedOperations"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" }, "sourceLedger": { "const": "audit-ledger.json" }, "sourceLedgerDigest": { "$ref": "common.schema.json#/$defs/sha256" }, "scanId": { "$ref": "common.schema.json#/$defs/entityId" }, "runId": { "$ref": "common.schema.json#/$defs/entityId" }, "scanStatus": { "enum": ["completed", "partial", "failed"] }, "conclusionsValid": { "type": "boolean" }, "terminalReason": { "$ref": "common.schema.json#/$defs/reason" }, "coverageProof": { "type": "object" }, "assessmentResultCounts": { "type": "object", "required": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"], "additionalProperties": { "type": "integer", "minimum": 0 } }, "failedOperations": { "type": "array", "items": { "type": "object", "required": ["operationId", "tool", "status"], "properties": { "operationId": { "$ref": "common.schema.json#/$defs/entityId" }, "tool": { "type": "string" }, "status": { "type": "string" }, "reason": { "$ref": "common.schema.json#/$defs/reason" } } } }
+  }
+}

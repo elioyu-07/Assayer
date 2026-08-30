@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/derived-issues.schema.json",
+  "title": "DerivedIssues",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "sourceLedger", "sourceLedgerDigest", "scanId", "runId", "scanStatus", "conclusionsValid", "ruleRegistryDigest", "issues", "invalidatedIssueRefs"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" }, "sourceLedger": { "const": "audit-ledger.json" },
+    "sourceLedgerDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" }, "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanStatus": { "enum": ["completed", "partial", "failed"] }, "conclusionsValid": { "type": "boolean" },
+    "ruleRegistryDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "invalidatedIssueRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "issues": { "type": "array", "items": { "type": "object", "required": ["issueId", "assessmentRef", "objectRef", "rule", "severity", "title", "message", "impact", "recommendation", "evidenceRefs", "screenshotRef", "page", "screenshotPath", "effectiveConclusionValidity"], "properties": { "issueId": { "$ref": "common.schema.json#/$defs/entityId" }, "assessmentRef": { "$ref": "common.schema.json#/$defs/entityId" }, "objectRef": { "$ref": "common.schema.json#/$defs/entityId" }, "rule": { "$ref": "common.schema.json#/$defs/ruleRef" }, "severity": { "$ref": "common.schema.json#/$defs/severity" }, "title": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "message": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "impact": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "recommendation": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "evidenceRefs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/entityId" } }, "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" }, "page": { "type": "object" }, "screenshotPath": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "effectiveConclusionValidity": { "const": "valid" } } } }
+  }
+}

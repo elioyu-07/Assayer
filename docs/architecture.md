@@ -50,7 +50,7 @@ flowchart LR
     H -->|验证后的精简证据包| A
     A -->|判定与证据引用| H
     H --> L[(审计账本与证据库)]
-    L --> R[HTML / JSON 报告与诊断]
+    L --> R[JSON / Markdown 报告与诊断]
     R --> U
 ```
 

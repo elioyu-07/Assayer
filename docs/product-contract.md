@@ -67,7 +67,7 @@ agent-f 不是通用爬虫、静态代码扫描器或视觉截图工具。它的
 - `partial`：只保留已完成且未失效的判定，未处理范围和原因必须披露；
 - `failed`：登录、浏览器、网络、凭据、账本或环境完整性失败，所有正式问题结论失效，只保留诊断。
 
-聚合审计账本是唯一事实源；HTML、问题 JSON、诊断 Markdown 和截图目录都是只读派生输出。
+聚合审计账本是唯一事实源；问题 JSON、摘要/诊断 Markdown 和截图目录都是只读派生输出。当前版本不生成 HTML。
 
 ## 4. 核心概念
 
@@ -289,8 +289,8 @@ FUA-14 暂不执行，保留编号以避免历史追踪混乱。具体启用集�
 
 第一版至少输出：
 
-- 主问题报告（HTML/JSON）；
-- `element-audit-ledger.json`：所有进入正式审计的待检查对象及结果；
+- 主问题报告（JSON/Markdown，不生成 HTML）；
+- `audit-ledger.json`：本次扫描的唯一聚合事实账本；
 - `page-element-judgement.json`：页面、状态、对象和规范的判定关系；
 - `run-diagnostics.json` / `run-diagnostics.md`：阶段、覆盖、失败和 `partial` 原因；
 - `audit.log`：不含敏感信息的稳定阶段日志；

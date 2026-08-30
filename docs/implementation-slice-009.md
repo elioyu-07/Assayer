@@ -12,4 +12,4 @@
 
 ## 切片边界
 
-本切片不生成 HTML。面向人的 Markdown/JSON 摘要和问题视图必须从 `audit-ledger.json` 确定性派生，不能反向修改账本。完整端到端 Harness 和真实浏览器适配仍属于后续任务。
+本切片不生成 HTML。面向人的 Markdown/JSON 摘要和问题视图必须从 `audit-ledger.json` 确定性派生，不能反向修改账本；该派生由垂直切片 010 实现。完整端到端 Harness 和真实浏览器适配仍属于后续任务。

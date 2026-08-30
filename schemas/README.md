@@ -23,8 +23,9 @@
 - `pending-decision.schema.json`：`prepare_decision` 生成的、尚未进入正式账本的临时判定。
 - `rule-registry.schema.json`：可扩展、可版本化的规则注册表。
 - `audit-ledger.schema.json`：把上述实体聚合为完整审计账本。
+- `derived-issues.schema.json`、`page-element-judgement.schema.json`、`run-diagnostics.schema.json`：账本只读派生 JSON 的发布契约。
 
-`audit-ledger.schema.json` 描述的聚合账本是唯一运行事实源。主问题报告、`page-element-judgement.json`、诊断 Markdown 和 HTML 都必须由账本确定性派生，不能反向修改账本。
+`audit-ledger.schema.json` 描述的聚合账本是唯一运行事实源。主问题 JSON、`page-element-judgement.json`、摘要和诊断 Markdown 都必须由账本确定性派生，不能反向修改账本；当前版本不生成 HTML。
 
 ## Schema 与 Host 语义校验的边界
 
