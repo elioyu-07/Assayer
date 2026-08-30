@@ -133,7 +133,7 @@ Host 在证据落盘前执行结构化脱敏：
 - 截图：对敏感区域应用不可逆像素遮挡，不使用可还原覆盖层；
 - 日志：只记录 ID、阶段、结果、耗时和脱敏原因码。
 
-`sanitized=true` 只有在脱敏器成功完成并记录 `sanitizationPolicyVersion` 后才能写入。脱敏状态不确定时拒绝保存证据。
+结构化 Evidence 的 `sanitized=true` 只有在脱敏器成功完成并记录 `sanitizationPolicyVersion` 后才能写入。图片另有 `sanitizationStatus`：B07b 的受控截图可为 `not_performed`，但不得写成 `sanitized`，且不能进入正式 `issue_found`；脱敏状态不确定或字段不一致时拒绝保存为 captured。
 
 ## 9. 安全错误
 

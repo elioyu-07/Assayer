@@ -7,7 +7,7 @@
 - 输入框只记录 `empty/non_empty` 等类别，不读取或保存字段原值；文本只保留长度/身份摘要所需事实，不保存完整 DOM。
 - Evidence 采集前重新绑定对象并校验 fingerprint、PageState 和 origin；绑定失败直接 fail-closed。
 - 扩展结构化字符串脱敏规则，覆盖 Bearer、参数秘密、邮箱、手机号和长数字标识。
-- `includeRawVisual=true` 明确返回截图适配器暂不可用；B07b 截图与像素脱敏仍未实现。
+- `includeRawVisual=true` 由 B07b 截图适配器处理；本切片仍只覆盖结构化 Evidence。
 
 ## 验收
 
@@ -18,5 +18,5 @@
 ## 边界
 
 - B07a 只能支持结构化 Evidence，不能作为正式 `issue_found` 的截图替代品。
-- B07b 的真实对象截图、敏感区域识别、不可逆像素遮挡和独立 IssueScreenshot 继续暂缓。
-- 下一项可推进 B08 通用 CLI/MCP 传输，但传输层不得绕过 Evidence、Screenshot、Case 恢复和 Decision 门禁。
+- B07b 的真实对象截图见垂直切片 018；B07c 敏感区域识别、不可逆像素遮挡和脱敏确认继续暂缓。
+- B08 传输层不得绕过 Evidence、Screenshot、Case 恢复和 Decision 门禁。

@@ -310,12 +310,19 @@
       "capturedAt": "2026-08-30T10:09:00Z",
       "capturedAtRevision": 7,
       "sanitizationPolicyVersion": "1.0.0",
+      "sanitizationStatus": "sanitized",
       "path": "screenshots/raw-issue-001.png",
       "digest": "abababababababababababababababababababababababababababababababab",
       "imageType": "png",
       "width": 640,
       "height": 120,
       "problemBoundingBox": {
+        "x": 20,
+        "y": 80,
+        "width": 640,
+        "height": 120
+      },
+      "sourceBoundingBox": {
         "x": 20,
         "y": 80,
         "width": 640,
@@ -334,6 +341,7 @@
       "capturedAt": "2026-08-30T10:09:30Z",
       "capturedAtRevision": 7,
       "sanitizationPolicyVersion": "1.0.0",
+      "sanitizationStatus": "sanitized",
       "rawVisualRef": "raw-visual-issue-001",
       "path": "screenshots/issue-issue-001.png",
       "digest": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
@@ -341,6 +349,12 @@
       "width": 640,
       "height": 120,
       "problemBoundingBox": {
+        "x": 20,
+        "y": 80,
+        "width": 640,
+        "height": 120
+      },
+      "sourceBoundingBox": {
         "x": 20,
         "y": 80,
         "width": 640,

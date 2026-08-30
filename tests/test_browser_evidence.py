@@ -1,4 +1,5 @@
 import unittest
+import struct
 
 from agent_f_host import (BrowserEvidenceAdapter,
                           BrowserProfile, BrowserReadOnlyPageAdapter,
@@ -28,6 +29,11 @@ class FakePage:
     def content(self): return "<form role='search'>查询</form>"
 
     def evaluate(self, expression, arg=None):
+        if "boundingBox" in expression:
+            return {"status": "matched", "route": "/orders",
+                    "identityMaterial": "filter_region|search|订单筛选|orders",
+                    "boundingBox": {"x": 20, "y": 80, "width": 640, "height": 120},
+                    "viewportWidth": 1280, "viewportHeight": 800}
         if "identityMaterial" in expression:
             return {
                 "status": "matched", "route": "/orders", "stateKind": "page",
@@ -38,6 +44,9 @@ class FakePage:
                                "expanded": None}],
             }
         return self.probe
+
+    def screenshot(self, **kwargs):
+        return b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + struct.pack(">II", 640, 120) + b"fixture"
 
 
 class FakeContext:
@@ -77,7 +86,7 @@ class BrowserEvidenceAdapterTest(unittest.TestCase):
         finally:
             session.close()
 
-    def test_raw_visual_is_rejected_while_b07b_is_deferred(self):
+    def test_raw_visual_is_captured_and_explicitly_not_sanitized(self):
         page = FakePage(); context = FakeContext(page)
         session = BrowserSession("scan-evidence", BrowserProfile(), backend=FakeBackend(context)); session.open()
         try:
@@ -86,11 +95,34 @@ class BrowserEvidenceAdapterTest(unittest.TestCase):
             from agent_f_host import BrowserObjectIdentityAdapter
             identity = BrowserObjectIdentityAdapter(session, locator_registry=page_adapter.locator_registry,
                                                     refresh=page_adapter.refresh_locators)
-            target = {"objectId": "object-001", "identity": {"hostLocatorId": "locator-browser-0", "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|订单筛选|orders")}}
+            target = {"objectId": "object-001",
+                      "location": {"boundingBox": {"x": 20, "y": 80, "width": 640, "height": 120}},
+                      "identity": {"hostLocatorId": "locator-browser-0", "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|订单筛选|orders")}}
             adapter = BrowserEvidenceAdapter(session, page_adapter, identity)
-            with self.assertRaises(HostError) as caught:
-                adapter.capture({"pageStateId": "page-001", "origin": "https://test.example.com"}, target, None, True)
-            self.assertEqual(caught.exception.code, "SCREENSHOT_ADAPTER_UNAVAILABLE")
+            captured = adapter.capture({"pageStateId": "page-001", "origin": "https://test.example.com"}, target, None, True)
+            self.assertEqual(captured.kind, "runtime_visual")
+            self.assertEqual(captured.raw_visual.status, "captured")
+            self.assertEqual(captured.raw_visual.sanitization_status, "not_performed")
+            self.assertFalse(captured.raw_visual.sanitized)
+            self.assertEqual(captured.raw_visual.source_bounding_box, target["location"]["boundingBox"])
+            self.assertEqual(captured.raw_visual.bounding_box, {"x": 0, "y": 0, "width": 640, "height": 120})
+        finally:
+            session.close()
+
+    def test_visual_target_disappearance_is_failed_closed(self):
+        page = FakePage(); context = FakeContext(page); session = BrowserSession("scan-evidence", BrowserProfile(), backend=FakeBackend(context)); session.open()
+        try:
+            page_adapter = BrowserReadOnlyPageAdapter(session, allowed_origin="https://test.example.com")
+            page_adapter.observe("page-001")
+            from agent_f_host import BrowserObjectIdentityAdapter
+            identity = BrowserObjectIdentityAdapter(session, locator_registry=page_adapter.locator_registry, refresh=page_adapter.refresh_locators)
+            target = {"objectId": "object-001", "location": {"boundingBox": {"x": 20, "y": 80, "width": 640, "height": 120}},
+                      "identity": {"hostLocatorId": "locator-browser-0", "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|订单筛选|orders")}}
+            original = page.evaluate
+            page.evaluate = lambda expression, arg=None: {"status": "not_found"} if "boundingBox" in expression else original(expression, arg)
+            captured = BrowserEvidenceAdapter(session, page_adapter, identity).capture({"pageStateId": "page-001", "origin": "https://test.example.com"}, target, None, True)
+            self.assertEqual(captured.raw_visual.status, "not_located")
+            self.assertEqual(captured.raw_visual.sanitization_status, "failed")
         finally:
             session.close()
 

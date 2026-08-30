@@ -27,5 +27,5 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -
 ## 边界
 
 - 当前恢复探针只对通用页面层、默认 Tab、overlay、固定筛选区域控件和局部几何状态做 Host 可验证比较；复杂业务控件必须增加版本化探针和回归样本。
-- B06 不实现 Evidence 或截图；下一项先实施 B07a 真实结构化 Evidence。仅 B07b 截图与像素脱敏暂缓，真实 `issue_found` 仍受截图门禁禁止。
+- B06 不实现 Evidence 或截图；后续 B07a/B07b 分别实现结构化 Evidence 和真实对象级截图。B07c 自动脱敏未完成前，真实 `issue_found` 仍受脱敏门禁禁止。
 - 恢复通过不等于规则结论通过；正式 Issue 仍受 Evidence、Screenshot、Decision 和完整生命周期门禁约束。

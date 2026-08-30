@@ -706,6 +706,23 @@ class HostCoreTest(unittest.TestCase):
         result = core.handle(session(started, tool="prepare_decision", key="prepare-bad-raw", revision=4, input=data))
         self.assertEqual(result["error"]["code"], "SCREENSHOT_NOT_CAPTURED")
 
+    def test_prepare_rejects_captured_visual_without_image_sanitization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nunsanitized", width=1280, height=800,
+                                   bounding_box={"x":20,"y":80,"width":640,"height":120}, annotation="对象区域",
+                                   sanitized=False, sanitization_status="not_performed")
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=raw)), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            case_id = case_result["result"]["caseId"]
+            evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+            self.restore_case(core, started, object_id, case_id, revision=3)
+            data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])
+            result = core.handle(session(started, tool="prepare_decision", key="prepare-unsanitized", revision=4, input=data))
+            self.assertEqual(result["error"]["code"], "SCREENSHOT_SANITIZATION_REQUIRED")
+
     def test_two_issue_preparations_never_reuse_issue_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())

@@ -9,9 +9,9 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 - 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
 - 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
 - Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定首个 `filter_region`；
-- 下一阶段按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a 真实结构化 Evidence 已完成；B07b 真实截图与像素脱敏暂缓，下一项推进 B08 通用 CLI 与 MCP 传输。
+- 下一阶段按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a 真实结构化 Evidence 与 B07b 真实对象级截图已完成；B07c 自动敏感区域识别与像素脱敏暂缓，随后推进 B08 通用 CLI 与 MCP 传输。
 
-当前真实浏览器路径不具备可发布的截图脱敏能力，因此 B07a 只能生成不含图片的结构化 Evidence，继续禁止正式 `issue_found`。确定性 Harness 中的截图只用于契约与回归测试，不代表真实站点截图能力。
+真实浏览器路径可以在受控测试数据环境生成对象级 PNG Raw Visual，并明确记录 `sanitizationStatus=not_performed`；它不能伪装成已脱敏图片，仍禁止据此提交正式 `issue_found`。自动敏感区域识别与像素脱敏属于后续 B07c。确定性 Harness 中的截图只用于契约与回归测试。
 
 ## 运行确定性 Harness
 

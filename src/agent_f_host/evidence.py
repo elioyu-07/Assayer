@@ -13,9 +13,14 @@ class RawVisualCapture:
     width: int = 1
     height: int = 1
     bounding_box: dict | None = None
+    source_bounding_box: dict | None = None
     annotation: str | None = None
     reason: str | None = None
     sanitized: bool = True
+    # Image sanitization is intentionally distinct from structured Evidence
+    # sanitization.  B07b can capture controlled real-browser pixels before
+    # B07c's automatic masking exists; that state must remain explicit.
+    sanitization_status: str = "sanitized"  # sanitized, not_performed, failed
 
 
 @dataclass(frozen=True)

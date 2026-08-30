@@ -692,26 +692,31 @@ class HostCore:
         screenshot_id = self._stable_id("screenshot", operation_id)
         common = {"screenshotId": screenshot_id, "scanId": scan["scanId"], "pageStateRef": page["pageStateId"], "objectRef": target["objectId"],
                   "kind": "raw_visual", "capturedAt": captured_at, "capturedAtRevision": revision,
-                  "sanitizationPolicyVersion": self._evidence_sanitizer.POLICY_VERSION}
+                  "sanitizationPolicyVersion": self._evidence_sanitizer.POLICY_VERSION,
+                  "sanitizationStatus": getattr(raw, "sanitization_status", "sanitized") if raw else "failed"}
         if case:
             common["caseRef"] = case["caseId"]
         target_box = target.get("location", {}).get("boundingBox")
-        bbox_valid = bool(raw and raw.bounding_box and target_box and all(raw.bounding_box.get(key) == target_box.get(key) for key in ("x", "y", "width", "height"))
+        source_box = (raw.source_bounding_box or raw.bounding_box) if raw else None
+        bbox_valid = bool(raw and raw.bounding_box and source_box and target_box and all(source_box.get(key) == target_box.get(key) for key in ("x", "y", "width", "height"))
                           and raw.bounding_box["x"] + raw.bounding_box["width"] <= raw.width
                           and raw.bounding_box["y"] + raw.bounding_box["height"] <= raw.height)
         header_valid = bool(raw and ((raw.image_type == "png" and raw.image_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
                                      or (raw.image_type == "jpeg" and raw.image_bytes.startswith(b"\xff\xd8\xff"))
                                      or (raw.image_type == "webp" and raw.image_bytes.startswith(b"RIFF") and raw.image_bytes[8:12] == b"WEBP")))
-        if raw and raw.status == "captured" and raw.sanitized and raw.image_bytes and raw.image_type in {"png", "jpeg", "webp"} and raw.width > 0 and raw.height > 0 and bbox_valid and header_valid and raw.annotation:
+        sanitization_status = getattr(raw, "sanitization_status", "sanitized") if raw else "failed"
+        status_consistent = sanitization_status in {"sanitized", "not_performed"} and raw is not None and raw.sanitized == (sanitization_status == "sanitized")
+        if raw and raw.status == "captured" and status_consistent and raw.image_bytes and raw.image_type in {"png", "jpeg", "webp"} and raw.width > 0 and raw.height > 0 and bbox_valid and header_valid and raw.annotation:
             extension = "jpg" if raw.image_type == "jpeg" else raw.image_type
             relative = f"screenshots/{screenshot_id}.{extension}"
             common.update({"status": "captured", "path": relative, "digest": hashlib.sha256(raw.image_bytes).hexdigest(), "imageType": raw.image_type,
                            "width": raw.width, "height": raw.height, "problemBoundingBox": raw.bounding_box,
+                           "sourceBoundingBox": source_box,
                            "annotation": self._evidence_sanitizer.sanitize(raw.annotation)})
             return common, Path(scan["outputDir"]) / relative
         status = raw.status if raw and raw.status in {"not_located", "ambiguous", "rejected"} else "rejected"
-        reason = raw.reason if raw and raw.reason else ("截图未通过脱敏确认" if raw and not raw.sanitized else "截图格式、尺寸或对象定位校验失败")
-        common.update({"status": status, "failureReason": {"code": "SANITIZATION_FAILED" if raw and not raw.sanitized else "SCREENSHOT_NOT_CAPTURED", "message": reason}})
+        reason = raw.reason if raw and raw.reason else ("截图脱敏状态无效" if raw and not status_consistent else "截图格式、尺寸或对象定位校验失败")
+        common.update({"status": status, "failureReason": {"code": "SANITIZATION_FAILED" if raw and not status_consistent else "SCREENSHOT_NOT_CAPTURED", "message": reason}})
         return common, None
 
     def _prepare_decision(self, request: dict, scan: dict, operation: dict) -> dict:
@@ -775,6 +780,8 @@ class HostCore:
                 return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Raw Visual 未绑定当前 Scan、页面和对象")
             if raw.get("caseRef") and raw["caseRef"] not in data["caseRefs"]:
                 return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Raw Visual 的 Case 未包含在当前判定中")
+            if raw.get("sanitizationStatus") != "sanitized":
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_SANITIZATION_REQUIRED", "正式 issue_found 需要已完成图片脱敏的 IssueScreenshot；当前截图未执行自动像素脱敏")
             try:
                 screenshot_bytes = self._read_screenshot(scan["outputDir"], raw)
                 screenshot = self._materialize_issue_screenshot(scan, raw, operation_id, revision)
@@ -1106,7 +1113,7 @@ class HostCore:
     def _materialize_issue_screenshot(self, scan: dict, raw: dict, operation_id: str, revision: int) -> dict:
         screenshot_id = self._stable_id("screenshot", operation_id, "issue")
         extension = "jpg" if raw["imageType"] == "jpeg" else raw["imageType"]
-        issue = {key: raw[key] for key in ("scanId", "pageStateRef", "objectRef", "imageType", "width", "height", "problemBoundingBox", "annotation", "sanitizationPolicyVersion")}
+        issue = {key: raw[key] for key in ("scanId", "pageStateRef", "objectRef", "imageType", "width", "height", "problemBoundingBox", "sourceBoundingBox", "annotation", "sanitizationPolicyVersion", "sanitizationStatus")}
         if raw.get("caseRef"):
             issue["caseRef"] = raw["caseRef"]
         issue.update({"screenshotId": screenshot_id, "kind": "issue", "status": "captured", "rawVisualRef": raw["screenshotId"],

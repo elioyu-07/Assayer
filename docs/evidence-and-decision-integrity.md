@@ -136,4 +136,4 @@ Host 在每个提交点和 `complete_audit` 前校验：
 
 当前 Host Core 已实现结构化 Evidence、Raw Visual 和 `prepare_decision` PendingDecision 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图由判定准备事务从同一 Raw Visual 复制为独立文件和实体。正式 Assessment/Issue 的原子写入仍由 `commit_decision` 负责。
 
-实现状态补充（2026-08-30）：B07a 真实结构化 Evidence 已完成，只采集最小 DOM/ARIA 事实、字段值类别和状态摘要，不保存完整 DOM、字段原值或图片；B07b 真实 Chromium 截图采集与像素脱敏暂缓。上述正式问题截图契约和失败关闭门禁保持不变；deterministic 截图只用于契约回归，真实浏览器扫描不得生成正式 `issue_found`。B08 传输接入不能放宽或绕过该限制。
+实现状态补充（2026-08-30）：B07a 真实结构化 Evidence 与 B07b 真实对象级截图已完成。Raw Visual 的图片绑定、裁剪、digest、不可变落盘和派生链路已验证；由于 B07c 自动像素脱敏尚未实现，截图记录 `sanitizationStatus=not_performed`，不能写成 `sanitized`，也不能进入正式 `issue_found`。B08 传输接入不能放宽或绕过该限制。

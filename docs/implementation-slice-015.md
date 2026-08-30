@@ -35,5 +35,5 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -
 ## 边界与后续
 
 - 当前动作适配器不填写输入值、不执行任意点击、不处理登录；完整 inverse、刷新重放和九维恢复检查属于 B06。
-- B07a 真实结构化 Evidence 继续实施；仅 B07b 真实截图与像素脱敏暂缓。在 B07b 恢复并完成验收前不得由此路径生成正式 `issue_found`。
+- B07a/B07b 已完成；B07c 自动截图脱敏仍暂缓。在 B07c 完成前不得由未脱敏截图生成正式 `issue_found`。
 - B05 只提供 Host Core 动作适配器，不代表已经接入 Codex MCP；通用传输属于 B08。

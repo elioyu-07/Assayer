@@ -1,4 +1,6 @@
 import json
+import hashlib
+import os
 import tempfile
 import threading
 import unittest
@@ -157,16 +159,25 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     self.assertEqual(persisted["kind"], "runtime_dom")
                     self.assertNotIn("secret", json.dumps(persisted))
                     self.assertNotIn("ticket", json.dumps(persisted))
-                    rejected = core.handle({
+                    visual = core.handle({
                         "protocolVersion": "1.0", "requestId": "live-visual", "scanId": started["scanId"],
                         "runId": started["runId"], "agentTurnId": "turn-live-5", "tool": "capture_evidence",
                         "idempotencyKey": "live-visual", "expectedRunRevision": 2,
                         "input": {"pageStateId": started["currentPageStateId"], "objectId": object_id,
                                   "includeRawVisual": True},
                     })
-                    self.assertEqual(rejected["status"], "rejected")
-                    self.assertEqual(rejected["error"]["code"], "SCREENSHOT_ADAPTER_UNAVAILABLE")
-                    self.assertEqual(core._store.list_entities("screenshots", started["scanId"]), [])
+                    self.assertEqual(visual["status"], "ok")
+                    screenshot = core._store.get_screenshot(visual["result"]["screenshotRef"])
+                    self.assertEqual(screenshot["status"], "captured")
+                    self.assertEqual(screenshot["sanitizationStatus"], "not_performed")
+                    self.assertEqual(screenshot["problemBoundingBox"]["x"], 0)
+                    self.assertEqual(screenshot["problemBoundingBox"]["y"], 0)
+                    self.assertEqual(screenshot["sourceBoundingBox"], core._store.get_audit_object(object_id)["location"]["boundingBox"])
+                    image_path = os.path.join(output, screenshot["path"])
+                    with open(image_path, "rb") as stream:
+                        image = stream.read()
+                    self.assertEqual(hashlib.sha256(image).hexdigest(), screenshot["digest"])
+                    self.assertEqual(os.stat(image_path).st_mode & 0o777, 0o600)
                 finally:
                     core.close()
         finally:

@@ -1,4 +1,4 @@
-"""Minimal structured Evidence collection from a managed browser Page (B07a)."""
+"""Managed-browser structured Evidence and object-level screenshots (B07a/B07b)."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from .browser_action import BrowserNetworkGuard
 from .browser_readonly import BrowserLocatorRegistry, BrowserObjectIdentityAdapter, BrowserReadOnlyPageAdapter
 from .browser_session import BrowserSession
 from .evidence import EvidenceCapture
+from .evidence import RawVisualCapture
 from .errors import HostError
 
 
@@ -53,6 +54,30 @@ EVIDENCE_PROBE_V1 = """({targetIndex}) => {
 }"""
 
 
+SCREENSHOT_PROBE_V1 = """({targetIndex}) => {
+  const visible = (element) => {
+    if (!element) return false;
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
+  };
+  const clean = (value, limit = 120) => String(value || '').replace(/\\s+/g, ' ').trim().slice(0, limit);
+  const regions = [...document.querySelectorAll('[role="search"], form, [data-testid*="filter" i], [class*="filter" i]')]
+    .filter(visible).slice(0, 128);
+  const target = regions[targetIndex] || null;
+  if (!target) return {status: 'not_found', route: location.pathname};
+  const role = clean(target.getAttribute('role') || (target.tagName === 'FORM' ? 'form' : 'region'), 64);
+  const label = clean(target.getAttribute('aria-label') || target.querySelector('legend')?.textContent || target.textContent, 200);
+  const box = target.getBoundingClientRect();
+  return {
+    status: 'matched', route: location.pathname,
+    identityMaterial: ['filter_region', role, clean(label), location.pathname, targetIndex].join('|'),
+    boundingBox: {x: box.x, y: box.y, width: box.width, height: box.height},
+    viewportWidth: innerWidth, viewportHeight: innerHeight
+  };
+}"""
+
+
 class BrowserEvidenceAdapter:
     """Collect only structured, value-classified DOM facts for the target object."""
 
@@ -69,8 +94,6 @@ class BrowserEvidenceAdapter:
         self._policy = policy or (network_guard.policy if network_guard else ActionSafetyPolicy())
 
     def capture(self, page_state: dict, target: dict, case: dict | None, include_raw_visual: bool) -> EvidenceCapture:
-        if include_raw_visual:
-            raise HostError("SCREENSHOT_ADAPTER_UNAVAILABLE", "B07b 真实截图与像素脱敏暂缓，当前仅支持结构化 Evidence")
         locator_id = target.get("identity", {}).get("hostLocatorId", "")
         match = self.LOCATOR_ID.fullmatch(locator_id)
         if not match:
@@ -98,11 +121,65 @@ class BrowserEvidenceAdapter:
                 "object": value.get("object", {}), "controls": value.get("controls", []),
                 "networkSummary": network,
             }
+            if include_raw_visual:
+                visual = self._capture_visual(page, int(match.group(1)), target)
+                return EvidenceCapture(kind="runtime_visual", payload_type="image_metadata",
+                                       payload={"objectId": target["objectId"], "pageStateId": page_state["pageStateId"],
+                                                "stateKind": value.get("stateKind", "page"),
+                                                "identityFingerprint": expected_fingerprint,
+                                                "imageType": visual.image_type, "width": visual.width, "height": visual.height,
+                                                "boundingBox": visual.bounding_box,
+                                                "sanitizationStatus": visual.sanitization_status},
+                                       raw_visual=visual, source_binding={"status": "verified", "bindingReason": "Host 固定截图探针与对象 fingerprint 一致"},
+                                       collector_version="1.0.0", sanitization_policy_version="1.0.0",
+                                       normalization_algorithm_version="1.0.0")
             return EvidenceCapture(kind="runtime_dom", payload_type="json", payload=payload,
                                    source_binding={"status": "verified", "bindingReason": "Host 固定 Evidence 探针与对象 fingerprint 一致"},
                                    collector_version="1.0.0", sanitization_policy_version="1.0.0",
                                    normalization_algorithm_version="1.0.0")
         return self._session.run_serial(collect)
+
+    def _capture_visual(self, page: object, target_index: int, target: dict) -> RawVisualCapture:
+        try:
+            value = page.evaluate(SCREENSHOT_PROBE_V1, {"targetIndex": target_index})
+        except Exception as error:
+            raise HostError("INTERNAL_FAILURE", "截图探针执行失败") from error
+        if not isinstance(value, dict) or value.get("status") != "matched":
+            return RawVisualCapture(status="not_located", reason="截图目标在页面中不存在", sanitized=False, sanitization_status="failed")
+        box = value.get("boundingBox")
+        target_box = target.get("location", {}).get("boundingBox")
+        if not isinstance(box, dict) or not isinstance(target_box, dict):
+            return RawVisualCapture(status="rejected", reason="截图缺少对象边界", sanitized=False, sanitization_status="failed")
+        expected = BrowserLocatorRegistry.digest(value.get("identityMaterial", ""))
+        if expected != target.get("identity", {}).get("fingerprint"):
+            return RawVisualCapture(status="rejected", reason="截图对象身份 fingerprint 已变化", sanitized=False, sanitization_status="failed")
+        if any(box.get(key) != target_box.get(key) for key in ("x", "y", "width", "height")):
+            return RawVisualCapture(status="rejected", reason="截图对象边界已变化", sanitized=False, sanitization_status="failed")
+        if any(not isinstance(box.get(key), (int, float)) or box[key] <= 0 for key in ("width", "height")):
+            return RawVisualCapture(status="rejected", reason="截图对象边界无效", sanitized=False, sanitization_status="failed")
+        screenshot = getattr(page, "screenshot", None)
+        if not callable(screenshot):
+            return RawVisualCapture(status="rejected", reason="浏览器 Page 不支持截图", sanitized=False, sanitization_status="failed")
+        try:
+            image = screenshot(type="png", clip=box, animations="disabled")
+        except TypeError:
+            image = screenshot(type="png", clip=box)
+        except Exception as error:
+            raise HostError("INTERNAL_FAILURE", "浏览器截图执行失败") from error
+        if not isinstance(image, (bytes, bytearray)) or not bytes(image).startswith(b"\x89PNG\r\n\x1a\n"):
+            return RawVisualCapture(status="rejected", reason="浏览器返回的截图不是 PNG", sanitized=False, sanitization_status="failed")
+        image = bytes(image)
+        if len(image) < 24:
+            return RawVisualCapture(status="rejected", reason="PNG 截图头不完整", sanitized=False, sanitization_status="failed")
+        width = int.from_bytes(image[16:20], "big")
+        height = int.from_bytes(image[20:24], "big")
+        if width <= 0 or height <= 0:
+            return RawVisualCapture(status="rejected", reason="PNG 截图尺寸无效", sanitized=False, sanitization_status="failed")
+        return RawVisualCapture(image_bytes=image, image_type="png", width=width, height=height,
+                                bounding_box={"x": 0, "y": 0, "width": width, "height": height},
+                                source_bounding_box=box,
+                                annotation="Host 固定定位的对象区域（未执行自动像素脱敏）",
+                                sanitized=False, sanitization_status="not_performed")
 
 
 def create_browser_evidence_adapter(session: BrowserSession, *, page_adapter: BrowserReadOnlyPageAdapter,

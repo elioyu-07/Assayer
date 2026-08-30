@@ -26,7 +26,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_browser_
 - 固定探针代码来自 Host，不接受页面或 Agent 提供的 JavaScript；页面内容只作为不可信审计数据处理。
 - 当前通用识别器只发现可见的 search/form/filter 区域并映射为 `filter_region`。扩大对象种类必须增加 Host 固定识别器和回归样本，不能接受用户 selector。
 - B04 只证明真实页面读取和初始对象唯一绑定；B05 增加发送前网络拦截、安全动作和动作后的强重新绑定，完整恢复证明属于 B06。
-- B07a 真实结构化 Evidence 继续实施；仅 B07b 真实截图与像素脱敏暂缓。在 B07b 恢复并完成验收前，不得由这条真实浏览器路径生成正式 `issue_found`。
+- B07a 真实结构化 Evidence 与 B07b 真实对象级截图已实施；B07c 自动截图脱敏仍暂缓。在 B07c 完成前，不得由未脱敏截图生成正式 `issue_found`。
 - 本切片没有通用真实站点登录适配器；测试使用本地无认证站点。类型化凭据仍被消费和清除，真实登录由站点配置支持后才能运行。
 
 ## 验收
