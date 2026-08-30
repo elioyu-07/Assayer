@@ -202,11 +202,11 @@ flowchart TD
     F --> G[Agent 检查证据是否充分]
     G -- 不足 --> H[请求定向补证或追加 Case]
     H --> D
-    G -- 充分 --> I[prepare_decision 创建 PendingDecision]
+    G -- 充分 --> L[定向恢复 Case 现场并验证]
+    L -- restored --> I[prepare_decision 创建 PendingDecision]
     I --> J{Host 完整性校验}
     J -- 失败 --> K[拒绝准备并返回缺口]
-    J -- 通过 --> L[定向恢复 Case 现场并验证]
-    L -- restored --> M[commit_decision 原子写入 Assessment]
+    J -- 通过 --> M[commit_decision 原子写入 Assessment]
     M --> N{issue_found?}
     N -- 是 --> O[同步派生 Issue]
     N -- 否 --> R[保留非问题状态并继续]

@@ -22,7 +22,7 @@ class SQLiteStore:
               run_revision INTEGER NOT NULL, status TEXT NOT NULL,
               login_status TEXT NOT NULL, created_at TEXT NOT NULL,
               rule_registry_digest TEXT NOT NULL, current_page_state_id TEXT,
-              capabilities_json TEXT NOT NULL, output_dir TEXT NOT NULL
+              capabilities_json TEXT NOT NULL, output_dir TEXT NOT NULL, entry_url TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS operations (
               operation_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
@@ -111,6 +111,7 @@ class SQLiteStore:
             "current_page_state_id": "TEXT",
             "capabilities_json": "TEXT NOT NULL DEFAULT '[]'",
             "output_dir": "TEXT NOT NULL DEFAULT ''",
+            "entry_url": "TEXT NOT NULL DEFAULT ''",
         }.items():
             if name not in scan_columns:
                 self._conn.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
@@ -146,8 +147,8 @@ class SQLiteStore:
 
     def insert_scan(self, scan: dict) -> None:
         self._conn.execute(
-            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json,output_dir) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["outputDir"]),
+            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json,output_dir,entry_url) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["outputDir"], scan.get("entryUrl", "")),
         )
 
     def update_scan(self, scan: dict) -> None:
@@ -336,6 +337,20 @@ class SQLiteStore:
     def get_issue(self, issue_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM issues WHERE issue_id=?", (issue_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def list_entities(self, table: str, scan_id: str | None = None) -> list[dict]:
+        allowed = {"page_states", "entrypoints", "page_candidates", "audit_objects", "object_verifications", "reverse_cases", "action_attempts", "request_observations", "evidence", "screenshots", "pending_decisions", "assessments", "issues"}
+        if table not in allowed:
+            raise ValueError("不允许读取未知实体表")
+        if scan_id is None:
+            rows = self._conn.execute(f"SELECT entity_json FROM {table} ORDER BY rowid").fetchall()
+        else:
+            rows = self._conn.execute(f"SELECT entity_json FROM {table} WHERE scan_id=? ORDER BY rowid", (scan_id,)).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def list_operations(self, scan_id: str) -> list[dict]:
+        rows = self._conn.execute("SELECT * FROM operations WHERE scan_id=? ORDER BY rowid", (scan_id,)).fetchall()
+        return [dict(row) for row in rows]
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
         self._conn.execute("INSERT INTO bootstrap_idempotency(idempotency_key,operation_id,request_digest) VALUES(?,?,?)", (key, operation_id, digest))

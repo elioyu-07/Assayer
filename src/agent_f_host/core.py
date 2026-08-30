@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,8 @@ class HostCore:
         self._pending_decision_validator = entity_validator("pending-decision.schema.json")
         self._assessment_validator = entity_validator("rule-assessment.schema.json")
         self._issue_validator = entity_validator("issue.schema.json")
+        self._scan_run_validator = entity_validator("scan-run.schema.json")
+        self._ledger_validator = entity_validator("audit-ledger.schema.json")
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
@@ -79,6 +82,7 @@ class HostCore:
         self._evidence_sanitizer = evidence_sanitizer or EvidenceSanitizer()
         registry_path = root.parent / "rules" / "registry.json"
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
+        self._rule_registry = registry
         self._rule_registry_version = registry["registryVersion"]
         self._rule_registry_digest = registry["digest"]
         self._rules_by_kind = {}
@@ -130,10 +134,11 @@ class HostCore:
                 if tool == "capture_evidence": return self._capture_evidence(request, scan, existing)
                 if tool == "prepare_decision": return self._prepare_decision(request, scan, existing)
                 if tool == "commit_decision": return self._commit_decision(request, scan, existing)
+                if tool == "complete_audit": return self._complete_audit(request, scan, existing)
             return self._operation_response(request, scan, existing)
-        if scan["status"] in {"completed", "partial", "failed"}:
+        if scan["status"] in {"completed", "partial", "failed"} and (tool != "complete_audit" or scan["status"] == "completed"):
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision"}
+        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision", "commit_decision", "complete_audit"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
@@ -148,6 +153,8 @@ class HostCore:
                 return self._prepare_decision(request, scan, operation)
             if operation["status"] == "running" and tool == "commit_decision":
                 return self._commit_decision(request, scan, operation)
+            if operation["status"] == "running" and tool == "complete_audit":
+                return self._complete_audit(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
@@ -165,6 +172,8 @@ class HostCore:
             return self._prepare_decision(request, scan, operation)
         if tool == "commit_decision":
             return self._commit_decision(request, scan, operation)
+        if tool == "complete_audit":
+            return self._complete_audit(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -182,7 +191,7 @@ class HostCore:
                 "scanId": self._new_id("scan"), "runId": self._new_id("run"), "runRevision": 0,
                 "status": "authenticating", "loginStatus": "pending", "createdAt": self._now(),
                 "ruleRegistryDigest": self._rule_registry_digest, "currentPageStateId": None, "capabilitiesJson": "[]",
-                "outputDir": request["input"]["outputDir"],
+                "outputDir": request["input"]["outputDir"], "entryUrl": request["input"]["url"],
             }
             operation = self._new_operation(request, scan["scanId"], "bootstrap", digest, "running", 0)
             self._store.insert_scan(scan)
@@ -920,6 +929,143 @@ class HostCore:
             return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "正式判定原子持久化失败")
         return self._response(request, scan, "ok", result=operation_result, operation=operation, evidence_refs=evidence_refs)
 
+    def _complete_audit(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        if (Path(scan["outputDir"]) / "audit-ledger.json").exists():
+            return self._finish_operation_failure(request, scan, operation, "ALREADY_COMPLETED", "当前 Scan 已生成审计账本")
+        if scan.get("loginStatus") != "succeeded":
+            return self._finish_operation_failure(request, scan, operation, "LOGIN_FAILED", "登录未成功，不能结束审计")
+        if scan.get("ruleRegistryDigest") != self._rule_registry_digest:
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "扫描冻结规则摘要与 Host 当前注册表不一致")
+        if any(item.get("status") == "pending" for item in self._store.list_entities("pending_decisions", scan["scanId"])):
+            return self._finish_operation_failure(request, scan, operation, "DECISION_PENDING", "仍有未提交的 PendingDecision")
+        operation_id = operation.get("operation_id") or operation["operationId"]
+        if any(item["operation_id"] != operation_id and item["status"] == "running" for item in self._store.list_operations(scan["scanId"])):
+            return self._finish_operation_failure(request, scan, operation, "OPERATION_IN_PROGRESS", "仍有未收束的 Operation")
+        cases = self._store.list_entities("reverse_cases", scan["scanId"])
+        if any(item.get("status") in {"planned", "safety_check", "executing", "evidence_captured", "decision_prepared", "restoring"} for item in cases):
+            return self._finish_operation_failure(request, scan, operation, "CASE_ACTIVE", "仍有未收束的 Case")
+        page_states = self._store.list_entities("page_states", scan["scanId"]); entrypoints = self._store.list_entities("entrypoints", scan["scanId"])
+        objects = self._store.list_entities("audit_objects", scan["scanId"]); assessments = self._store.list_entities("assessments", scan["scanId"]); issues = self._store.list_entities("issues", scan["scanId"])
+        scan_id = scan["scanId"]
+        if any(item.get("scanId") != scan_id for item in page_states + entrypoints + objects + assessments + issues):
+            return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "账本包含跨 Scan 实体")
+        page_ids = {item["pageStateId"] for item in page_states}; object_ids = {item["objectId"] for item in objects}; entry_ids = {item["entrypointId"] for item in entrypoints}
+        if len(data["visitedPageStateRefs"]) != len(set(data["visitedPageStateRefs"])) or not set(data["visitedPageStateRefs"]).issubset(page_ids):
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "visitedPageStateRefs 引用不闭合")
+        if len(data["processedObjectRefs"]) != len(set(data["processedObjectRefs"])) or not set(data["processedObjectRefs"]).issubset(object_ids):
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "processedObjectRefs 引用不闭合")
+        processed = set(data["processedEntrypointRefs"]); skipped = {item["entrypointId"] for item in data["skippedEntrypoints"]}; unprocessed = set(data["unprocessedEntrypointRefs"])
+        if len(skipped) != len(data["skippedEntrypoints"]) or processed | skipped | unprocessed != entry_ids or not processed.isdisjoint(skipped | unprocessed) or not skipped.isdisjoint(unprocessed):
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "入口 processed/skipped/unprocessed 未闭合")
+        if any(not item.get("reason", {}).get("message") for item in data["skippedEntrypoints"]):
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "跳过入口缺少原因")
+        by_rule = {}
+        for assessment in assessments:
+            try:
+                self._validate_entity(self._assessment_validator, assessment, "RuleAssessment")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            by_rule.setdefault((assessment["rule"]["ruleId"], assessment["rule"]["version"]), []).append(assessment)
+        assessment_ids = {item["assessmentId"] for item in assessments}
+        issues_by_assessment = {}
+        for issue in issues:
+            try:
+                self._validate_entity(self._issue_validator, issue, "Issue")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            if issue["assessmentRef"] not in assessment_ids:
+                return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "Issue 未绑定当前 Scan 的 Assessment")
+            issues_by_assessment.setdefault(issue["assessmentRef"], []).append(issue)
+        if any((assessment["result"] == "issue_found" and len(issues_by_assessment.get(assessment["assessmentId"], [])) != 1) or (assessment["result"] != "issue_found" and assessment["assessmentId"] in issues_by_assessment) for assessment in assessments):
+            return self._finish_operation_failure(request, scan, operation, "LEDGER_REFERENCE_INVALID", "Issue 与 issue_found Assessment 不是一对一关系")
+        summaries = []
+        summary_keys = [(item["rule"]["ruleId"], item["rule"]["version"]) for item in data["ruleSummaries"]]
+        if len(summary_keys) != len(set(summary_keys)) or set(summary_keys) != set(self._rules):
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "规则摘要必须恰好覆盖冻结启用规则")
+        for summary in data["ruleSummaries"]:
+            rule_ref = summary["rule"]; rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+            if not rule:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "规则摘要引用未知规则")
+            found = by_rule.get((rule_ref["ruleId"], rule_ref["version"]), [])
+            counts = {result: sum(1 for item in found if item["result"] == result) for result in ("issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise")}
+            provided_counts = summary.get("resultCounts", {})
+            if summary["assessmentCount"] != len(found) or any(provided_counts.get(key, 0) != value for key, value in counts.items()):
+                return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "规则摘要计数与正式 Assessment 不一致")
+            complete = bool(found) and all(item["coverage"].get("complete") for item in found)
+            if summary["coverageComplete"] != complete:
+                return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "规则摘要覆盖状态不一致")
+            summaries.append({"rule": rule_ref, "assessmentCount": len(found), "resultCounts": {k: v for k, v in counts.items() if v}, "coverageComplete": complete})
+        incomplete_objects = object_ids - set(data["processedObjectRefs"])
+        incomplete_pages = page_ids - set(data["visitedPageStateRefs"])
+        for object_ref in data["processedObjectRefs"]:
+            target = next(item for item in objects if item["objectId"] == object_ref)
+            if target.get("status") != "decided" or len(target.get("assessmentRefs", [])) < len(target.get("potentialRules", [])):
+                return self._finish_operation_failure(request, scan, operation, "COVERAGE_INVALID", "processedObjectRefs 包含尚未完成全部规则判定的对象")
+        incomplete_rules = any(not item["coverageComplete"] for item in summaries)
+        status = "failed" if scan["status"] == "failed" else ("partial" if unprocessed or incomplete_objects or incomplete_pages or incomplete_rules else "completed")
+        proof = {"visitedPageStateRefs": list(data["visitedPageStateRefs"]), "processedObjectRefs": list(data["processedObjectRefs"]), "processedEntrypointRefs": list(data["processedEntrypointRefs"]), "skippedEntrypoints": list(data["skippedEntrypoints"]), "ruleSummaries": summaries, "unprocessedEntrypointRefs": list(data["unprocessedEntrypointRefs"]), "completionReason": data["completionReason"]}
+        terminal = {"code": "COVERAGE_COMPLETE" if status == "completed" else ("SCAN_FAILED" if status == "failed" else "COVERAGE_PARTIAL"), "message": data["completionReason"]}
+        revision = scan["runRevision"] + 1
+        scan.update({"status": status, "runRevision": revision})
+        operation_result = {"scanStatus": status, "conclusionsValid": status != "failed", "runRevision": revision}
+        operation.update({"status": "succeeded", "resultJson": json.dumps(operation_result, ensure_ascii=False, separators=(",", ":"))})
+        with self._store.transaction():
+            self._store.update_scan(scan); self._store.update_operation(operation)
+        try:
+            ledger_path = self._export_ledger(scan, proof, summaries, terminal, status)
+            operation_result["ledgerPath"] = ledger_path
+            operation["resultJson"] = json.dumps(operation_result, ensure_ascii=False, separators=(",", ":"))
+            with self._store.transaction():
+                self._store.update_operation(operation)
+        except Exception as error:
+            scan["status"] = "failed"; operation.update({"status": "failed_known", "errorCode": "LEDGER_EXPORT_FAILED", "errorMessage": str(error)}); operation.pop("resultJson", None)
+            with self._store.transaction(): self._store.update_scan(scan); self._store.update_operation(operation)
+            return self._response(request, scan, "failed", error=HostError("LEDGER_EXPORT_FAILED", str(error)), operation=operation)
+        return self._response(request, scan, "ok", result=operation_result, operation=operation)
+
+    def _export_ledger(self, scan: dict, proof: dict, summaries: list[dict], terminal: dict, status: str) -> str:
+        ended_at = self._now(); entry_url = scan.get("entryUrl") or "https://unknown.invalid"; parsed = urlparse(entry_url)
+        scan_entity = {"scanId": scan["scanId"], "runId": scan["runId"], "protocolVersion": "1.0", "skillVersion": "1.0.0", "runRevision": scan["runRevision"], "algorithms": {"pageIdentity": "1.0.0", "objectIdentity": "1.0.0", "recoveryPolicy": "1.0.0", "sanitizationPolicy": "1.0.0", "normalization": "1.0.0"}, "status": status, "auditMode": "runtime_only", "entryUrl": entry_url, "allowedOrigins": [f"{parsed.scheme}://{parsed.netloc}"], "startedAt": scan["createdAt"], "endedAt": ended_at, "loginStatus": scan["loginStatus"], "ruleRegistryDigest": scan["ruleRegistryDigest"], "frozenRules": [{"ruleId": r["ruleId"], "version": r["version"]} for r in self._rule_registry.get("rules", []) if r.get("status") == "enabled"], "capabilities": json.loads(scan["capabilitiesJson"]), "coverageProof": proof, "terminalReason": terminal, "conclusionsValid": status != "failed"}
+        self._validate_entity(self._scan_run_validator, scan_entity, "ScanRun")
+        operations = []
+        for row in self._store.list_operations(scan["scanId"]):
+            item = {"operationId": row["operation_id"], "scanId": row["scan_id"], "requestId": row["request_id"], "tool": row["tool"], "operationKind": row["operation_kind"], "idempotencyKey": row["idempotency_key"], "requestDigest": row["request_digest"], "status": row["status"], "acceptedAt": scan["createdAt"], "acceptedAtRevision": row["accepted_at_revision"]}
+            if row.get("case_ref"): item["caseRef"] = row["case_ref"]
+            if row["status"] in {"succeeded", "rejected", "failed_known", "result_unknown"}: item["endedAt"] = ended_at
+            if row["status"] in {"rejected", "failed_known", "result_unknown"}: item["reason"] = {"code": row.get("error_code") or "OPERATION_FAILED", "message": row.get("error_message") or "Operation 未产生成功结果"}
+            operations.append(item)
+        entrypoints = self._store.list_entities("entrypoints", scan["scanId"]); processed = set(proof["processedEntrypointRefs"]); unprocessed = set(proof["unprocessedEntrypointRefs"]); skipped = {item["entrypointId"]: item["reason"] for item in proof["skippedEntrypoints"]}
+        for entrypoint in entrypoints:
+            ref = entrypoint["entrypointId"]
+            if ref in processed: entrypoint["status"] = "processed"
+            elif ref in skipped: entrypoint.update({"status": "skipped", "reason": skipped[ref]})
+            elif ref in unprocessed: entrypoint["status"] = "unprocessed"
+        objects = self._store.list_entities("audit_objects", scan["scanId"]); refs_by_page = {}
+        for target in objects: refs_by_page.setdefault(target["pageStateRef"], []).append(target["objectId"])
+        pages = self._store.list_entities("page_states", scan["scanId"])
+        for page in pages:
+            page["objectRefs"] = sorted(refs_by_page.get(page["pageStateId"], []))
+            for embedded in page.get("safeEntrypoints", []):
+                ref = embedded["entrypointId"]
+                if ref in processed: embedded["status"] = "processed"
+                elif ref in skipped: embedded.update({"status": "skipped", "reason": skipped[ref]})
+                elif ref in unprocessed: embedded["status"] = "unprocessed"
+        ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
+        self._validate_entity(self._ledger_validator, ledger, "AuditLedger")
+        output = Path(scan["outputDir"]) / "audit-ledger.json"; output.parent.mkdir(parents=True, exist_ok=True); content = json.dumps(ledger, ensure_ascii=False, indent=2).encode("utf-8")
+        if output.exists():
+            if output.read_bytes() != content: raise ValueError("审计账本文件内容冲突")
+        else:
+            descriptor, temporary_name = tempfile.mkstemp(prefix=".audit-ledger-", dir=output.parent)
+            temporary = Path(temporary_name)
+            try:
+                with os.fdopen(descriptor, "wb") as stream: stream.write(content); stream.flush(); os.fsync(stream.fileno())
+                os.link(temporary, output)
+            finally:
+                temporary.unlink(missing_ok=True)
+        return "audit-ledger.json"
+
     def _materialize_issue_screenshot(self, scan: dict, raw: dict, operation_id: str, revision: int) -> dict:
         screenshot_id = self._stable_id("screenshot", operation_id, "issue")
         extension = "jpg" if raw["imageType"] == "jpeg" else raw["imageType"]
@@ -1132,7 +1278,7 @@ class HostCore:
         return {"scanId":row["scan_id"],"runId":row["run_id"],"runRevision":row["run_revision"],
                 "status":row["status"],"loginStatus":row["login_status"],"createdAt":row["created_at"],
                 "ruleRegistryDigest":row["rule_registry_digest"],"currentPageStateId":row["current_page_state_id"],
-                "capabilitiesJson":row["capabilities_json"],"outputDir":row["output_dir"]}
+                "capabilitiesJson":row["capabilities_json"],"outputDir":row["output_dir"],"entryUrl":row["entry_url"]}
 
     def _check_revision(self, request: dict, scan: dict) -> None:
         if request["expectedRunRevision"] != scan["runRevision"]:

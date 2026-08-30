@@ -44,6 +44,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 12. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
 13. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
 14. Evidence/Screenshot 只能绑定当前 Scan 中真实的 PageState 和唯一验证对象；Raw Visual 失败记录不能作为 captured IssueScreenshot 使用。
+15. `complete_audit` 必须让全部入口恰好归入 processed、skipped 或 unprocessed，并由 Host 从正式 Assessment 重算规则摘要；最终 `audit-ledger.json` 必须通过聚合 Schema 后原子写出。
 
 ## 摘要与规范化
 

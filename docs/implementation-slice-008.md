@@ -12,4 +12,4 @@
 
 ## 切片边界
 
-本切片仍不实现 `complete_audit` 的全量 Coverage Universe 收束、账本导出和报告派生；真实浏览器动作、恢复和截图适配器继续默认 fail-closed。
+本切片仍不实现 `complete_audit` 的全量 Coverage Universe 收束、账本导出和报告派生；收束和账本导出由垂直切片 009 实现，真实浏览器动作、恢复和截图适配器继续默认 fail-closed。

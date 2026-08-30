@@ -411,6 +411,8 @@ Host 最终校验：
 - 规则版本和注册表摘要稳定；
 - 没有未处理的安全入口被 Agent 无理由遗漏。
 
+成功响应返回 `scanStatus`、`conclusionsValid` 和相对于 `outputDir` 的 `ledgerPath`。Host 从正式账本事实重算规则计数和覆盖状态；未处理页面、对象、入口或规则覆盖会使扫描收束为 `partial`，不能由 Agent 自报为 `completed`。
+
 ## 7. Agent 调查循环协议
 
 每个对象按以下循环运行：

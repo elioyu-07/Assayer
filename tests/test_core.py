@@ -264,6 +264,25 @@ class HostCoreTest(unittest.TestCase):
                          "message":"筛选区只有查询动作。","impact":"用户无法一键恢复筛选条件。","recommendation":"增加绑定同一列表的重置动作。"})
         return data
 
+    def committed_no_issue(self, core, started):
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        prepared = core.handle(session(started, tool="prepare_decision", key="complete-prepare", revision=4,
+                                       input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        committed = core.handle(session(started, tool="commit_decision", key="complete-commit", revision=5,
+                                        input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
+        return object_id, committed
+
+    def completion_input(self, core, started, object_id, *, partial=False, assessment_count=1):
+        entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
+        return {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],
+                "processedEntrypointRefs":[] if partial else [entrypoint_id],"skippedEntrypoints":[],
+                "ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.0.0"},"assessmentCount":assessment_count,
+                                  "resultCounts":{"scanned_no_issue":assessment_count},"coverageComplete":True}],
+                "unprocessedEntrypointRefs":[entrypoint_id] if partial else [],"completionReason":"覆盖验证完成"}
+
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
         started, candidate_id = self.discover_candidate(core)
@@ -770,6 +789,63 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
             self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "pending")
             self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 5)
+
+    def test_complete_audit_closes_coverage_and_exports_valid_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, _ = self.committed_no_issue(core, started)
+            request = session(started, tool="complete_audit", key="complete-ok", revision=6,
+                              input=self.completion_input(core, started, object_id))
+            result = core.handle(request)
+            self.assertEqual(result["result"]["scanStatus"], "completed")
+            self.assertEqual(result["result"]["ledgerPath"], "audit-ledger.json")
+            ledger = json.loads((Path(tmp) / "audit-ledger.json").read_text())
+            self.assertEqual(ledger["scan"]["status"], "completed")
+            self.assertEqual(ledger["scan"]["coverageProof"]["processedObjectRefs"], [object_id])
+            self.assertEqual(len(ledger["assessments"]), 1)
+            retry = core.handle(request)
+            self.assertEqual(retry["result"], result["result"])
+
+    def test_complete_audit_marks_unprocessed_entrypoint_partial(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, _ = self.committed_no_issue(core, started)
+            result = core.handle(session(started, tool="complete_audit", key="complete-partial", revision=6,
+                                         input=self.completion_input(core, started, object_id, partial=True)))
+            self.assertEqual(result["result"]["scanStatus"], "partial")
+            self.assertTrue(result["result"]["conclusionsValid"])
+
+    def test_complete_audit_rejects_agent_rule_count_claim(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, _ = self.committed_no_issue(core, started)
+            result = core.handle(session(started, tool="complete_audit", key="complete-bad-count", revision=6,
+                                         input=self.completion_input(core, started, object_id, assessment_count=2)))
+            self.assertEqual(result["error"]["code"], "COVERAGE_INVALID")
+            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 6)
+            self.assertFalse((Path(tmp) / "audit-ledger.json").exists())
+
+    def test_complete_audit_rejects_pending_decision(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        core.handle(session(started, tool="prepare_decision", key="pending-at-end", revision=4,
+                            input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="scanned_no_issue")))
+        result = core.handle(session(started, tool="complete_audit", key="complete-with-pending", revision=5,
+                                     input=self.completion_input(core, started, object_id)))
+        self.assertEqual(result["error"]["code"], "DECISION_PENDING")
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))
