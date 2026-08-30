@@ -78,6 +78,7 @@
 | D-005 | Bootstrap 和 Session 使用不同请求封套。 | `start_audit` 前不存在 `scanId/runId`。 | accepted |
 | D-006 | 对象重新绑定无法唯一确认时返回 `ambiguous`，不得选择相似度最高者。 | 防止证据错绑和错误截图。 | accepted |
 | D-007 | `Issue` 是 Assessment 的不可变派生投影，不拥有独立业务判断。 | 保持 Agent 语义判定只有一个来源。 | accepted |
+| D-008 | 确定性 Harness 必须显式标注测试模式并注入测试适配器；它不得改变 Host 的生产默认适配器或冒充真实站点审计。 | 既验证完整生命周期，又防止测试成功被误解为浏览器能力已经接入。 | accepted |
 
 ## 6. 变更规则
 
