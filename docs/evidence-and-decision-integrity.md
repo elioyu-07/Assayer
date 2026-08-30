@@ -66,10 +66,10 @@ Case 执行期间按规则要求同步采集，绑定当前 PageState、Object �
 正式判定采用恢复屏障后的两阶段事务：
 
 ```text
-Agent → prepare_decision
-Host  → 校验规则、覆盖、证据、语义字段，创建 PendingDecision
-Host  → 为 issue_found 生成/验证 IssueScreenshot
 Agent/Host → restore_case
+Host  → 仅 restored 的 Case 才允许 prepare_decision
+Agent → prepare_decision
+Host  → 校验规则、覆盖、证据、语义字段，创建 PendingDecision 和 IssueScreenshot
 Host  → 仅 restored 才允许 commit_decision
 Host  → 原子写入 RuleAssessment，并按需派生 Issue
 ```
@@ -134,4 +134,4 @@ Host 在每个提交点和 `complete_audit` 前校验：
 7. 敏感数据扫描和摘要校验通过；
 8. 历史事件可以重放出当前状态和 runRevision。
 
-当前 Host Core 已实现结构化 Evidence 和 Raw Visual 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图仍由后续判定准备事务负责。
+当前 Host Core 已实现结构化 Evidence、Raw Visual 和 `prepare_decision` PendingDecision 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图由判定准备事务从同一 Raw Visual 复制为独立文件和实体。正式 Assessment/Issue 的原子写入仍由 `commit_decision` 负责。

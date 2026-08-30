@@ -106,10 +106,9 @@ stateDiagram-v2
     safety_check --> executing: 动作获准
     safety_check --> blocked: 动作拒绝且无替代路径
     executing --> evidence_captured: 所需证据已保存
-    evidence_captured --> decision_prepared: prepare_decision
-    decision_prepared --> restoring: restore_case
-    evidence_captured --> restoring: 无需提交判定但仍需恢复
+    evidence_captured --> restoring: restore_case
     restoring --> completed: 恢复结果 restored
+    completed --> completed: prepare_decision 创建 PendingDecision
     restoring --> restore_failed: 刷新重放后仍未恢复
     planned --> invalidated: Scan 失败/对象身份失效
     executing --> invalidated: 环境污染
@@ -119,7 +118,7 @@ stateDiagram-v2
 
 - `begin_case` 原子创建 Case、冻结对象/规则引用和恢复基线；
 - Case 内每个动作必须引用 `caseId`；
-- `prepare_decision` 只创建 PendingDecision，不创建正式 Assessment 或 Issue；
+- `prepare_decision` 只接受已完成且 `recovery.finalStatus=restored` 的 Case，创建 PendingDecision，不创建正式 Assessment 或 Issue；
 - `commit_decision` 只接受状态为 `completed` 且恢复为 `restored` 的 Case；
 - `restore_failed` 时 PendingDecision 失效，当前对象停止；若无法排除环境污染，Scan 失败；
 - `observation` Case 允许零页面变更，但仍需执行 `noop` 恢复检查以确认对象和 pending request 状态。

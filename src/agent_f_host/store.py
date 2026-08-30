@@ -82,6 +82,12 @@ class SQLiteStore:
               page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id), object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
               entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS pending_decisions (
+              pending_decision_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
+              rule_id TEXT NOT NULL, rule_version TEXT NOT NULL, status TEXT NOT NULL,
+              entity_json TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -273,6 +279,28 @@ class SQLiteStore:
     def get_screenshot(self, screenshot_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM screenshots WHERE screenshot_id=?", (screenshot_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def insert_screenshot(self, screenshot: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO screenshots(screenshot_id,scan_id,page_state_id,object_id,entity_json) VALUES(?,?,?,?,?)",
+            (screenshot["screenshotId"], screenshot["scanId"], screenshot["pageStateRef"], screenshot["objectRef"], json.dumps(screenshot, ensure_ascii=False, separators=(",", ":"))),
+        )
+
+    def insert_pending_decision(self, decision: dict) -> None:
+        self._conn.execute(
+            "INSERT INTO pending_decisions(pending_decision_id,scan_id,object_id,rule_id,rule_version,status,entity_json) VALUES(?,?,?,?,?,?,?)",
+            (decision["pendingDecisionId"], decision["scanId"], decision["objectRef"], decision["rule"]["ruleId"], decision["rule"]["version"], decision["status"], json.dumps(decision, ensure_ascii=False, separators=(",", ":"))),
+        )
+
+    def get_pending_decision(self, pending_decision_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM pending_decisions WHERE pending_decision_id=?", (pending_decision_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def update_pending_decision(self, decision: dict) -> None:
+        self._conn.execute(
+            "UPDATE pending_decisions SET status=?, entity_json=? WHERE pending_decision_id=?",
+            (decision["status"], json.dumps(decision, ensure_ascii=False, separators=(",", ":")), decision["pendingDecisionId"]),
+        )
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
         self._conn.execute("INSERT INTO bootstrap_idempotency(idempotency_key,operation_id,request_digest) VALUES(?,?,?)", (key, operation_id, digest))

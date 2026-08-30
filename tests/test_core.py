@@ -231,11 +231,11 @@ class HostCoreTest(unittest.TestCase):
     def inspect_candidate(self, core, started, candidate_id, key="verify"):
         return core.handle(session(started, tool="inspect_object", key=key, input={"candidateId":candidate_id}))
 
-    def begin_case(self, core, started, key="case-1"):
-        page = core.handle(session(started, key=f"{key}-discover", input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
+    def begin_case(self, core, started, key="case-1", revision=1):
+        page = core.handle(session(started, key=f"{key}-discover", revision=revision, input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
         candidate_id = page["candidateRefs"][0]
-        object_id = self.inspect_candidate(core, started, candidate_id)["result"]["objectId"]
-        response = core.handle(session(started, tool="begin_case", key=key, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"验证筛选能力","plannedCoverageDimensions":["filter_present","query_action","reset_action","binding_to_list"]}))
+        object_id = core.handle(session(started, tool="inspect_object", key=f"{key}-verify", revision=revision, input={"candidateId":candidate_id}))["result"]["objectId"]
+        response = core.handle(session(started, tool="begin_case", key=key, revision=revision, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"验证筛选能力","plannedCoverageDimensions":["filter_present","query_action","reset_action","binding_to_list"]}))
         return object_id, response
 
     def perform_action(self, core, started, object_id, case_id, *, key="action-1", revision=2, action_type="focus", intent="观察筛选区", parameters=None):
@@ -249,6 +249,14 @@ class HostCoreTest(unittest.TestCase):
         if case_id:
             input_data["caseId"] = case_id
         return core.handle(session(started, tool="capture_evidence", key=key, revision=revision, input=input_data))
+
+    def prepare_input(self, object_id, case_id, evidence_id, *, result="issue_found", raw_visual_ref=None):
+        data = {"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":result,
+                "reasonText":"Host 证据支持该判定","evidenceRefs":[evidence_id],"caseRefs":[case_id]}
+        if result == "issue_found":
+            data.update({"rawVisualRef":raw_visual_ref,"severity":"P2","title":"筛选区缺少重置",
+                         "message":"筛选区只有查询动作。","impact":"用户无法一键恢复筛选条件。","recommendation":"增加绑定同一列表的重置动作。"})
+        return data
 
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
@@ -558,6 +566,105 @@ class HostCoreTest(unittest.TestCase):
             conflict.write_bytes(b"tampered")
             result = core.handle(request)
             self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_prepare_issue_creates_pending_and_independent_issue_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            case_id = case_result["result"]["caseId"]
+            evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+            self.restore_case(core, started, object_id, case_id, revision=3)
+            request = session(started, tool="prepare_decision", key="prepare-issue", revision=4,
+                              input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"]))
+            result = core.handle(request)
+            self.assertEqual(result["runRevision"], 5)
+            self.assertNotEqual(result["result"]["screenshotRef"], evidence["result"]["screenshotRef"])
+            screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+            self.assertEqual(screenshot["kind"], "issue")
+            self.assertEqual(screenshot["rawVisualRef"], evidence["result"]["screenshotRef"])
+            pending = core._store.get_pending_decision(result["result"]["pendingDecisionId"])
+            self.assertEqual(pending["status"], "pending")
+            self.assertTrue(pending["coverage"]["complete"])
+            tables = {row[0] for row in core._store._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertNotIn("rule_assessments", tables)
+            self.assertNotIn("issues", tables)
+            retry = core.handle(request)
+            self.assertEqual(retry["result"], result["result"])
+
+    def test_prepare_issue_requires_raw_visual_at_contract_boundary(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        data = self.prepare_input("object-001", "case-001", "evidence-001", raw_visual_ref="screenshot-001")
+        data.pop("rawVisualRef")
+        with self.assertRaises(HostError) as caught:
+            core.handle(session(started, tool="prepare_decision", key="prepare-no-raw", input=data))
+        self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
+    def test_prepare_needs_review_requires_structured_blocker(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        data = {"objectId":"object-001","rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":"needs_review",
+                "reasonText":"证据冲突","evidenceRefs":[],"caseRefs":["case-001"]}
+        with self.assertRaises(HostError) as caught:
+            core.handle(session(started, tool="prepare_decision", key="prepare-no-blocker", input=data))
+        self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
+    def test_prepare_rejects_case_before_recovery_barrier(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], result="not_applicable")
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-unrestored", revision=3, input=data))
+        self.assertEqual(result["error"]["code"], "CASE_NOT_RESTORED")
+
+    def test_prepare_rejects_incomplete_no_issue_coverage(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        page = core.handle(session(started, key="partial-discover", input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
+        object_id = self.inspect_candidate(core, started, page["candidateRefs"][0], key="partial-inspect")["result"]["objectId"]
+        case = core.handle(session(started, tool="begin_case", key="partial-case", input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"局部覆盖","plannedCoverageDimensions":["filter_present"]}))["result"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case["caseId"], revision=2)
+        self.restore_case(core, started, object_id, case["caseId"], revision=3)
+        data = self.prepare_input(object_id, case["caseId"], evidence["result"]["evidenceId"], result="scanned_no_issue")
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-partial", revision=4, input=data))
+        self.assertEqual(result["error"]["code"], "COVERAGE_INCOMPLETE")
+
+    def test_prepare_rejects_failed_raw_visual(self):
+        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=RawVisualCapture(status="ambiguous", reason="对象歧义"))
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture), recovery_adapter=DeterministicRecoveryAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2, raw=True)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], raw_visual_ref=evidence["result"]["screenshotRef"])
+        result = core.handle(session(started, tool="prepare_decision", key="prepare-bad-raw", revision=4, input=data))
+        self.assertEqual(result["error"]["code"], "SCREENSHOT_NOT_CAPTURED")
+
+    def test_two_issue_preparations_never_reuse_issue_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, first_case = self.begin_case(core, started, key="multi-one")
+            first_id = first_case["result"]["caseId"]
+            first_ev = self.capture_evidence(core, started, object_id, case_id=first_id, key="multi-ev-one", revision=2, raw=True)
+            self.restore_case(core, started, object_id, first_id, key="multi-restore-one", revision=3)
+            first = core.handle(session(started, tool="prepare_decision", key="multi-prepare-one", revision=4,
+                                        input=self.prepare_input(object_id, first_id, first_ev["result"]["evidenceId"], raw_visual_ref=first_ev["result"]["screenshotRef"])))
+            _, second_case = self.begin_case(core, started, key="multi-two", revision=5)
+            second_id = second_case["result"]["caseId"]
+            second_ev = self.capture_evidence(core, started, object_id, case_id=second_id, key="multi-ev-two", revision=6, raw=True)
+            self.restore_case(core, started, object_id, second_id, key="multi-restore-two", revision=7)
+            second = core.handle(session(started, tool="prepare_decision", key="multi-prepare-two", revision=8,
+                                         input=self.prepare_input(object_id, second_id, second_ev["result"]["evidenceId"], raw_visual_ref=second_ev["result"]["screenshotRef"])))
+            self.assertNotEqual(first["result"]["screenshotRef"], second["result"]["screenshotRef"])
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))

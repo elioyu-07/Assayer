@@ -64,6 +64,7 @@ class HostCore:
         self._request_observation_validator = entity_validator("request-observation.schema.json")
         self._evidence_validator = entity_validator("evidence.schema.json")
         self._screenshot_validator = entity_validator("screenshot.schema.json")
+        self._pending_decision_validator = entity_validator("pending-decision.schema.json")
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
@@ -125,10 +126,11 @@ class HostCore:
                 if tool == "inspect_object": return self._inspect_object(request, scan, existing)
                 if tool == "begin_case": return self._begin_case(request, scan, existing)
                 if tool == "capture_evidence": return self._capture_evidence(request, scan, existing)
+                if tool == "prepare_decision": return self._prepare_decision(request, scan, existing)
             return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"}:
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence"}
+        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action", "restore_case", "capture_evidence", "prepare_decision"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
@@ -139,6 +141,8 @@ class HostCore:
                 return self._begin_case(request, scan, operation)
             if operation["status"] == "running" and tool == "capture_evidence":
                 return self._capture_evidence(request, scan, operation)
+            if operation["status"] == "running" and tool == "prepare_decision":
+                return self._prepare_decision(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
@@ -152,6 +156,8 @@ class HostCore:
             return self._restore_case(request, scan, operation)
         if tool == "capture_evidence":
             return self._capture_evidence(request, scan, operation)
+        if tool == "prepare_decision":
+            return self._prepare_decision(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -676,6 +682,139 @@ class HostCore:
         reason = raw.reason if raw and raw.reason else ("截图未通过脱敏确认" if raw and not raw.sanitized else "截图格式、尺寸或对象定位校验失败")
         common.update({"status": status, "failureReason": {"code": "SANITIZATION_FAILED" if raw and not raw.sanitized else "SCREENSHOT_NOT_CAPTURED", "message": reason}})
         return common, None
+
+    def _prepare_decision(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        target = self._store.get_audit_object(data["objectId"])
+        if not target or target["scanId"] != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "判定对象不存在于当前 Scan")
+        if target.get("pageStateRef") != scan.get("currentPageStateId") or target.get("rebindStatus") != "matched":
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "判定对象不是当前页面中已唯一验证的对象")
+        if target.get("status") not in {"eligible", "investigating"}:
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "对象状态不允许准备判定")
+        rule_ref = data["rule"]
+        rule = self._rules.get((rule_ref["ruleId"], rule_ref["version"]))
+        if not rule or rule_ref not in target.get("potentialRules", []):
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "规则不属于对象的冻结规则集合")
+
+        evidence = []
+        for evidence_ref in data["evidenceRefs"]:
+            item = self._store.get_evidence(evidence_ref)
+            if not item or item.get("scanId") != scan["scanId"] or item.get("objectRef") != target["objectId"] or item.get("pageStateRef") != target["pageStateRef"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Evidence 不存在或未绑定当前 Scan、页面和对象")
+            if item.get("caseRef") and item["caseRef"] not in data["caseRefs"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Evidence 的 Case 未包含在当前判定中")
+            evidence.append(item)
+
+        cases = []
+        covered_dimensions = set()
+        for case_ref in data["caseRefs"]:
+            case = self._store.get_case(case_ref)
+            if not case or case.get("scanId") != scan["scanId"] or case.get("objectRef") != target["objectId"] or case.get("rule") != rule_ref:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Case 不存在或未绑定当前对象与规则")
+            if case.get("status") != "completed" or case.get("recovery", {}).get("finalStatus") != "restored":
+                return self._finish_operation_failure(request, scan, operation, "CASE_NOT_RESTORED", "引用 Case 尚未完成恢复屏障")
+            cases.append(case)
+            covered_dimensions.update(case.get("plannedCoverageDimensions", []))
+
+        required_dimensions = list(rule.get("coverageDimensions", []))
+        covered = [dimension for dimension in required_dimensions if dimension in covered_dimensions]
+        coverage = {"requiredDimensions": required_dimensions, "coveredDimensions": covered,
+                    "complete": set(required_dimensions).issubset(covered_dimensions)}
+        if data["result"] == "scanned_no_issue" and not coverage["complete"]:
+            return self._finish_operation_failure(request, scan, operation, "COVERAGE_INCOMPLETE", "无问题结论未满足规则最低覆盖契约")
+        if data["result"] == "issue_found" and not evidence:
+            return self._finish_operation_failure(request, scan, operation, "EVIDENCE_INSUFFICIENT", "问题结论至少需要一条有效 Evidence")
+        if data.get("severity") and data["severity"] not in rule.get("allowedSeverities", []):
+            return self._finish_operation_failure(request, scan, operation, "INVALID_REQUEST", "问题严重度不在规则允许范围内")
+
+        operation_id = operation.get("operation_id") or operation["operationId"]
+        pending_id = self._stable_id("pending", operation_id)
+        revision = scan["runRevision"] + 1
+        screenshot = None
+        screenshot_bytes = None
+        screenshot_path = None
+        if data["result"] == "issue_found":
+            raw_ref = data.get("rawVisualRef")
+            raw = self._store.get_screenshot(raw_ref) if raw_ref else None
+            evidence_links_raw = any(raw_ref in item.get("screenshotRefs", []) for item in evidence)
+            if not raw or raw.get("kind") != "raw_visual" or raw.get("status") != "captured" or not evidence_links_raw:
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_NOT_CAPTURED", "问题结论必须引用 Evidence 中已捕获的 Raw Visual")
+            if raw.get("scanId") != scan["scanId"] or raw.get("objectRef") != target["objectId"] or raw.get("pageStateRef") != target["pageStateRef"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Raw Visual 未绑定当前 Scan、页面和对象")
+            if raw.get("caseRef") and raw["caseRef"] not in data["caseRefs"]:
+                return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Raw Visual 的 Case 未包含在当前判定中")
+            try:
+                screenshot_bytes = self._read_screenshot(scan["outputDir"], raw)
+                screenshot = self._materialize_issue_screenshot(scan, raw, operation_id, revision)
+                self._validate_entity(self._screenshot_validator, screenshot, "Screenshot")
+                screenshot_path = Path(scan["outputDir"]) / screenshot["path"]
+            except (OSError, ValueError, HostError) as error:
+                message = error.message if isinstance(error, HostError) else str(error)
+                return self._finish_operation_failure(request, scan, operation, "SCREENSHOT_NOT_CAPTURED", message)
+
+        applicable = data["result"] != "not_applicable"
+        pending = {"pendingDecisionId": pending_id, "scanId": scan["scanId"], "preparationOperationRef": operation_id,
+                   "objectRef": target["objectId"], "rule": rule_ref, "applicable": applicable, "result": data["result"],
+                   "coverage": coverage, "evidenceRefs": list(data["evidenceRefs"]), "caseRefs": list(data["caseRefs"]),
+                   "reasonText": self._evidence_sanitizer.sanitize(data["reasonText"]), "status": "pending",
+                   "preparedAt": self._now(), "preparedAtRevision": revision}
+        if data["result"] == "needs_review":
+            pending["blocker"] = self._evidence_sanitizer.sanitize(data["blocker"])
+        if screenshot:
+            pending.update({"rawVisualRef": data["rawVisualRef"], "screenshotRef": screenshot["screenshotId"]})
+            for field in ("severity", "title", "message", "impact", "recommendation"):
+                pending[field] = self._evidence_sanitizer.sanitize(data[field])
+        try:
+            self._validate_entity(self._pending_decision_validator, pending, "PendingDecision")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        result = {"pendingDecisionId": pending_id, "runRevision": revision}
+        if screenshot:
+            result["screenshotRef"] = screenshot["screenshotId"]
+        operation.update({"status": "succeeded", "resultJson": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        scan["runRevision"] = revision
+        created_file = False
+        try:
+            if screenshot:
+                created_file = self._write_screenshot(scan["outputDir"], screenshot["path"], screenshot_bytes, screenshot["digest"])
+            with self._store.transaction():
+                if screenshot:
+                    self._store.insert_screenshot(screenshot)
+                self._store.insert_pending_decision(pending)
+                self._store.update_scan(scan)
+                self._store.update_operation(operation)
+        except Exception:
+            if created_file and screenshot_path and screenshot_path.exists():
+                screenshot_path.unlink()
+            scan = self._scan_from_row(self._store.get_scan(scan["scanId"]))
+            return self._finish_operation_failure(request, scan, operation, "INTERNAL_FAILURE", "PendingDecision 或问题截图持久化失败")
+        return self._response(request, scan, "ok", result=result, operation=operation, evidence_refs=data["evidenceRefs"])
+
+    def _materialize_issue_screenshot(self, scan: dict, raw: dict, operation_id: str, revision: int) -> dict:
+        screenshot_id = self._stable_id("screenshot", operation_id, "issue")
+        extension = "jpg" if raw["imageType"] == "jpeg" else raw["imageType"]
+        issue = {key: raw[key] for key in ("scanId", "pageStateRef", "objectRef", "imageType", "width", "height", "problemBoundingBox", "annotation", "sanitizationPolicyVersion")}
+        if raw.get("caseRef"):
+            issue["caseRef"] = raw["caseRef"]
+        issue.update({"screenshotId": screenshot_id, "kind": "issue", "status": "captured", "rawVisualRef": raw["screenshotId"],
+                      "path": f"screenshots/{screenshot_id}.{extension}", "digest": raw["digest"],
+                      "capturedAt": self._now(), "capturedAtRevision": revision})
+        return issue
+
+    @staticmethod
+    def _read_screenshot(output_dir: str, screenshot: dict) -> bytes:
+        root = Path(output_dir).resolve()
+        relative = Path(screenshot["path"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("截图路径越出 outputDir")
+        path = (root / relative).resolve()
+        if path == root or root not in path.parents or not path.is_file():
+            raise ValueError("Raw Visual 文件不存在于 outputDir")
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != screenshot["digest"]:
+            raise ValueError("Raw Visual 文件完整性校验失败")
+        return content
 
     @staticmethod
     def _write_screenshot(output_dir: str, relative_path: str, image_bytes: bytes, expected_digest: str):

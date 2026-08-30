@@ -72,7 +72,7 @@
 | ID | 决策 | 理由 | 状态 |
 |---|---|---|---|
 | D-001 | 使用单一全局 `runRevision` 做并发控制；PageState 自身使用不可变快照身份，不再承担并发版本。 | 避免页面、对象和账本各自解释 `stateVersion`。 | accepted |
-| D-002 | 使用 `begin_case → prepare_decision → restore_case → commit_decision` 的恢复屏障。 | 防止先发布问题、后发现环境污染。 | accepted |
+| D-002 | 使用 `begin_case → restore_case → prepare_decision → commit_decision` 的恢复屏障。 | 只有确认环境恢复后才冻结判定准备，防止把污染现场带入问题结论。 | accepted |
 | D-003 | 聚合审计账本是唯一事实源，其他输出是确定性派生视图。 | 避免多份 JSON 各自成为真相。 | accepted |
 | D-004 | 第一版所有正式 Assessment 都必须属于至少一个 Case；直接观察使用 `observation` Case。 | 统一证据、恢复和追溯链。 | accepted |
 | D-005 | Bootstrap 和 Session 使用不同请求封套。 | `start_audit` 前不存在 `scanId/runId`。 | accepted |

@@ -20,6 +20,7 @@
 - `evidence.schema.json`：Host 生成的不可变、已脱敏证据。
 - `screenshot.schema.json`：对象病灶截图及其定位状态。
 - `issue.schema.json`：由 `issue_found` 产生的正式问题项。
+- `pending-decision.schema.json`：`prepare_decision` 生成的、尚未进入正式账本的临时判定。
 - `rule-registry.schema.json`：可扩展、可版本化的规则注册表。
 - `audit-ledger.schema.json`：把上述实体聚合为完整审计账本。
 
@@ -39,7 +40,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 8. Case 恢复中，定向尝试为 `uncertain` 或 `failed` 时必须存在后续刷新重放尝试；最终只有全部必检项为 `match` 的 `restored` 才允许继续调查。
 9. Operation 的 `idempotencyKey` 在 Scan 内唯一；同键请求摘要必须一致，`result_unknown` 不允许盲目重放。
 10. `begin_case` 的同一对象、同一规则活动唯一性由 Host 语义校验和 SQLite 唯一索引双重保证；动作必须引用真实 Case。
-11. Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
+11. `prepare_decision` 只生成 PendingDecision 和必要的独立 IssueScreenshot，不写 Assessment/Issue；正式 Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
 12. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
 13. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
 14. Evidence/Screenshot 只能绑定当前 Scan 中真实的 PageState 和唯一验证对象；Raw Visual 失败记录不能作为 captured IssueScreenshot 使用。

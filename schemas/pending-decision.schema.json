@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/pending-decision.schema.json",
+  "title": "PendingDecision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pendingDecisionId", "scanId", "preparationOperationRef", "objectRef", "rule", "applicable", "result", "coverage", "evidenceRefs", "caseRefs", "reasonText", "status", "preparedAt", "preparedAtRevision"],
+  "properties": {
+    "pendingDecisionId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "preparationOperationRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "objectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rule": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "applicable": { "type": "boolean" },
+    "result": { "$ref": "common.schema.json#/$defs/decisionResult" },
+    "coverage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requiredDimensions", "coveredDimensions", "complete"],
+      "properties": {
+        "requiredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "coveredDimensions": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "complete": { "type": "boolean" },
+        "coverageNote": { "type": "string" }
+      }
+    },
+    "evidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "caseRefs": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+    "screenshotRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "rawVisualRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "severity": { "$ref": "common.schema.json#/$defs/severity" },
+    "title": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "message": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "impact": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "recommendation": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "blocker": { "$ref": "common.schema.json#/$defs/reason" },
+    "reasonText": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "status": { "enum": ["pending", "committed", "invalidated"] },
+    "preparedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "preparedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" }
+  },
+  "allOf": [
+    { "if": { "properties": { "result": { "const": "issue_found" } }, "required": ["result"] }, "then": { "required": ["severity", "title", "message", "impact", "recommendation", "screenshotRef", "rawVisualRef"], "properties": { "applicable": { "const": true }, "evidenceRefs": { "minItems": 1 } } } },
+    { "if": { "properties": { "result": { "const": "scanned_no_issue" } }, "required": ["result"] }, "then": { "properties": { "applicable": { "const": true }, "coverage": { "properties": { "complete": { "const": true } } } } } },
+    { "if": { "properties": { "result": { "const": "not_applicable" } }, "required": ["result"] }, "then": { "properties": { "applicable": { "const": false } } } },
+    { "if": { "properties": { "result": { "const": "needs_review" } }, "required": ["result"] }, "then": { "required": ["blocker"] } }
+  ]
+}
