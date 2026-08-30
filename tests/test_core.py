@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RecoveryAttempt, RecoveryCheck, SQLiteStore
+from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -52,10 +52,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None, evidence_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", "secret")
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter, action_adapter=action_adapter, recovery_adapter=recovery_adapter)
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter, action_adapter=action_adapter, recovery_adapter=recovery_adapter, evidence_adapter=evidence_adapter)
         self.cores.append(core)
         return core
 
@@ -243,6 +243,12 @@ class HostCoreTest(unittest.TestCase):
 
     def restore_case(self, core, started, object_id, case_id, *, key="restore-1", revision=3):
         return core.handle(session(started, tool="restore_case", key=key, revision=revision, input={"caseId":case_id,"pageStateId":started["currentPageStateId"],"objectId":object_id,"fallback":"refresh_and_replay_safe_entrypoints"}))
+
+    def capture_evidence(self, core, started, object_id, *, case_id=None, key="evidence-1", revision=2, raw=False):
+        input_data = {"pageStateId":started["currentPageStateId"],"objectId":object_id,"includeRawVisual":raw}
+        if case_id:
+            input_data["caseId"] = case_id
+        return core.handle(session(started, tool="capture_evidence", key=key, revision=revision, input=input_data))
 
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
@@ -452,6 +458,106 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(interrupted["status"], "result_unknown")
             self.assertEqual(restarted._store.get_scan(started["scanId"])["status"], "failed")
             restarted_store.close(); self.cores.remove(restarted)
+
+    def test_capture_structured_evidence_binds_object_and_increments_revision(self):
+        adapter = DeterministicEvidenceAdapter()
+        core = self.make_core(evidence_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], revision=2)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["runRevision"], 3)
+        evidence = core._store.get_evidence(result["result"]["evidenceId"])
+        self.assertEqual(evidence["objectRef"], object_id)
+        self.assertTrue(evidence["sanitized"])
+        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "evidence_captured")
+
+    def test_capture_raw_visual_writes_immutable_screenshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = DeterministicEvidenceAdapter()
+            core = self.make_core(evidence_adapter=adapter)
+            started = bootstrap(core)["result"]
+            core._store.get_scan(started["scanId"])
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
+            self.assertIn("screenshotRef", result["result"])
+            screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+            self.assertEqual(screenshot["status"], "captured")
+            self.assertTrue((Path(tmp) / screenshot["path"]).exists())
+
+    def test_capture_visual_rejection_is_persisted_not_promoted(self):
+        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={"status":"failed"}, raw_visual=RawVisualCapture(status="ambiguous", reason="对象定位不唯一"))
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
+        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        self.assertEqual(screenshot["status"], "ambiguous")
+        self.assertNotIn("path", screenshot)
+
+    def test_capture_rejects_visual_bound_to_wrong_box(self):
+        raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nwrong-box", width=1280, height=800,
+                               bounding_box={"x":0,"y":0,"width":10,"height":10}, annotation="错误位置")
+        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=raw)
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
+        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        self.assertEqual(screenshot["status"], "rejected")
+        self.assertNotIn("path", screenshot)
+
+    def test_capture_rejects_cross_scan_object(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
+        started = bootstrap(core)["result"]
+        result = self.capture_evidence(core, started, "object-foreign", revision=1)
+        self.assertEqual(result["error"]["code"], "UNKNOWN_REFERENCE")
+
+    def test_capture_sanitizes_sensitive_payload(self):
+        capture = EvidenceCapture(payload={"password":"secret-value", "headers":{"Authorization":"Bearer abc"}, "text":"token=xyz"})
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
+        started = bootstrap(core)["result"]
+        object_id, _ = self.begin_case(core, started)
+        result = self.capture_evidence(core, started, object_id, revision=2)
+        payload = core._store.get_evidence(result["result"]["evidenceId"])["payload"]["content"]
+        self.assertEqual(payload["password"], "[REDACTED]")
+        self.assertNotIn("Bearer abc", str(payload))
+
+    def test_capture_evidence_is_idempotent_after_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "host.sqlite"
+            first_store = SQLiteStore(path)
+            first = self.make_core(store=first_store)
+            started = bootstrap(first)["result"]
+            object_id, case_result = self.begin_case(first, started)
+            request = session(started, tool="capture_evidence", key="evidence-restart", revision=2, input={"pageStateId":started["currentPageStateId"],"objectId":object_id,"caseId":case_result["result"]["caseId"],"includeRawVisual":False})
+            original = first.handle(request)
+            first_store.close(); self.cores.remove(first)
+            second_store = SQLiteStore(path)
+            second = self.make_core(store=second_store, evidence_adapter=DeterministicEvidenceAdapter(capture=EvidenceCapture(payload={"unexpected":"not-used"})))
+            retry = second.handle(request)
+            self.assertEqual(retry["result"], original["result"])
+            self.assertEqual(second._store.get_evidence(original["result"]["evidenceId"])["evidenceId"], original["result"]["evidenceId"])
+            second_store.close(); self.cores.remove(second)
+
+    def test_screenshot_file_conflict_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, case_result = self.begin_case(core, started)
+            request = session(started, tool="capture_evidence", key="evidence-conflict", revision=2, input={"pageStateId":started["currentPageStateId"],"objectId":object_id,"caseId":case_result["result"]["caseId"],"includeRawVisual":True})
+            scan = core._scan_from_row(core._store.get_scan(started["scanId"]))
+            operation, _ = core._accept_operation(request, scan, implemented=True)
+            screenshot_id = core._stable_id("screenshot", operation["operationId"])
+            conflict = Path(tmp) / "screenshots" / f"{screenshot_id}.png"
+            conflict.parent.mkdir(parents=True)
+            conflict.write_bytes(b"tampered")
+            result = core.handle(request)
+            self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
 
     def test_sent_request_fails_scan(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))

@@ -42,6 +42,7 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 11. Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
 12. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
 13. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
+14. Evidence/Screenshot 只能绑定当前 Scan 中真实的 PageState 和唯一验证对象；Raw Visual 失败记录不能作为 captured IssueScreenshot 使用。
 
 ## 摘要与规范化
 

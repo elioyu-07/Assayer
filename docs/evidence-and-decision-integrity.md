@@ -133,3 +133,5 @@ Host 在每个提交点和 `complete_audit` 前校验：
 6. Case 恢复状态和 PendingDecision 屏障满足结果门槛；
 7. 敏感数据扫描和摘要校验通过；
 8. 历史事件可以重放出当前状态和 runRevision。
+
+当前 Host Core 已实现结构化 Evidence 和 Raw Visual 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图仍由后续判定准备事务负责。

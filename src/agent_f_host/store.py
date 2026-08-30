@@ -22,7 +22,7 @@ class SQLiteStore:
               run_revision INTEGER NOT NULL, status TEXT NOT NULL,
               login_status TEXT NOT NULL, created_at TEXT NOT NULL,
               rule_registry_digest TEXT NOT NULL, current_page_state_id TEXT,
-              capabilities_json TEXT NOT NULL
+              capabilities_json TEXT NOT NULL, output_dir TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS operations (
               operation_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
@@ -72,6 +72,16 @@ class SQLiteStore:
               observation_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
               operation_id TEXT NOT NULL REFERENCES operations(operation_id), entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS evidence (
+              evidence_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id), object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
+              entity_json TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS screenshots (
+              screenshot_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              page_state_id TEXT NOT NULL REFERENCES page_states(page_state_id), object_id TEXT NOT NULL REFERENCES audit_objects(object_id),
+              entity_json TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -84,6 +94,7 @@ class SQLiteStore:
             "rule_registry_digest": "TEXT NOT NULL DEFAULT ''",
             "current_page_state_id": "TEXT",
             "capabilities_json": "TEXT NOT NULL DEFAULT '[]'",
+            "output_dir": "TEXT NOT NULL DEFAULT ''",
         }.items():
             if name not in scan_columns:
                 self._conn.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
@@ -118,8 +129,8 @@ class SQLiteStore:
 
     def insert_scan(self, scan: dict) -> None:
         self._conn.execute(
-            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json) VALUES(?,?,?,?,?,?,?,?,?)",
-            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"]),
+            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json,output_dir) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["outputDir"]),
         )
 
     def update_scan(self, scan: dict) -> None:
@@ -246,6 +257,21 @@ class SQLiteStore:
 
     def get_request_observation(self, observation_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM request_observations WHERE observation_id=?", (observation_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def insert_evidence(self, evidence: dict, screenshot: dict | None = None) -> None:
+        if screenshot is not None:
+            self._conn.execute("INSERT INTO screenshots(screenshot_id,scan_id,page_state_id,object_id,entity_json) VALUES(?,?,?,?,?)",
+                               (screenshot["screenshotId"], screenshot["scanId"], screenshot["pageStateRef"], screenshot["objectRef"], json.dumps(screenshot, ensure_ascii=False, separators=(",", ":"))))
+        self._conn.execute("INSERT INTO evidence(evidence_id,scan_id,page_state_id,object_id,entity_json) VALUES(?,?,?,?,?)",
+                           (evidence["evidenceId"], evidence["scanId"], evidence["pageStateRef"], evidence["objectRef"], json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))))
+
+    def get_evidence(self, evidence_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM evidence WHERE evidence_id=?", (evidence_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def get_screenshot(self, screenshot_id: str) -> dict | None:
+        row = self._conn.execute("SELECT entity_json FROM screenshots WHERE screenshot_id=?", (screenshot_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
