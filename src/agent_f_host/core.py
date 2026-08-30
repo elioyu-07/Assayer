@@ -5,6 +5,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, RefResolver
 
@@ -12,6 +13,8 @@ from .auth import CredentialVault, LoginAdapter, UnavailableLoginAdapter
 from .errors import HostError
 from .page import DeterministicPageAdapter, ReadOnlyPageAdapter
 from .object_identity import DeterministicObjectIdentityAdapter, ObjectIdentityAdapter
+from .action_safety import (ActionExecution, ActionSafetyPolicy,
+                            SafeActionAdapter, UnavailableActionAdapter)
 from .store import SQLiteStore
 
 
@@ -28,7 +31,8 @@ class HostCore:
 
     def __init__(self, schema_root: str | Path | None = None, *, store: SQLiteStore | None = None,
                  credential_vault: CredentialVault | None = None, login_adapter: LoginAdapter | None = None,
-                 page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None):
+                 page_adapter: ReadOnlyPageAdapter | None = None, object_identity_adapter: ObjectIdentityAdapter | None = None,
+                 action_adapter: SafeActionAdapter | None = None, action_policy: ActionSafetyPolicy | None = None):
         root = Path(schema_root or Path(__file__).resolve().parents[2] / "schemas")
         schemas = {}
         for path in root.rglob("*.schema.json"):
@@ -50,19 +54,26 @@ class HostCore:
         self._candidate_validator = entity_validator("page-candidate.schema.json")
         self._audit_object_validator = entity_validator("audit-object.schema.json")
         self._object_verification_validator = entity_validator("object-verification.schema.json")
+        self._case_validator = entity_validator("reverse-case.schema.json")
+        self._action_attempt_validator = entity_validator("action-attempt.schema.json")
+        self._request_observation_validator = entity_validator("request-observation.schema.json")
         self._store = store or SQLiteStore()
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
         self._page_adapter = page_adapter or DeterministicPageAdapter()
         self._object_identity_adapter = object_identity_adapter or DeterministicObjectIdentityAdapter()
+        self._action_adapter = action_adapter or UnavailableActionAdapter()
+        self._action_policy = action_policy or ActionSafetyPolicy()
         registry_path = root.parent / "rules" / "registry.json"
         registry = json.loads(registry_path.read_text()) if registry_path.exists() else {"registryVersion":"0.0.0","digest":"0"*64}
         self._rule_registry_version = registry["registryVersion"]
         self._rule_registry_digest = registry["digest"]
         self._rules_by_kind = {}
+        self._rules = {}
         for rule in registry.get("rules", []):
             if rule.get("status") != "enabled":
                 continue
+            self._rules[(rule["ruleId"], rule["version"])] = rule
             for kind in rule["objectKinds"]:
                 self._rules_by_kind.setdefault(kind, []).append({"ruleId":rule["ruleId"],"version":rule["version"]})
 
@@ -79,20 +90,37 @@ class HostCore:
         scan = self._require_scan(request)
         if tool == "get_operation":
             return self._get_operation(request, scan)
+        existing = self._store.get_by_idempotency(scan["scanId"], request["idempotencyKey"])
+        if existing:
+            self._assert_same_digest(existing, self._request_digest(request), "幂等键对应不同请求摘要")
+            if existing["status"] == "running":
+                if tool == "inspect_page": return self._inspect_page(request, scan, existing)
+                if tool == "inspect_object": return self._inspect_object(request, scan, existing)
+                if tool == "begin_case": return self._begin_case(request, scan, existing)
+                if tool == "perform_action": return self._perform_action(request, scan, existing)
+            return self._operation_response(request, scan, existing)
         if scan["status"] in {"completed", "partial", "failed"}:
             raise HostError("RUN_TERMINAL", "Scan 已进入终态")
-        implemented = tool in {"inspect_page", "inspect_object"}
+        implemented = tool in {"inspect_page", "inspect_object", "begin_case", "perform_action"}
         operation, repeated = self._accept_operation(request, scan, implemented=implemented)
         if repeated:
             if operation["status"] == "running" and tool == "inspect_page":
                 return self._inspect_page(request, scan, operation)
             if operation["status"] == "running" and tool == "inspect_object":
                 return self._inspect_object(request, scan, operation)
+            if operation["status"] == "running" and tool == "begin_case":
+                return self._begin_case(request, scan, operation)
+            if operation["status"] == "running" and tool == "perform_action":
+                return self._perform_action(request, scan, operation)
             return self._operation_response(request, scan, operation)
         if tool == "inspect_page":
             return self._inspect_page(request, scan, operation)
         if tool == "inspect_object":
             return self._inspect_object(request, scan, operation)
+        if tool == "begin_case":
+            return self._begin_case(request, scan, operation)
+        if tool == "perform_action":
+            return self._perform_action(request, scan, operation)
         error = HostError("INTERNAL_FAILURE", f"工具 {tool} 尚未接入 Host 适配器")
         return self._response(request, scan, "rejected", error=error, operation=operation)
 
@@ -157,7 +185,10 @@ class HostCore:
         op = self._store.get_operation(request["input"]["operationId"])
         if not op or op["scan_id"] != scan["scanId"]:
             raise HostError("UNKNOWN_REFERENCE", "Operation 不存在于当前 Scan")
-        return self._response(request, scan, "ok", result={"operationId":op["operation_id"],"status":op["status"],"requestDigest":op["request_digest"]})
+        result = {"operationId":op["operation_id"],"status":op["status"],"requestDigest":op["request_digest"]}
+        if op.get("result_json"):
+            result["result"] = json.loads(op["result_json"])
+        return self._response(request, scan, "ok", result=result)
 
     def _inspect_page(self, request: dict, scan: dict, operation: dict) -> dict:
         page_state_id = request["input"]["pageStateId"]
@@ -269,6 +300,175 @@ class HostCore:
             self._store.update_operation(operation)
         return self._response(request, scan, "ok", result=result, operation=operation)
 
+    def _begin_case(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        obj = self._store.get_audit_object(data["objectId"])
+        if not obj or obj["scanId"] != scan["scanId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "AuditObject 不存在于当前 Scan")
+        if obj["pageStateRef"] != scan.get("currentPageStateId"):
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "对象不是当前活动页面中的已验证对象")
+        if obj.get("status") not in {"eligible", "investigating"} or obj.get("rebindStatus") != "matched":
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "对象当前状态不允许创建 Case")
+        rule = data["rule"]
+        if rule not in obj.get("potentialRules", []):
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "规则不属于该对象的冻结规则集合")
+        if (rule["ruleId"], rule["version"]) not in self._rules:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "规则版本不在 Host 注册表中")
+        required = set(self._rules[(rule["ruleId"], rule["version"])].get("requiredCapabilities", []))
+        capabilities = set(json.loads(scan["capabilitiesJson"]))
+        if not required.issubset(capabilities):
+            return self._finish_operation_failure(request, scan, operation, "CAPABILITY_MISSING", "当前 Scan 能力不足以执行该规则")
+        active = self._store.get_active_case(scan["scanId"], obj["objectId"], rule)
+        if active:
+            return self._finish_operation_failure(request, scan, operation, "CASE_ALREADY_ACTIVE", "同一对象同一规则已有执行中的 Case")
+        case = {"caseId": self._new_id("case"), "scanId": scan["scanId"], "objectRef": obj["objectId"],
+                "rule": rule, "kind": data["kind"], "purpose": data["purpose"], "beginRevision": scan["runRevision"] + 1,
+                "plannedAt": self._now(), "plannedCoverageDimensions": data["plannedCoverageDimensions"],
+                "syntheticInputs": data.get("syntheticInputs", []), "status": "planned", "operationRefs": [operation.get("operation_id") or operation["operationId"]],
+                "actions": [], "beforePageStateRef": scan["currentPageStateId"],
+                "recovery": {"policy": "targeted_then_refresh", "baselinePageStateRef": scan["currentPageStateId"], "finalStatus": "not_started", "attempts": []}}
+        try:
+            self._validate_entity(self._case_validator, case, "ReverseCase")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        scan["runRevision"] += 1
+        obj["status"] = "investigating"
+        operation["caseRef"] = case["caseId"]
+        result = {"caseId": case["caseId"], "baselinePageStateRef": case["beforePageStateRef"], "status": "planned", "runRevision": scan["runRevision"]}
+        operation.update({"status": "succeeded", "resultJson": json.dumps(result, ensure_ascii=False, separators=(",", ":"))})
+        inserted = False
+        with self._store.transaction():
+            inserted = self._store.insert_case(case)
+            if inserted:
+                self._store.update_audit_object(obj)
+                self._store.update_scan(scan)
+                self._store.update_operation(operation)
+        if not inserted:
+            scan = self._scan_from_row(self._store.get_scan(scan["scanId"]))
+            operation.pop("caseRef", None)
+            operation.pop("resultJson", None)
+            return self._finish_operation_failure(request, scan, operation, "CASE_ALREADY_ACTIVE", "同一对象同一规则已有执行中的 Case")
+        return self._response(request, scan, "ok", result=result, operation=operation)
+
+    def _perform_action(self, request: dict, scan: dict, operation: dict) -> dict:
+        data = request["input"]
+        case = self._store.get_case(data["caseId"])
+        obj = self._store.get_audit_object(data["objectId"])
+        if not case or case["scanId"] != scan["scanId"] or case.get("objectRef") != data["objectId"]:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "Case 不存在于当前 Scan 或未绑定目标对象")
+        if case.get("status") not in {"planned", "executing", "safety_check", "evidence_captured", "decision_prepared"}:
+            return self._finish_operation_failure(request, scan, operation, "INVALID_LIFECYCLE_TRANSITION", "Case 当前状态不允许动作")
+        if not obj or obj["scanId"] != scan["scanId"] or obj.get("status") not in {"eligible", "investigating"} or obj.get("rebindStatus") != "matched":
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "目标对象不是当前 Scan 中已验证对象")
+        if data["pageStateId"] != scan.get("currentPageStateId") or obj["pageStateRef"] != data["pageStateId"]:
+            return self._finish_operation_failure(request, scan, operation, "STALE_STATE", "动作页面不是当前活动 PageState")
+        decision = self._action_policy.action_decision(data["type"], data["intent"], data["parameters"])
+        action_id = self._new_id("action")
+        action = {"actionId": action_id, "scanId": scan["scanId"], "caseId": case["caseId"], "operationId": operation.get("operation_id") or operation["operationId"],
+                  "type": data["type"], "targetObjectRef": obj["objectId"], "intent": data["intent"], "parameters": self._sanitized_parameters(data["parameters"]),
+                  "atRunRevision": scan["runRevision"], "safetyOutcome": "blocked" if decision.outcome == "blocked" else "not_attempted"}
+        if decision.outcome == "blocked":
+            action["blockReason"] = {"code": decision.code, "message": decision.reason}
+            try:
+                self._validate_entity(self._action_attempt_validator, action, "ActionAttempt")
+            except HostError as error:
+                return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+            operation.update({"status": "failed_known", "errorCode": decision.code, "errorMessage": decision.reason, "resultJson": json.dumps({"runRevision": scan["runRevision"], "beforePageStateRef": data["pageStateId"], "afterPageStateRef": data["pageStateId"], "resultStatus": "rejected", "actionId": action_id, "safetyOutcome": "blocked"}, ensure_ascii=False, separators=(",", ":"))})
+            case["actions"].append(self._case_action(action, data["pageStateId"]))
+            case["operationRefs"].append(action["operationId"])
+            self._validate_entity(self._case_validator, case, "ReverseCase")
+            with self._store.transaction():
+                self._store.update_case(case)
+                self._store.insert_action_attempt(action); self._store.update_operation(operation)
+            return self._response(request, scan, "rejected", error=HostError(decision.code, decision.reason), operation=operation)
+        page = self._store.get_page_state(data["pageStateId"])
+        if not page:
+            return self._finish_operation_failure(request, scan, operation, "UNKNOWN_REFERENCE", "PageState 不存在")
+        try:
+            execution = self._action_adapter.execute(data, obj, page, lambda req: self._action_policy.classify_request(req, page.get("origin", "")))
+        except Exception:
+            execution = ActionExecution(status="result_unknown", diagnostic="动作适配器执行异常")
+        if execution.status not in {"succeeded", "request_blocked", "result_unknown", "persistent_write_observed", "unavailable"}:
+            execution = ActionExecution(status="result_unknown", requests=execution.requests, diagnostic="动作适配器返回未知状态")
+        requests = []
+        request_decisions = []
+        for idx, req in enumerate(execution.requests):
+            request_decision = self._action_policy.classify_request(req, page.get("origin", ""))
+            request_decisions.append(request_decision)
+            parsed = urlparse(req.url)
+            safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}" if parsed.scheme and parsed.netloc else parsed.path
+            requests.append({"observationId": self._stable_id("request", operation.get("operation_id") or operation["operationId"], str(idx)), "scanId": scan["scanId"], "operationId": operation.get("operation_id") or operation["operationId"],
+                              "method": req.method.upper(), "url": safe_url, "transport": req.transport, "sent": req.sent,
+                              "outcome": request_decision.outcome, "code": request_decision.code, "reason": request_decision.reason})
+        if execution.status == "succeeded":
+            if any(item.outcome == "already_sent" for item in request_decisions):
+                execution = ActionExecution(status="persistent_write_observed", requests=execution.requests, diagnostic="请求已在拦截器接管前发送")
+            elif any(item.outcome == "unknown" for item in request_decisions):
+                execution = ActionExecution(status="result_unknown", requests=execution.requests, diagnostic="请求无法证明未发送")
+            elif any(item.outcome == "blocked" for item in request_decisions):
+                execution = ActionExecution(status="request_blocked", requests=execution.requests, diagnostic="请求在发送前被 Host 阻断")
+        action["requestObservationRefs"] = [x["observationId"] for x in requests]
+        if execution.status == "unavailable":
+            return self._finish_operation_failure(request, scan, operation, "ACTION_ADAPTER_UNAVAILABLE", execution.diagnostic or "浏览器动作适配器未配置")
+        if execution.status == "persistent_write_observed":
+            scan["runRevision"] += 1; scan["status"] = "failed"
+        elif execution.status == "succeeded":
+            scan["runRevision"] += 1
+        elif execution.status == "result_unknown":
+            scan["runRevision"] += 1
+        elif execution.status == "request_blocked" and execution.local_state_changed:
+            scan["runRevision"] += 1
+        action["atRunRevision"] = scan["runRevision"]
+        result_status = "succeeded" if execution.status == "succeeded" else ("result_unknown" if execution.status in {"result_unknown", "persistent_write_observed"} else "rejected")
+        after = data["pageStateId"]
+        action["safetyOutcome"] = "allowed" if execution.status == "succeeded" else "blocked"
+        if execution.status != "succeeded":
+            action["blockReason"] = {"code": "REQUEST_RESULT_UNKNOWN" if result_status == "result_unknown" else "REQUEST_BLOCKED", "message": execution.diagnostic or "动作未完成"}
+        try:
+            self._validate_entity(self._action_attempt_validator, action, "ActionAttempt")
+            for item in requests:
+                self._validate_entity(self._request_observation_validator, item, "RequestObservation")
+        except HostError as error:
+            return self._finish_operation_failure(request, scan, operation, error.code, error.message)
+        operation_status = "succeeded" if result_status == "succeeded" else ("failed_known" if execution.status == "persistent_write_observed" else ("result_unknown" if result_status == "result_unknown" else "failed_known"))
+        operation.update({"status": operation_status, "errorCode": None if result_status == "succeeded" else action["blockReason"]["code"], "errorMessage": None if result_status == "succeeded" else action["blockReason"]["message"]})
+        if execution.status == "persistent_write_observed":
+            operation.update({"errorCode": "PERSISTENT_WRITE_OBSERVED", "errorMessage": "观察到潜在持久化写请求已离开浏览器"})
+        result = {"runRevision": scan["runRevision"], "beforePageStateRef": data["pageStateId"], "afterPageStateRef": after, "resultStatus": result_status, "actionId": action_id, "safetyOutcome": action["safetyOutcome"], "requestObservationRefs": [x["observationId"] for x in requests]}
+        operation["resultJson"] = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        case["operationRefs"].append(action["operationId"])
+        case["actions"].append(self._case_action(action, data["pageStateId"]))
+        case["startedAt"] = case.get("startedAt") or self._now()
+        case["afterPageStateRef"] = after
+        if execution.status == "succeeded":
+            case["status"] = "executing"
+        elif execution.status in {"request_blocked", "result_unknown"}:
+            case["status"] = "restoring"
+        elif execution.status == "persistent_write_observed":
+            case.update({"status": "invalidated", "endedAt": self._now(),
+                         "restoreReason": {"code": "PERSISTENT_WRITE_OBSERVED", "message": "潜在持久化写请求已离开浏览器"}})
+        self._validate_entity(self._case_validator, case, "ReverseCase")
+        with self._store.transaction():
+            self._store.update_case(case)
+            for item in requests: self._store.insert_request_observation(item)
+            self._store.insert_action_attempt(action)
+            if execution.status == "succeeded":
+                self._store.update_scan(scan)
+            elif execution.status == "result_unknown":
+                self._store.update_scan(scan)
+            elif execution.status == "persistent_write_observed":
+                self._store.update_scan(scan)
+            elif execution.status == "request_blocked" and execution.local_state_changed:
+                self._store.update_scan(scan)
+            self._store.update_operation(operation)
+        if execution.status == "persistent_write_observed":
+            return self._response(request, scan, "failed", error=HostError("PERSISTENT_WRITE_OBSERVED", "观察到潜在持久化写请求已离开浏览器"), operation=operation)
+        if result_status == "result_unknown":
+            return self._response(request, scan, "rejected", error=HostError("REQUEST_RESULT_UNKNOWN", operation["errorMessage"]), operation=operation)
+        if result_status == "rejected":
+            return self._response(request, scan, "rejected", error=HostError(operation["errorCode"], operation["errorMessage"]), operation=operation)
+        return self._response(request, scan, "ok", result=result, operation=operation)
+
     def _materialize_object_verification(self, scan, source_kind, source, outcome, operation):
         object_id = source.get("objectId") if source_kind == "audit_object" else None
         audit_object = None
@@ -305,6 +505,29 @@ class HostCore:
         if object_id and outcome.status == "matched":
             verification["objectRef"] = object_id
         return verification, audit_object, replacement
+
+    @classmethod
+    def _sanitized_parameters(cls, value):
+        if isinstance(value, dict):
+            return {str(key): cls._sanitized_parameters(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._sanitized_parameters(item) for item in value]
+        if isinstance(value, str):
+            return {"valueClass": "redacted_string", "length": len(value)}
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        return {"valueClass": "redacted_unknown"}
+
+    @staticmethod
+    def _case_action(action: dict, before_page_state_id: str) -> dict:
+        item = {key: action[key] for key in ("actionId", "type", "targetObjectRef", "intent", "parameters", "safetyOutcome", "atRunRevision")}
+        if action["safetyOutcome"] == "allowed":
+            item.update({"beforeStateEvidenceRefs": [before_page_state_id], "recoveryMode": "refresh_only"})
+        if action.get("blockReason"):
+            item["blockReason"] = action["blockReason"]
+        if action.get("requestObservationRefs"):
+            item["requestObservationRefs"] = list(action["requestObservationRefs"])
+        return item
 
     @staticmethod
     def _validate_identity_outcome(outcome):

@@ -386,7 +386,7 @@ Case 未恢复、PendingDecision 已失效或 Scan 已进入终态时拒绝提�
 
 ### 6.11 `get_operation`
 
-查询一个 Host Operation 的已知状态，不执行或重放原动作。输入 `operationId`，返回请求摘要、`accepted/running/succeeded/rejected/failed_known/result_unknown` 状态和可用结果引用。
+查询一个 Host Operation 的已知状态，不执行或重放原动作。输入 `operationId`，返回请求摘要、`accepted/running/succeeded/rejected/failed_known/result_unknown` 状态，以及可用的结果引用或已保存结构化结果快照。即使 Scan 已因潜在持久化写入进入终态，同一幂等请求和 `get_operation` 仍可读取原结果，但不能再次执行动作。
 
 ### 6.12 `complete_audit`
 

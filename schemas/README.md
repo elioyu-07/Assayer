@@ -14,6 +14,8 @@
 - `operation.schema.json`：Host 请求的幂等执行记录和结果已知性。
 - `rule-assessment.schema.json`：一个对象 × 一条规则的固定五态判定。
 - `reverse-case.schema.json`：Agent 规划、Host 安全执行的反向 Case，以及动作前基线、反向动作、定向恢复、验证结果和刷新兜底记录。
+- `action-attempt.schema.json`：一次 Case 动作的 Host 安全决策、目标和请求观察引用。
+- `request-observation.schema.json`：外发请求的脱敏机械分类与是否已发送事实。
 - `evidence.schema.json`：Host 生成的不可变、已脱敏证据。
 - `screenshot.schema.json`：对象病灶截图及其定位状态。
 - `issue.schema.json`：由 `issue_found` 产生的正式问题项。
@@ -35,9 +37,10 @@ JSON Schema 能校验字段类型、枚举、必填项和局部条件，但不�
 7. 规则 ID 不得复用，规则语义变化必须使用新版本；扫描期间注册表快照冻结。
 8. Case 恢复中，定向尝试为 `uncertain` 或 `failed` 时必须存在后续刷新重放尝试；最终只有全部必检项为 `match` 的 `restored` 才允许继续调查。
 9. Operation 的 `idempotencyKey` 在 Scan 内唯一；同键请求摘要必须一致，`result_unknown` 不允许盲目重放。
-10. Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
-11. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
-12. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
+10. `begin_case` 的同一对象、同一规则活动唯一性由 Host 语义校验和 SQLite 唯一索引双重保证；动作必须引用真实 Case。
+11. Assessment 只能由已越过恢复屏障的 PendingDecision 提交；Issue 与 `issue_found` Assessment 一对一。
+12. `failed` Scan 的所有 Assessment 和 Issue 在派生视图中必须视为失效；`partial` 只保留未被失效事件覆盖的结论。
+13. 身份、恢复、脱敏和规范化算法版本必须与 Scan 冻结版本一致。
 
 ## 摘要与规范化
 

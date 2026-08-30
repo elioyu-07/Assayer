@@ -78,6 +78,11 @@
             "type": "array",
             "uniqueItems": true,
             "items": { "$ref": "common.schema.json#/$defs/entityId" }
+          },
+          "requestObservationRefs": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "common.schema.json#/$defs/entityId" }
           }
         },
         "allOf": [

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_f_host import CredentialVault, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, HostCore, HostError, ObjectMatch, ObjectVerification, SQLiteStore
+from agent_f_host import ActionExecution, CredentialVault, DeterministicActionAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, HostCore, HostError, NetworkRequest, ObjectMatch, ObjectVerification, SQLiteStore
 
 
 class ExplodingLoginAdapter:
@@ -52,10 +52,10 @@ class HostCoreTest(unittest.TestCase):
             except Exception:
                 pass
 
-    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None):
+    def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", "secret")
-        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter)
+        core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter, object_identity_adapter=identity_adapter, action_adapter=action_adapter)
         self.cores.append(core)
         return core
 
@@ -231,6 +231,16 @@ class HostCoreTest(unittest.TestCase):
     def inspect_candidate(self, core, started, candidate_id, key="verify"):
         return core.handle(session(started, tool="inspect_object", key=key, input={"candidateId":candidate_id}))
 
+    def begin_case(self, core, started, key="case-1"):
+        page = core.handle(session(started, key=f"{key}-discover", input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
+        candidate_id = page["candidateRefs"][0]
+        object_id = self.inspect_candidate(core, started, candidate_id)["result"]["objectId"]
+        response = core.handle(session(started, tool="begin_case", key=key, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"验证筛选能力","plannedCoverageDimensions":["filter_present","query_action","reset_action","binding_to_list"]}))
+        return object_id, response
+
+    def perform_action(self, core, started, object_id, case_id, *, key="action-1", revision=2, action_type="focus", intent="观察筛选区", parameters=None):
+        return core.handle(session(started, tool="perform_action", key=key, revision=revision, input={"pageStateId":started["currentPageStateId"],"caseId":case_id,"objectId":object_id,"type":action_type,"intent":intent,"parameters":parameters or {}}))
+
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
         started, candidate_id = self.discover_candidate(core)
@@ -281,6 +291,122 @@ class HostCoreTest(unittest.TestCase):
         started, candidate_id = self.discover_candidate(core)
         result = self.inspect_candidate(core, started, candidate_id)
         self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
+
+    def test_begin_case_freezes_baseline_and_increments_revision(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        object_id, result = self.begin_case(core, started)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["runRevision"], 2)
+        case = core._store.get_case(result["result"]["caseId"])
+        self.assertEqual(case["beforePageStateRef"], started["currentPageStateId"])
+        self.assertEqual(core._store.get_audit_object(object_id)["status"], "investigating")
+
+    def test_begin_case_rejects_second_active_case_for_same_rule(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        object_id, first = self.begin_case(core, started)
+        second = core.handle(session(started, tool="begin_case", key="case-2", revision=2, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"重复验证","plannedCoverageDimensions":["filter_present"]}))
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["error"]["code"], "CASE_ALREADY_ACTIVE")
+        self.assertEqual(second["runRevision"], 2)
+
+    def test_perform_action_requires_real_case(self):
+        core = self.make_core(action_adapter=DeterministicActionAdapter())
+        started, candidate_id = self.discover_candidate(core)
+        object_id = self.inspect_candidate(core, started, candidate_id)["result"]["objectId"]
+        result = self.perform_action(core, started, object_id, "case-invented", revision=1)
+        self.assertEqual(result["error"]["code"], "UNKNOWN_REFERENCE")
+
+    def test_perform_safe_action_increments_revision_once(self):
+        adapter = DeterministicActionAdapter()
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.perform_action(core, started, object_id, case_result["result"]["caseId"])
+        self.assertEqual(result["result"]["resultStatus"], "succeeded")
+        self.assertEqual(result["runRevision"], 3)
+        self.assertEqual(adapter.calls, 1)
+
+    def test_action_parameters_are_redacted_before_persistence(self):
+        core = self.make_core(action_adapter=DeterministicActionAdapter())
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.perform_action(core, started, object_id, case_result["result"]["caseId"], action_type="input_synthetic_value", parameters={"value":"do-not-persist","nested":{"label":"private"}})
+        stored = core._store.get_action_attempt(result["result"]["actionId"])
+        serialized = str(stored)
+        self.assertNotIn("do-not-persist", serialized)
+        self.assertNotIn("private", serialized)
+        self.assertEqual(stored["parameters"]["value"]["valueClass"], "redacted_string")
+
+    def test_write_request_is_blocked_before_send_and_not_replayed(self):
+        adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save"),)))
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        request = session(started, tool="perform_action", key="write", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        first = core.handle(request)
+        second = core.handle(request)
+        self.assertEqual(first["error"]["code"], "REQUEST_BLOCKED")
+        self.assertEqual(second["error"]["code"], "REQUEST_BLOCKED")
+        self.assertEqual(adapter.calls, 1)
+        self.assertEqual(first["runRevision"], 3)
+
+    def test_unknown_request_status_is_locked_and_queryable(self):
+        adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("GET", "https://test.example.com/api/orders", attributable=False),)))
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        request = session(started, tool="perform_action", key="unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        first = core.handle(request)
+        retry = core.handle(request)
+        self.assertEqual(first["error"]["code"], "REQUEST_RESULT_UNKNOWN")
+        self.assertEqual(retry["error"]["code"], "REQUEST_RESULT_UNKNOWN")
+        self.assertEqual(adapter.calls, 1)
+        operation_id = core._store.get_by_idempotency(started["scanId"], "unknown")["operation_id"]
+        queried = core.handle(session(started, tool="get_operation", key="query", revision=3, input={"operationId":operation_id}))
+        self.assertEqual(queried["result"]["status"], "result_unknown")
+        self.assertEqual(queried["result"]["result"]["resultStatus"], "result_unknown")
+
+    def test_result_unknown_is_not_replayed_after_restart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "host.sqlite"
+            first_adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("GET", "https://test.example.com/api/orders", attributable=False),)))
+            first_store = SQLiteStore(path)
+            first = self.make_core(store=first_store, action_adapter=first_adapter)
+            started = bootstrap(first)["result"]
+            object_id, case_result = self.begin_case(first, started)
+            request = session(started, tool="perform_action", key="restart-unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+            first.handle(request)
+            first_store.close(); self.cores.remove(first)
+            second_adapter = DeterministicActionAdapter()
+            second_store = SQLiteStore(path)
+            second = self.make_core(store=second_store, action_adapter=second_adapter)
+            retry = second.handle(request)
+            self.assertEqual(retry["error"]["code"], "REQUEST_RESULT_UNKNOWN")
+            self.assertEqual(second_adapter.calls, 0)
+            second_store.close(); self.cores.remove(second)
+
+    def test_sent_request_fails_scan(self):
+        adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save", sent=True),)))
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        request = session(started, tool="perform_action", key="action-1", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        result = core.handle(request)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        retry = core.handle(request)
+        self.assertEqual(retry["error"]["code"], "PERSISTENT_WRITE_OBSERVED")
+        self.assertEqual(adapter.calls, 1)
+
+    def test_default_action_adapter_fails_closed_without_unknown_claim(self):
+        core = self.make_core()
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.perform_action(core, started, object_id, case_result["result"]["caseId"])
+        self.assertEqual(result["error"]["code"], "ACTION_ADAPTER_UNAVAILABLE")
+        self.assertEqual(result["runRevision"], 2)
 
 
 if __name__ == "__main__":

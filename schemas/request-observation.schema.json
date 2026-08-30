@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/request-observation.schema.json",
+  "title": "RequestObservation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["observationId", "scanId", "operationId", "method", "url", "transport", "sent", "outcome", "code", "reason"],
+  "properties": {
+    "observationId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "operationId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "method": { "type": "string", "minLength": 1 },
+    "url": { "type": "string", "minLength": 1 },
+    "transport": { "enum": ["http", "beacon", "websocket", "sse", "service_worker"] },
+    "sent": { "type": "boolean" },
+    "outcome": { "enum": ["allowed", "blocked", "unknown", "already_sent"] },
+    "code": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 }
+  }
+}

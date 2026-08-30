@@ -75,6 +75,8 @@ Host 必须在浏览器网络层注册发送前拦截器。未完成分类前请
 - 页面本地状态已变化但请求被阻断：仍需执行 Case 恢复；
 - 被阻断请求的 URL、method 和脱敏分类原因可以进入诊断，header、body、cookie 和 token 不得进入。
 
+实现约束：Host 持久化的 RequestObservation 只保留去除 query/fragment 的 URL、method、transport、是否已发送和分类结果；请求 header、body、cookie、token 不进入 SQLite。动作参数中的字符串值在进入 ActionAttempt/ReverseCase 前只保留类型和长度，不保留原文。动作适配器未配置属于发送前的确定失败，不得虚构成 `result_unknown`。
+
 ## 6. 超时与重试
 
 所有等待必须有显式预算，最终数值由运行配置给出并写入 Scan。第一版至少配置：

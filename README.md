@@ -1,12 +1,12 @@
 # agent-f
 
-agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质量审计垂直智能体。项目当前进入**第一条 Host Core 垂直切片**，浏览器适配器仍未接入。
+agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质量审计垂直智能体。项目当前已完成**第四条 Host Core 垂直切片**；真实浏览器适配器仍未接入。
 
 ## 当前状态
 
-- 产品边界、顶层架构、Host–Agent 工具目录和核心账本 Schema 已形成初稿；
-- 正在收敛状态机、对象身份、安全执行、证据判定和规则契约；
-- 协议与 Operation Core 已开始编码；浏览器、凭据和账本适配器仍须按 [垂直切片 001](docs/implementation-slice-001.md) 的门槛逐步接入。
+- 产品边界、顶层架构、Host–Agent 协议和核心账本 Schema 已形成可执行基线；
+- Host Core 已实现 Scan/Operation、凭据消费、只读页面发现、对象身份、最小 Case 和安全动作内核；
+- 动作执行默认 fail-closed；下一切片实现 Case 恢复，之后再推进证据、判定和真实浏览器适配器。
 
 ## 推荐阅读顺序
 
@@ -24,7 +24,8 @@ agent-f 是运行在 Codex 中、面向测试/预发布 Web 站点的前端质�
 12. [垂直切片 001](docs/implementation-slice-001.md)
 13. [垂直切片 002](docs/implementation-slice-002.md)
 14. [垂直切片 003](docs/implementation-slice-003.md)
-15. [数据 Schema](schemas/README.md)
+15. [垂直切片 004](docs/implementation-slice-004.md)
+16. [数据 Schema](schemas/README.md)
 
 ## 规范性来源
 

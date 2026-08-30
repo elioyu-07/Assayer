@@ -56,5 +56,5 @@ class DeterministicLoginAdapter:
 
     def authenticate(self, url: str, secret: str) -> LoginResult:
         if self.succeed:
-            return LoginResult("succeeded", current_page_state_id="page-bootstrap-001", capabilities=("runtime", "dom"))
+            return LoginResult("succeeded", current_page_state_id="page-bootstrap-001", capabilities=("runtime", "dom", "interaction"))
         return LoginResult("failed", reason=self.reason)

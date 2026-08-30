@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-f.dev/schemas/action-attempt.schema.json",
+  "title": "ActionAttempt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["actionId", "scanId", "caseId", "operationId", "type", "intent", "parameters", "atRunRevision", "safetyOutcome"],
+  "properties": {
+    "actionId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "caseId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "operationId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "type": { "enum": ["scroll", "focus", "expand", "collapse", "switch_tab", "open_detail", "close_detail", "open_edit", "close_overlay", "input_synthetic_value", "restore_value", "refresh"] },
+    "targetObjectRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "intent": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "parameters": { "type": "object" },
+    "atRunRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
+    "safetyOutcome": { "enum": ["allowed", "blocked", "not_attempted"] },
+    "blockReason": { "$ref": "common.schema.json#/$defs/reason" },
+    "requestObservationRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } }
+  }
+}
