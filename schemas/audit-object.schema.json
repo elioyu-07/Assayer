@@ -61,6 +61,7 @@
           "kind": { "enum": ["input", "select", "textarea", "button", "other"] },
           "semanticAction": { "enum": ["query", "reset", "filter_input", "other"] },
           "visible": { "type": "boolean" }, "disabled": { "type": "boolean" },
+          "readOnly": { "type": "boolean" },
           "valueClass": { "enum": ["empty", "non_empty", "unknown"] }
         }
       }

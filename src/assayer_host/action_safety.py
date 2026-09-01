@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Protocol, Callable
 from urllib.parse import urlparse
 
+from .locale_terms import WRITE_ACTION_LABELS
+
 
 @dataclass(frozen=True)
 class NetworkRequest:
@@ -32,6 +34,7 @@ class ActionExecution:
     requests: tuple[NetworkRequest, ...] = ()
     diagnostic: str | None = None
     local_state_changed: bool = False
+    interaction: dict | None = None
 
 
 class SafeActionAdapter(Protocol):
@@ -41,7 +44,7 @@ class SafeActionAdapter(Protocol):
 class UnavailableActionAdapter:
     """Production default: actions cannot run before a browser adapter is explicitly configured."""
     def execute(self, action, target, page_state, intercept):
-        return ActionExecution(status="unavailable", diagnostic="浏览器动作适配器未配置")
+        return ActionExecution(status="unavailable", diagnostic="Browser action adapter is not configured")
 
 
 class DeterministicActionAdapter:
@@ -71,18 +74,21 @@ class ActionSafetyPolicy:
     """Mechanical action and network policy. Unknown input is rejected by default."""
     OBSERVATION = {"scroll", "focus"}
     REVERSIBLE = {"expand", "collapse", "switch_tab", "open_detail", "close_detail", "open_edit", "close_overlay", "refresh"}
-    SYNTHETIC = {"input_synthetic_value", "restore_value"}
-    WRITE_WORDS = ("save", "submit", "delete", "remove", "approve", "publish", "upload", "import", "cancel", "unbind", "作废", "删除", "保存", "提交", "审批", "发布", "上传", "导入")
+    SYNTHETIC = {
+        "input_synthetic_value", "select_synthetic_option", "activate_query",
+        "activate_reset", "restore_value",
+    }
+    WRITE_WORDS = WRITE_ACTION_LABELS
 
     def action_decision(self, action_type: str, intent: str, parameters: dict | None = None) -> RequestDecision:
         if action_type not in self.OBSERVATION | self.REVERSIBLE | self.SYNTHETIC:
-            return RequestDecision("blocked", "ACTION_BLOCKED", "动作类型不在 Host 安全白名单")
+            return RequestDecision("blocked", "ACTION_BLOCKED", "Action type is not on the Host safety allowlist")
         lowered = (intent or "").lower()
         if any(word in lowered for word in self.WRITE_WORDS):
-            return RequestDecision("blocked", "ACTION_BLOCKED", "动作意图包含潜在持久化写操作")
+            return RequestDecision("blocked", "ACTION_BLOCKED", "Action intent may perform a persistent write")
         if self._contains_forbidden_parameter(parameters or {}):
-            return RequestDecision("blocked", "ACTION_BLOCKED", "动作参数包含 selector、脚本或请求秘密材料")
-        return RequestDecision("allowed", "ACTION_ALLOWED", "动作类型和意图通过安全门禁")
+            return RequestDecision("blocked", "ACTION_BLOCKED", "Action parameters contain a selector, script, or request secret")
+        return RequestDecision("allowed", "ACTION_ALLOWED", "Action type and intent passed the safety gate")
 
     @classmethod
     def _contains_forbidden_parameter(cls, value) -> bool:
@@ -107,24 +113,24 @@ class ActionSafetyPolicy:
         mutation = bool(request.graphql_operation_type and request.graphql_operation_type.lower() == "mutation")
         if request.sent:
             if method not in {"GET", "HEAD", "OPTIONS"} or mutation or body_write or active_transport or cross_origin or origin_mismatch:
-                return RequestDecision("already_sent", "REQUEST_RESULT_UNKNOWN", "潜在写请求在 Host 拦截器接管前已发送")
-            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "只读形态请求已发送，但无法证明无副作用")
+                return RequestDecision("already_sent", "REQUEST_RESULT_UNKNOWN", "A potential write request was sent before Host interception")
+            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "A read-shaped request was sent, but side effects cannot be proven absent")
         if transport == "service_worker" and not request.attributable:
-            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "Service Worker 请求无法归因到当前动作")
+            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "The Service Worker request cannot be attributed to the current action")
         if active_transport:
-            return RequestDecision("blocked", "REQUEST_BLOCKED", f"传输类型 {transport} 默认禁止")
+            return RequestDecision("blocked", "REQUEST_BLOCKED", f"Transport type {transport} is blocked by default")
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
-            return RequestDecision("blocked", "REQUEST_BLOCKED", f"HTTP {method} 默认禁止")
+            return RequestDecision("blocked", "REQUEST_BLOCKED", f"HTTP {method} is blocked by default")
         if mutation:
-            return RequestDecision("blocked", "REQUEST_BLOCKED", "GraphQL mutation 默认禁止")
+            return RequestDecision("blocked", "REQUEST_BLOCKED", "GraphQL mutations are blocked by default")
         if body_write:
-            return RequestDecision("blocked", "REQUEST_BLOCKED", "multipart/form-data 请求禁止")
+            return RequestDecision("blocked", "REQUEST_BLOCKED", "multipart/form-data requests are blocked")
         if origin_mismatch:
-            return RequestDecision("blocked", "CROSS_ORIGIN_BLOCKED", "请求声明 origin 与 URL origin 不一致")
+            return RequestDecision("blocked", "CROSS_ORIGIN_BLOCKED", "The declared request origin does not match the URL origin")
         if cross_origin:
-            return RequestDecision("blocked", "CROSS_ORIGIN_BLOCKED", "跨 origin 业务请求禁止")
+            return RequestDecision("blocked", "CROSS_ORIGIN_BLOCKED", "Cross-origin business requests are blocked")
         if not request.attributable:
-            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "请求无法归因到当前动作")
+            return RequestDecision("unknown", "REQUEST_RESULT_UNKNOWN", "The request cannot be attributed to the current action")
         if method not in {"GET", "HEAD", "OPTIONS"}:
-            return RequestDecision("blocked", "REQUEST_BLOCKED", "无法分类的 HTTP 方法默认禁止")
-        return RequestDecision("allowed", "REQUEST_ALLOWED", "同源只读请求允许")
+            return RequestDecision("blocked", "REQUEST_BLOCKED", "Unclassified HTTP methods are blocked by default")
+        return RequestDecision("allowed", "REQUEST_ALLOWED", "Same-origin read-only request allowed")

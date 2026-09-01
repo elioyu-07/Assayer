@@ -1,0 +1,25 @@
+{
+  "name": "assayer",
+  "version": "0.1.0",
+  "description": "Evidence-backed frontend audits from a URL in Codex",
+  "author": {
+    "name": "Assayer maintainers"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Assayer",
+    "shortDescription": "Audit a web URL with bounded, evidence-backed checks.",
+    "longDescription": "Assayer guides Codex through a safe frontend audit: it observes a real page, checks enabled rules, records evidence, and explains completed, partial, or failed results. The user only needs to provide a URL.",
+    "developerName": "Assayer maintainers",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Audit this web URL for frontend issues: <URL>",
+      "Continue the Assayer audit and explain the current progress.",
+      "Explain the Assayer result and what I should do next."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

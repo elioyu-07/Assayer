@@ -1,6 +1,6 @@
-# FUA-10 列表筛选必须同时提供查询和重置
+# FUA-10 List Filters Must Provide Both Query and Reset
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
 | ruleId | `FUA-10` |
 | version | `1.0.0` |
@@ -10,75 +10,75 @@
 | requiredCapabilities | `runtime, dom, interaction` |
 | defaultSeverity | `P2` |
 
-当前 `enabled` 仅表示设计基线已启用；实现完成后仍必须以回归执行结果重新确认注册表发布状态。
+The `enabled` status means only that the design baseline is active. Registry publication must be reconfirmed by regression results after implementation.
 
-## 1. 规则语义
+## 1. Rule Semantics
 
-当一个真实页面上的业务列表存在可改变结果集的筛选条件时，筛选区域必须同时提供查询和重置能力。
+When a real page list has filter conditions that change its result set, the filter region must provide both query and reset capabilities.
 
-## 2. 适用性
+## 2. Applicability
 
-适用对象是页面中同时包含列表结果区和一个或多个筛选条件的 `filter_region`。只有一个孤立搜索框、静态展示、详情页局部筛选或不改变列表结果的展示控件不适用。
+The applicable object is a `filter_region` that contains one or more filter conditions and controls a list result region. An isolated search box, static display, local detail-page filter, or display control that does not change list results is not applicable.
 
-如果无法确认该区域确实控制当前列表，输出 `needs_review`，不能按不适用处理。
+If ownership of the current list cannot be confirmed, return `needs_review`; do not treat the object as not applicable.
 
-## 3. 最低覆盖契约
+## 3. Minimum Coverage Contract
 
-| 维度 | 要观察的事实 | 证据 |
+| Dimension | Required observation | Evidence |
 |---|---|---|
-| `filter_present` | 至少一个筛选控件，且其值会影响列表查询语义 | runtime_dom / runtime_interaction |
-| `query_action` | 区域有明确发起查询的入口 | runtime_dom |
-| `reset_action` | 区域有清空筛选并恢复默认条件的入口 | runtime_dom / runtime_interaction |
-| `binding_to_list` | 筛选区与当前列表结果区有唯一归属关系 | runtime_dom / runtime_interaction |
+| `filter_present` | At least one filter control whose value affects list-query semantics. | runtime_dom / runtime_interaction |
+| `query_action` | The region has an explicit query entrypoint. | runtime_dom |
+| `reset_action` | The region can clear filters and restore default conditions. | runtime_dom / runtime_interaction |
+| `binding_to_list` | The filter region has unique ownership of the current list result region. | runtime_dom / runtime_interaction |
 
-FUA-10 的 `scanned_no_issue` 必须完成全部四个维度。只看到“查询”按钮不能证明完整覆盖。
+A FUA-10 `scanned_no_issue` result requires all four dimensions. A query button alone does not prove complete coverage.
 
-## 4. Case 生成原则
+## 4. Case Planning
 
-- 默认使用 `observation` Case 读取筛选区、列表和按钮语义；
-- 必要时使用合成筛选值触发查询，但不得提交真实写操作；
-- 查询请求可以被观察，但不得因审计而改变持久化数据；
-- 若点击重置会触发网络查询，Host 必须确认请求为只读并记录前后状态；
-- 每个 Case 都必须恢复筛选值、列表状态和 pending request。
+- Use an `observation` Case by default to read filter-region, list, and button semantics.
+- Use synthetic filter values only when necessary; never submit a real write operation.
+- Query requests may be observed, but the audit must not change persistent data.
+- If reset triggers a network query, Host must confirm that the request is read-only and record before/after state.
+- Every Case must restore filter values, list state, and pending requests.
 
-## 5. 五态判定
+## 5. Five-State Decision
 
 ### `issue_found`
 
-适用性和 `binding_to_list` 已确认，筛选条件存在且查询入口存在，但没有可见重置入口或等价的清空并恢复默认条件能力；证据充分并有独立病灶截图。
+Applicability and `binding_to_list` are confirmed; filter conditions and a query entrypoint exist; but no visible reset entrypoint or equivalent clear-and-restore capability exists. Evidence is sufficient and an independent issue screenshot is available.
 
 ### `scanned_no_issue`
 
-四个最低覆盖维度均完成，查询和重置入口均存在，且没有相反证据。
+All four minimum coverage dimensions are complete, query and reset entrypoints exist, and no contrary evidence is present.
 
 ### `not_applicable`
 
-对象不是控制列表结果的筛选区域，或不存在可改变结果集的筛选条件。
+The object is not a filter region that controls list results, or no filter condition can change the result set.
 
 ### `needs_review`
 
-无法确认筛选区和列表的绑定、按钮语义、对象身份或所需交互能力；不得以“没有看到重置”直接确认问题。
+Filter/list binding, button semantics, object identity, or the required interaction capability cannot be confirmed. Failure to see reset is not sufficient by itself to confirm an issue.
 
 ### `noise`
 
-候选区域包含输入框或按钮，但它是页面级搜索、排序、分页或静态展示，不满足 FUA-10 的列表筛选语义。
+The candidate contains inputs or buttons but represents page-level search, sorting, pagination, or static display rather than FUA-10 list filtering.
 
-## 6. 证据和截图
+## 6. Evidence and Screenshots
 
-- `scanned_no_issue` 至少引用覆盖四个维度的 Evidence；
-- `issue_found` 必须引用缺少重置能力的 runtime Evidence，并生成当前筛选区的独立 IssueScreenshot；
-- 源码只能补充按钮归属或事件意图，不能覆盖运行态没有重置入口的事实。
+- `scanned_no_issue` must reference Evidence covering all four dimensions.
+- `issue_found` must reference runtime Evidence showing the missing reset capability and create an independent IssueScreenshot.
+- Source code may supplement button ownership or event intent, but it cannot override the runtime fact that reset is absent.
 
-## 7. 严重度
+## 7. Severity
 
-默认 `P2`。若列表是关键业务操作入口且无法恢复筛选条件会造成明显操作成本，可由 Agent 在理由中说明后调整为 `P1`；不得仅因按钮命名差异调整严重度。
+The default is `P2`. The Agent may justify `P1` when the list is a critical business-operation entrypoint and inability to restore filters causes significant operating cost. Button-label differences alone must not change severity.
 
-## 8. 样本与回归
+## 8. Samples and Regression
 
-- 正例：筛选条件 + 查询 + 重置均存在；
-- 负例：筛选条件 + 查询存在，但没有重置或清空入口；
-- 不适用：详情页内一个不控制列表结果的输入框；
-- 噪声：只有分页、排序或页面级关键词搜索；
-- 能力缺失：无法读取 DOM 或交互归属 → `needs_review`；
-- 身份歧义：两个相似筛选区无法唯一绑定列表 → `needs_review`；
-- 截图失败：问题仍可能存在，但正式结果只能为 `needs_review`。
+- Positive: filter conditions, query, and reset are present.
+- Negative: filter conditions and query are present, but reset or clear is absent.
+- Not applicable: a detail-page input that does not control list results.
+- Noise: pagination, sorting, or page-level keyword search only.
+- Missing capability: DOM or interaction ownership cannot be read → `needs_review`.
+- Identity ambiguity: two similar filter regions cannot be bound uniquely to a list → `needs_review`.
+- Screenshot failure: an issue may still exist, but the formal result can only be `needs_review`.

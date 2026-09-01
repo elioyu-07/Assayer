@@ -1,20 +1,20 @@
 {
   "registryId": "registry-001",
   "registryVersion": "1.0.0",
-  "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+  "digest": "6fb8e22d7f65183cc25459bccc6943af286961fa2c38383fdaf7581d45bd9e7d",
   "createdAt": "2026-08-30T08:00:00Z",
   "rules": [
     {
       "ruleId": "FUA-10",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "status": "enabled",
-      "name": "列表筛选必须同时提供查询和重置",
+      "name": "List filters must provide both query and reset",
       "owner": "product-owner",
-      "document": "rules/FUA-10.md",
+      "document": "rules/FUA-10-v1.1.md",
       "objectKinds": ["filter_region"],
-      "requiredCapabilities": ["runtime", "dom", "interaction"],
+      "requiredCapabilities": ["runtime", "dom"],
       "capabilityMissingOutcome": "needs_review",
-      "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+      "coverageContract": "rules/FUA-10-v1.1.md#minimum-coverage-contract",
       "coverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
       "decisionGates": {
         "scanned_no_issue": { "allRequiredStatuses": ["satisfied"] },
@@ -26,12 +26,12 @@
       "directConfirmationConditions": [],
       "defaultSeverity": "P2",
       "allowedSeverities": ["P1", "P2", "P3"],
-      "regressionSuite": "rules/FUA-10.md#样本与回归",
-      "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
+      "regressionSuite": "rules/FUA-10-v1.1.md#samples-and-regression",
+      "contentDigest": "a5b9604801b361ae9f756e899c9e7b058deadce9e83c3669127f217173f8c32e",
       "examples": {
-        "positive": ["筛选条件、查询和重置均存在"],
-        "negative": ["筛选条件和查询存在，但没有重置"],
-        "regression": ["对象身份歧义时必须 needs_review"]
+        "positive": ["Filter conditions, query, and reset are present"],
+        "negative": ["Filter conditions and query are present, but reset is absent"],
+        "regression": ["Ambiguous object identity requires needs_review"]
       }
     }
   ]

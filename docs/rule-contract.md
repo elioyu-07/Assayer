@@ -1,96 +1,96 @@
-# Assayer 规则契约
+# Assayer Rule Contract
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
-| 状态 | 设计收敛中 |
-| Owner | 规则 Owner / 产品 Owner |
+| Document version | 1.0.0-draft |
+| Date | 2026-08-30 |
+| Status | Design converging |
+| Owner | Rule Owner / Product Owner |
 
-## 1. 规则文件的职责
+## 1. Responsibility of Rule Files
 
-规则文件是 Agent 语义判断的规范来源；注册表是规则元数据和 Host 能力需求的来源；Host 不根据规则文件自行生成业务结论。规则不得修改固定五态、动作安全、证据绑定或账本关联。
+A rule file is the normative source for Agent semantic decisions. The registry is the source for rule metadata and required Host capabilities. The Host does not derive business conclusions from rule files. A rule cannot alter the fixed five states, action safety, evidence bindings, or ledger references.
 
-## 2. 必备结构
+## 2. Required Structure
 
-每条规则必须包含：
+Every rule includes:
 
-1. 稳定 `ruleId`、语义版本、状态、Owner；
-2. 一句话规则和适用对象类型；
-3. 适用性判断与明确不适用条件；
-4. 所需 Host capabilities；
-5. 最低覆盖维度及每个维度的可观察证据；
-6. 反向 Case 生成原则、输入类别和安全边界；
-7. `issue_found`、`scanned_no_issue`、`not_applicable`、`needs_review`、`noise` 的判定条件；
-8. 默认严重度、允许调整范围和调整理由要求；
-9. 正例、负例、边界例、噪声例和回归样本；
-10. 规则文档、覆盖契约和回归套件的摘要/路径。
+1. Stable `ruleId`, semantic version, state, and owner;
+2. One-sentence rule and applicable object types;
+3. Applicability criteria and explicit non-applicable conditions;
+4. Required Host capabilities;
+5. Minimum coverage dimensions and observable evidence for each dimension;
+6. Reverse-Case principles, input categories, and safety boundaries;
+7. Criteria for `issue_found`, `scanned_no_issue`, `not_applicable`, `needs_review`, and `noise`;
+8. Default severity, permitted range, and rationale required for adjustment;
+9. Positive, negative, boundary, noise, and regression samples;
+10. Summaries or paths for rule documentation, coverage contract, and regression suite.
 
-## 3. 适用性和能力缺失
+## 3. Applicability and Missing Capabilities
 
-- Host 先按对象类型提供候选，Agent 必须根据页面事实确认适用性；
-- 规则适用但所需 capability 不可用：不能输出 `not_applicable` 或 `scanned_no_issue`；默认输出 `needs_review`，并记录缺失能力；
-- `not_applicable` 仍需引用一个 observation Case，证明对象和规则前置条件已被观察；
-- 规则明确不适用且有证据：输出 `not_applicable`；
-- 候选对象与规则相关但确认是规则噪声：输出 `noise`；
-- 规则状态为 `draft`、`owner_approved`、`validated` 或 `deprecated`：不得生成正式 `issue_found`；只有 `enabled` 规则能产生正式问题。
+- Host first supplies candidates by object type; Agent confirms applicability from page facts;
+- If a rule applies but a required capability is unavailable, the result cannot be `not_applicable` or `scanned_no_issue`; it defaults to `needs_review` and records the missing capability;
+- `not_applicable` still references an observation Case proving that the object and rule prerequisites were observed;
+- When the rule explicitly does not apply and evidence proves that fact, use `not_applicable`;
+- When a candidate relates superficially to a rule but is confirmed rule noise, use `noise`;
+- Rules in `draft`, `owner_approved`, `validated`, or `deprecated` state cannot produce formal `issue_found`; only `enabled` rules create formal issues.
 
-## 4. 覆盖契约
+## 4. Coverage Contract
 
-最低覆盖是规则定义的命名维度集合，而非固定 Case 数量。每个维度必须说明：
+Minimum coverage is a named set of rule-defined dimensions, not a fixed Case count. Every dimension states:
 
-- 需要观察的对象或页面事实；
-- 是否需要动作；
-- 允许的输入类别；
-- 通过和问题的可区分结果；
-- 证据类型；
-- 哪些失败只能得到 `needs_review`。
+- Object or page facts to observe;
+- Whether an action is required;
+- Permitted input categories;
+- Distinguishable pass and issue outcomes;
+- Evidence kinds;
+- Failures that can only yield `needs_review`.
 
-Case 数量由 Agent 决定，但不能少于覆盖维度要求。等价输入、重复点击、纯视觉重复截图不能增加覆盖。
+Agent chooses the Case count, but it cannot cover fewer than the required dimensions. Equivalent inputs, repeated clicks, and visually duplicate screenshots do not add coverage.
 
-Case 的 `plannedCoverageDimensions` 只表达调查意图。正式覆盖必须为每个维度形成 `DimensionFinding`，包含 `satisfied/violated/unresolved/blocked/conflicted` 状态、公开简明理由和同一扫描 Evidence 引用。只有 `satisfied` 或 `violated` 属于 resolved；其余状态必须出现在 unresolved 集合中。
+A Case's `plannedCoverageDimensions` expresses investigation intent only. Formal coverage requires one `DimensionFinding` per dimension with `satisfied`, `violated`, `unresolved`, `blocked`, or `conflicted` state, a concise public rationale, and same-Scan Evidence references. Only `satisfied` and `violated` are resolved; every other state appears in the unresolved set.
 
-注册表还必须声明各五态结果的机器可校验门禁，例如允许的 Finding 组合、必需 Evidence kind 和截图要求。门禁按通用结构解释，Host 主循环不得按 `ruleId` 编写条件分支。
+The registry also declares machine-checkable gates for each of the five results, such as allowed Finding combinations, required Evidence kinds, and screenshot requirements. Host interprets these through a generic structure; the main loop must not branch on `ruleId`.
 
-## 5. 直接运行态确认
+## 5. Direct Runtime Confirmation
 
-规则可以声明某些条件允许不执行交互 Case 直接确认，例如运行态已经清晰显示技术错误、字段没有任何约束或表格确实截断且无查看入口。直接确认必须：
+A rule may permit direct confirmation without an interactive Case for explicitly declared conditions, such as a visible technical error, a field with no constraints, or actually truncated table content without a full-content affordance. Direct confirmation requires:
 
-- 在规则文件中逐项列出允许条件；
-- 需要的运行态 Evidence 全部存在；
-- 不绕过恢复屏障和 IssueScreenshot 门禁；
-- 不把源码意图当成运行态事实。
+- Every permitted condition listed in the rule file;
+- All required runtime Evidence present;
+- No bypass of the recovery barrier or IssueScreenshot gate;
+- Source intent not treated as runtime fact.
 
-## 6. 五态判定模板
+## 6. Five-State Decision Template
 
-| 结果 | 规则文件必须回答 |
+| Result | The rule file must answer |
 |---|---|
-| `issue_found` | 什么可观察事实足以确认问题、影响是什么、需要哪些 Evidence 和截图。 |
-| `scanned_no_issue` | 哪些最低维度全部完成且每个维度的通过事实是什么。 |
-| `not_applicable` | 对象缺少何种规则前置条件，如何证明不是能力缺失。 |
-| `needs_review` | 哪个证据、能力、来源或恢复条件缺失，谁需要复核。 |
-| `noise` | 为什么候选匹配规则表面特征但不属于规则语义。 |
+| `issue_found` | Which observable facts confirm an issue, its impact, and required Evidence and screenshot. |
+| `scanned_no_issue` | Which minimum dimensions are complete and what pass fact resolves each one. |
+| `not_applicable` | Which prerequisite the object lacks and how the evidence proves this is not a capability gap. |
+| `needs_review` | Which evidence, capability, source, or recovery condition is missing and who must review it. |
+| `noise` | Why the candidate matches superficial features but not the rule semantics. |
 
-## 7. 规则生命周期
+## 7. Rule Lifecycle
 
 ```text
-draft → owner_approved → validated → enabled → deprecated
+draft -> owner_approved -> validated -> enabled -> deprecated
 ```
 
-- `owner_approved` 表示规则语义得到 Owner 确认；
-- `validated` 表示正反例、安全和截图回归已通过；
-- `enabled` 才能用于正式审计和正式问题；
-- 规则语义实质变化必须生成新版本，旧版本只用于历史账本；
-- 规则 ID 永不复用；
-- 注册表在 Scan 启动时冻结，运行期间禁止热更新。
+- `owner_approved` means the owner confirmed the semantics;
+- `validated` means positive/negative, safety, and screenshot regressions passed;
+- Only `enabled` participates in formal audits and formal issues;
+- A material semantic change creates a new version; old versions remain only for historical ledgers;
+- Rule IDs are never reused;
+- The registry is frozen when the Scan starts and cannot be hot-updated during a run.
 
-## 8. 规则接入验收
+## 8. Rule-Onboarding Acceptance
 
-新增规则必须证明：
+A new rule must prove that it:
 
-- 复用通用 Agent 调查循环；
-- 不新增判定状态；
-- 不要求绕过 Host 安全或证据门禁；
-- 缺失 capability 时 fail closed；
-- 正例、反例、边界、噪声、阻断、截图失败和恢复场景均有回归；
-- 能在统一账本和报告中展示规则版本和证据链。
+- Reuses the general Agent investigation loop;
+- Adds no decision state;
+- Requires no bypass of Host safety or evidence gates;
+- Fails closed when a capability is missing;
+- Has regressions for positive, negative, boundary, noise, blocked, screenshot-failure, and recovery scenarios;
+- Displays rule version and evidence chain in the unified ledger and reports.

@@ -204,7 +204,7 @@
   ],
   "$defs": {
     "actionType": {
-      "enum": ["scroll", "focus", "expand", "collapse", "switch_tab", "open_detail", "close_detail", "open_edit", "close_overlay", "input_synthetic_value", "restore_value", "refresh"]
+      "enum": ["scroll", "focus", "expand", "collapse", "switch_tab", "open_detail", "close_detail", "open_edit", "close_overlay", "input_synthetic_value", "select_synthetic_option", "activate_query", "activate_reset", "restore_value", "refresh"]
     }
   }
 }

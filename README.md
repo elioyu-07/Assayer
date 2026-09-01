@@ -1,118 +1,117 @@
 # Assayer
 
-Assayer 是面向测试/预发布 Web 站点的前端质量审计垂直智能体。Host Core、真实 Chromium 适配器和 JSON/MCP 传输已经贯通；下一阶段把 Codex LLM 接入调查控制循环，使终端和桌面客户端共用同一套 Skill + MCP 能力。
+Assayer is a frontend-quality audit agent for test and staging web sites. The Host Core, real Chromium adapter, dynamic JSON/MCP Runtime Router, project Skill, model-independent agent loop, and Codex entrypoint are connected end to end. The production path uses LLM-owned semantic decisions; the deterministic semantic evaluator is not part of the product runtime.
 
-工程已由 `agent-f` 统一更名为 `Assayer`。Python 分发包为 `assayer`，实现模块为 `assayer_host`，命令行为 `assayer`、`assayer-harness`、`assayer-json` 和 `assayer-mcp`。
+## Current status
 
-## 当前状态
+The product goal is a complete end-to-end user journey, not a collection of isolated components. The journey gates and Definition of Done are documented in [User Journey and Definition of Done](docs/user-journey-and-definition-of-done.md).
 
-- 产品边界、顶层架构、Host–Agent 协议和核心账本 Schema 已形成可执行基线；
-- Host Core 已实现 Scan/Operation、凭据消费、页面发现、对象身份、Case、安全动作、恢复屏障、证据、判定事务、审计收束、账本导出和 JSON/Markdown 派生报告；
-- C02 已实现冻结规则读取、可重建调查进度、不透明 control/list 引用、不可变 DimensionFinding 和 Finding 驱动的覆盖/判定门禁；
-- 确定性端到端 Harness 已覆盖完整生命周期，并提供模块与已安装 CLI 两种入口；
-- 浏览器侧登录、页面、对象身份、动作、恢复和截图默认 fail-closed；Harness 只用于契约演示和 CI，不代表真实站点审计；
-- Playwright 只读适配器已可在显式安装可选依赖后读取同源页面并唯一绑定每个可判定的 `filter_region`；
-- 按[真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)推进：B07a/B07b、B08、B09、B10、B11、B12 已完成；B12 已把真实 URL 接入通用 Host Case/Evidence/恢复/判定/账本全链路；B07c 自动敏感区域识别与像素脱敏暂缓；
-- B12 的 `BrowserHostRuntime.audit` 是确定性 smoke runner，不包含 LLM 自主对象选择、Case 规划、补证和语义判定；LLM 调查层按 [C01–C07 实施计划](docs/llm-agent-integration-plan.md)推进，C01–C02 已完成。
-- 后续已拆解为 [C03–C07 的 22 个执行工作包](docs/implementation-plan-c03-c07.md)；当前下一步是 C03a“可引用控件与列表发现”。
-
-公开页面当前可执行真实只读 smoke 试跑：
+The J01 delivery skeleton is in [`plugins/assayer`](plugins/assayer). Build a release archive with:
 
 ```bash
-assayer audit 'http://localhost:8081/#/lease-mock' --output-dir ./assayer-output
+python3 scripts/build_plugin_bundle.py --output ./dist
 ```
 
-当前兼容命令名仍为 `audit`，但实际运行的是确定性 Host smoke：它把 URL 当作黑盒样本并验证完整 Host 生命周期，不会为该系统做专属适配，也不能解释为 LLM 智能审计。C05 将正式入口切换为 LLM 驱动的 `audit`，并把现有路径改名为 `smoke`；正式 Agent 不可用时禁止静默降级。
+The builder packages the offline runtime, rules, schemas, and MCP server and verifies the bundle in a temporary environment. See [J01 install and delivery](docs/j01-install-delivery.md) for platform boundaries.
 
-真实浏览器路径可以在受控测试数据环境生成对象级 PNG Raw Visual，并明确记录 `sanitizationStatus=not_performed`；它不能伪装成已脱敏图片，仍禁止据此提交正式 `issue_found`。自动敏感区域识别与像素脱敏属于后续 B07c。确定性 Harness 中的截图只用于契约与回归测试。
+Implemented product foundations include:
 
-## 运行确定性 Harness
+- Host-owned Scan/Operation state, credential handling, page discovery, object identity, Cases, safe actions, recovery barriers, Evidence, decision transactions, audit completion, ledger export, and JSON/Markdown reports.
+- A dynamic Runtime Router with Scan isolation, lease supervision, bounded recovery, and a formal Agent entrypoint.
+- A real-browser read-only adapter that captures structured DOM context and object-level visual Evidence while keeping browser handles opaque.
+- FUA-10 five-state regression coverage and a full gate that executes Chromium and MCP tests without silent skips.
+- Layered observability: durable ledger, runtime event stream, public decision trace, diagnostics, and integrity manifest.
+- Multilingual target-page recognition. Locale terms used by browser probes are isolated in runtime resources; Assayer's authored product and engineering text is English.
 
-请使用一个尚未包含同名报告的新输出目录：
+## Run a formal audit
+
+Provide an HTTP(S) URL. Codex loads the `assayer-audit` Skill and uses the local product MCP facade; users and models do not construct protocol envelopes.
 
 ```bash
-PYTHONPATH=src python3 -m assayer_host --output-dir ./audit-output
+assayer audit 'http://localhost:8081/#/lease-mock' --output-root ./assayer-output
 ```
 
-通用 JSON CLI 使用 JSON Lines（每行一个完整协议封套）：
+The formal path fails explicitly when Codex, MCP, or the browser runtime is unavailable. It never silently falls back to smoke mode.
+
+For a non-publishable Host fact diagnostic, use `smoke` explicitly:
 
 ```bash
-assayer-json --url 'http://localhost:8081/#/lease-mock' --stdio < requests.jsonl
+assayer smoke 'http://localhost:8081/#/lease-mock' --output-dir ./assayer-smoke-output
 ```
 
-MCP 通过可选依赖提供本地 stdio Server：
+## Run the deterministic harness
+
+The harness is for contract demonstrations and CI only; it is not a real-site audit and does not accept real credentials.
 
 ```bash
-pip install 'assayer[mcp]'
-assayer-mcp --url 'http://localhost:8081/#/lease-mock'
+assayer-harness --output-dir ./audit-output
 ```
 
-需要同时验证问题、Raw Visual 和独立问题截图链路时：
+The output directory contains `audit-ledger.json`, derived JSON/Markdown reports, `runtime-events.jsonl`, `observability-manifest.json`, and required screenshots.
+
+The low-level JSON Lines transport is available for integrations:
 
 ```bash
-PYTHONPATH=src python3 -m assayer_host --output-dir ./audit-issue-output --result issue_found
+assayer-json --stdio --output-root ./assayer-output < requests.jsonl
 ```
 
-安装项目后也可运行 `assayer-harness --output-dir ./audit-output`。命令向标准输出写入机器可读 JSON 摘要，输出目录包含唯一事实源 `audit-ledger.json`、JSON/Markdown 派生报告和必要截图；不会生成 HTML。
+The local stdio MCP server is available after installing optional dependencies:
 
-## 推荐阅读顺序
+```bash
+pip install 'assayer[browser,mcp]'
+assayer-mcp --output-root ./assayer-output
+```
 
-1. [产品契约](docs/product-contract.md)
-2. [设计治理与不变量](docs/design-governance.md)
-3. [顶层架构](docs/architecture.md)
-4. [LLM 调查编排设计](docs/llm-agent-orchestration.md)
-5. [领域模型与生命周期](docs/domain-model-and-lifecycle.md)
-6. [Host–Agent 协议](docs/host-agent-protocol.md)
-7. [对象身份与恢复](docs/identity-and-recovery.md)
-8. [动作安全与凭据](docs/action-safety-and-credentials.md)
-9. [证据与判定完整性](docs/evidence-and-decision-integrity.md)
-10. [规则契约](docs/rule-contract.md)
-11. [设计验收与追溯](docs/verification-and-traceability.md)
-12. [工具级协议契约](docs/tool-contracts.md)
-13. [真实浏览器与 MCP 集成计划](docs/browser-mcp-integration-plan.md)
-14. [LLM Agent 调查层实施计划](docs/llm-agent-integration-plan.md)
-15. [垂直切片 001](docs/implementation-slice-001.md)
-16. [垂直切片 002](docs/implementation-slice-002.md)
-17. [垂直切片 003](docs/implementation-slice-003.md)
-18. [垂直切片 004](docs/implementation-slice-004.md)
-19. [垂直切片 005](docs/implementation-slice-005.md)
-20. [垂直切片 006](docs/implementation-slice-006.md)
-21. [垂直切片 007](docs/implementation-slice-007.md)
-22. [垂直切片 008](docs/implementation-slice-008.md)
-23. [垂直切片 009](docs/implementation-slice-009.md)
-24. [垂直切片 010](docs/implementation-slice-010.md)
-25. [垂直切片 011](docs/implementation-slice-011.md)
-26. [垂直切片 012](docs/implementation-slice-012.md)
-27. [垂直切片 013](docs/implementation-slice-013.md)
-28. [垂直切片 014](docs/implementation-slice-014.md)
-29. [垂直切片 015](docs/implementation-slice-015.md)
-30. [垂直切片 016](docs/implementation-slice-016.md)
-31. [垂直切片 017](docs/implementation-slice-017.md)
-32. [垂直切片 018](docs/implementation-slice-018.md)
-33. [垂直切片 019](docs/implementation-slice-019.md)
-34. [垂直切片 020](docs/implementation-slice-020.md)
-35. [垂直切片 021](docs/implementation-slice-021.md)
-36. [垂直切片 022](docs/implementation-slice-022.md)
-37. [垂直切片 023](docs/implementation-slice-023.md)
-38. [垂直切片 024](docs/implementation-slice-024.md)
-39. [垂直切片 025](docs/implementation-slice-025.md)
-40. [数据 Schema](schemas/README.md)
+## Test gates
 
-## 规范性来源
+Fast tests cover deterministic unit and protocol regressions:
 
-发生冲突时，按 [设计治理与不变量](docs/design-governance.md) 中的权威顺序处理。示例、测试和派生报告不得覆盖产品契约、安全不变量、协议或 Schema。
+```bash
+python scripts/run_tests.py fast
+```
 
-## 仓库结构
+Full acceptance starts Chromium and executes MCP SDK tests. Missing dependencies, browser startup failure, or skipped tests fail the gate:
+
+```bash
+uv pip install --python .venv/bin/python -e '.[test]'
+.venv/bin/python -m playwright install chromium
+.venv/bin/python scripts/run_tests.py full
+```
+
+See [C07.2 real-link test gate](docs/implementation-slice-032.md) and [observability governance](docs/observability-governance.md).
+
+## Recommended reading
+
+1. [Product contract](docs/product-contract.md)
+2. [User journey and Definition of Done](docs/user-journey-and-definition-of-done.md)
+3. [J01 install and delivery](docs/j01-install-delivery.md)
+4. [J02 activation and discovery](docs/j02-activation-and-discovery.md)
+5. [Design governance](docs/design-governance.md)
+6. [Top-level architecture](docs/architecture.md)
+7. [LLM agent orchestration](docs/llm-agent-orchestration.md)
+8. [Domain model and lifecycle](docs/domain-model-and-lifecycle.md)
+9. [Host–Agent protocol](docs/host-agent-protocol.md)
+10. [Object identity and recovery](docs/identity-and-recovery.md)
+11. [Action safety and credentials](docs/action-safety-and-credentials.md)
+12. [Evidence and decision integrity](docs/evidence-and-decision-integrity.md)
+13. [Rule contract](docs/rule-contract.md)
+14. [Verification and traceability](docs/verification-and-traceability.md)
+15. [Tool contracts](docs/tool-contracts.md)
+16. [Browser and MCP integration plan](docs/browser-mcp-integration-plan.md)
+17. [LLM agent integration plan](docs/llm-agent-integration-plan.md)
+18. [Observability governance](docs/observability-governance.md)
+
+## Repository layout
 
 ```text
-docs/       产品、架构、协议和专项设计
-rules/      规则模板及独立 FUA 规则
-schemas/    持久化数据的 JSON Schema
-examples/   账本和协议示例
-src/        Host Core 实现
-tests/      Host Core 行为测试
+docs/       Product, architecture, protocol, and design documents
+rules/      Rule templates and versioned FUA rules
+schemas/    JSON Schemas for persisted data and protocol messages
+examples/   Ledger and protocol examples
+src/        Host Core and model-independent Agent loop
+tests/      Host Core, browser, MCP, and contract tests
 ```
 
-## 生产边界
+## Normative sources
 
-`run_deterministic_harness` 显式注入静态测试适配器，不接受真实凭据，也不访问真实浏览器。直接构造 `HostCore()` 时，登录、页面、对象身份、动作和恢复适配器保持不可用并 fail-closed；接入真实浏览器前不得把 Harness 产物解释为目标站点审计结论。
+When documents conflict, follow the authority order in [Design governance](docs/design-governance.md). Examples, tests, and derived reports cannot override the product contract, safety invariants, protocol, or schemas.

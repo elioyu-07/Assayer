@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 import json
+import re
+from datetime import datetime, timezone
 
 
 class SQLiteStore:
@@ -22,13 +26,16 @@ class SQLiteStore:
               run_revision INTEGER NOT NULL, status TEXT NOT NULL,
               login_status TEXT NOT NULL, created_at TEXT NOT NULL,
               rule_registry_digest TEXT NOT NULL, current_page_state_id TEXT,
-              capabilities_json TEXT NOT NULL, output_dir TEXT NOT NULL, entry_url TEXT NOT NULL DEFAULT ''
+              capabilities_json TEXT NOT NULL, output_dir TEXT NOT NULL, entry_url TEXT NOT NULL DEFAULT '',
+              started_monotonic_ns INTEGER
             );
             CREATE TABLE IF NOT EXISTS operations (
               operation_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
               request_id TEXT NOT NULL, tool TEXT NOT NULL, operation_kind TEXT NOT NULL,
               idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL,
               status TEXT NOT NULL, accepted_at_revision INTEGER NOT NULL,
+              accepted_at TEXT, ended_at TEXT, accepted_monotonic_ns INTEGER, duration_ms INTEGER,
+              agent_turn_id TEXT, decision_reason TEXT, model_duration_ms INTEGER, model_retry_count INTEGER,
               error_code TEXT, error_message TEXT, result_json TEXT,
               UNIQUE(scan_id, idempotency_key)
             );
@@ -104,6 +111,11 @@ class SQLiteStore:
               assessment_id TEXT NOT NULL REFERENCES assessments(assessment_id),
               object_id TEXT NOT NULL REFERENCES audit_objects(object_id), entity_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS runtime_events (
+              event_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES scans(scan_id),
+              run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_json TEXT NOT NULL,
+              UNIQUE(scan_id, sequence)
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -111,6 +123,18 @@ class SQLiteStore:
             self._conn.execute("ALTER TABLE operations ADD COLUMN result_json TEXT")
         if "case_ref" not in columns:
             self._conn.execute("ALTER TABLE operations ADD COLUMN case_ref TEXT")
+        for name, definition in {
+            "accepted_at": "TEXT",
+            "ended_at": "TEXT",
+            "accepted_monotonic_ns": "INTEGER",
+            "duration_ms": "INTEGER",
+            "agent_turn_id": "TEXT",
+            "decision_reason": "TEXT",
+            "model_duration_ms": "INTEGER",
+            "model_retry_count": "INTEGER",
+        }.items():
+            if name not in columns:
+                self._conn.execute(f"ALTER TABLE operations ADD COLUMN {name} {definition}")
         scan_columns = {row[1] for row in self._conn.execute("PRAGMA table_info(scans)")}
         for name, definition in {
             "rule_registry_digest": "TEXT NOT NULL DEFAULT ''",
@@ -118,6 +142,7 @@ class SQLiteStore:
             "capabilities_json": "TEXT NOT NULL DEFAULT '[]'",
             "output_dir": "TEXT NOT NULL DEFAULT ''",
             "entry_url": "TEXT NOT NULL DEFAULT ''",
+            "started_monotonic_ns": "INTEGER",
         }.items():
             if name not in scan_columns:
                 self._conn.execute(f"ALTER TABLE scans ADD COLUMN {name} {definition}")
@@ -152,16 +177,22 @@ class SQLiteStore:
         return dict(row) if row else None
 
     def insert_scan(self, scan: dict) -> None:
+        started_monotonic_ns = scan.get("startedMonotonicNs") or time.monotonic_ns()
         self._conn.execute(
-            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json,output_dir,entry_url) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["outputDir"], scan.get("entryUrl", "")),
+            "INSERT INTO scans(scan_id,run_id,run_revision,status,login_status,created_at,rule_registry_digest,current_page_state_id,capabilities_json,output_dir,entry_url,started_monotonic_ns) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (scan["scanId"], scan["runId"], scan["runRevision"], scan["status"], scan["loginStatus"], scan["createdAt"], scan["ruleRegistryDigest"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["outputDir"], scan.get("entryUrl", ""), started_monotonic_ns),
         )
+        self._append_runtime_event(scan, "lifecycle", "scan.started", "start", "info", "started", "Scan started")
 
     def update_scan(self, scan: dict) -> None:
+        previous = self._conn.execute("SELECT status FROM scans WHERE scan_id=?", (scan["scanId"],)).fetchone()
         self._conn.execute(
             "UPDATE scans SET run_revision=?, status=?, login_status=?, current_page_state_id=?, capabilities_json=? WHERE scan_id=?",
             (scan["runRevision"], scan["status"], scan["loginStatus"], scan.get("currentPageStateId"), scan["capabilitiesJson"], scan["scanId"]),
         )
+        if previous and previous[0] not in {"completed", "partial", "failed"} and scan.get("status") in {"completed", "partial", "failed"}:
+            outcome = "succeeded" if scan["status"] in {"completed", "partial"} else "failed"
+            self._append_runtime_event(scan, "lifecycle", "scan.terminal", "finish", "info" if outcome == "succeeded" else "error", outcome, f"Scan terminal: {scan['status']}")
 
     def get_operation(self, operation_id: str) -> dict | None:
         row = self._conn.execute("SELECT * FROM operations WHERE operation_id = ?", (operation_id,)).fetchone()
@@ -183,17 +214,44 @@ class SQLiteStore:
         return dict(row) if row else None
 
     def insert_operation(self, op: dict) -> None:
+        accepted_at = op.get("acceptedAt") or self._now()
+        accepted_mono = op.get("acceptedMonotonicNs") or time.monotonic_ns()
+        ended_at = op.get("endedAt")
+        duration_ms = op.get("durationMs")
+        if op.get("status") in {"succeeded", "rejected", "failed_known", "result_unknown"}:
+            ended_at = ended_at or self._now()
+            duration_ms = duration_ms if duration_ms is not None else max(0, int((time.monotonic_ns() - accepted_mono) / 1_000_000))
         self._conn.execute(
-            "INSERT INTO operations(operation_id,scan_id,request_id,tool,operation_kind,idempotency_key,request_digest,status,accepted_at_revision,error_code,error_message,result_json,case_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (op["operationId"], op["scanId"], op["requestId"], op["tool"], op["operationKind"], op["idempotencyKey"], op["requestDigest"], op["status"], op["acceptedAtRevision"], op.get("errorCode"), op.get("errorMessage"), op.get("resultJson"), op.get("caseRef")),
+            "INSERT INTO operations(operation_id,scan_id,request_id,tool,operation_kind,idempotency_key,request_digest,status,accepted_at_revision,accepted_at,ended_at,accepted_monotonic_ns,duration_ms,agent_turn_id,decision_reason,model_duration_ms,model_retry_count,error_code,error_message,result_json,case_ref) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (op["operationId"], op["scanId"], op["requestId"], op["tool"], op["operationKind"], op["idempotencyKey"], op["requestDigest"], op["status"], op["acceptedAtRevision"], accepted_at, ended_at, accepted_mono, duration_ms, op.get("agentTurnId"), op.get("decisionReason"), (op.get("modelTelemetry") or {}).get("durationMs"), (op.get("modelTelemetry") or {}).get("retryCount"), op.get("errorCode"), op.get("errorMessage"), op.get("resultJson"), op.get("caseRef")),
         )
+        event_op = {**op, "acceptedAt": accepted_at}
+        self._append_operation_event(event_op, "start")
+        self._append_agent_decision_events(event_op)
+        if ended_at:
+            self._append_operation_event({**event_op, "endedAt": ended_at, "durationMs": duration_ms}, "finish")
 
     def update_operation(self, op: dict) -> None:
         operation_id = op.get("operationId") or op.get("operation_id")
+        previous = self._conn.execute("SELECT * FROM operations WHERE operation_id=?", (operation_id,)).fetchone()
+        if previous is None:
+            raise ValueError(f"unknown operation: {operation_id}")
+        accepted_at = previous["accepted_at"] or op.get("acceptedAt") or self._now()
+        accepted_mono = previous["accepted_monotonic_ns"] or op.get("acceptedMonotonicNs") or time.monotonic_ns()
+        terminal = op["status"] in {"succeeded", "rejected", "failed_known", "result_unknown"}
+        ended_at = previous["ended_at"]
+        duration_ms = previous["duration_ms"]
+        if terminal and not ended_at:
+            ended_at = op.get("endedAt") or self._now()
+            duration_ms = op.get("durationMs") if op.get("durationMs") is not None else max(0, int((time.monotonic_ns() - accepted_mono) / 1_000_000))
         self._conn.execute(
-            "UPDATE operations SET status=?, error_code=?, error_message=?, result_json=?, case_ref=? WHERE operation_id=?",
-            (op["status"], op.get("errorCode") or op.get("error_code"), op.get("errorMessage") or op.get("error_message"), op.get("resultJson") or op.get("result_json"), op.get("caseRef") or op.get("case_ref"), operation_id),
+            "UPDATE operations SET status=?, accepted_at=?, ended_at=?, accepted_monotonic_ns=?, duration_ms=?, agent_turn_id=?, decision_reason=?, model_duration_ms=?, model_retry_count=?, error_code=?, error_message=?, result_json=?, case_ref=? WHERE operation_id=?",
+            (op["status"], accepted_at, ended_at, accepted_mono, duration_ms, op.get("agentTurnId") or op.get("agent_turn_id") or previous["agent_turn_id"], op.get("decisionReason") or op.get("decision_reason") or previous["decision_reason"], (op.get("modelTelemetry") or {}).get("durationMs", previous["model_duration_ms"]), (op.get("modelTelemetry") or {}).get("retryCount", previous["model_retry_count"]), op.get("errorCode") or op.get("error_code"), op.get("errorMessage") or op.get("error_message"), op.get("resultJson") if op.get("resultJson") is not None else (op.get("result_json") if op.get("result_json") is not None else previous["result_json"]), op.get("caseRef") or op.get("case_ref") or previous["case_ref"], operation_id),
         )
+        if not previous["ended_at"] and ended_at:
+            event_op = dict(op)
+            event_op.update({"operationId": operation_id, "scanId": previous["scan_id"], "requestId": previous["request_id"], "tool": previous["tool"], "operationKind": previous["operation_kind"], "acceptedAt": accepted_at, "endedAt": ended_at, "durationMs": duration_ms})
+            self._append_operation_event(event_op, "finish")
 
     def insert_page_inspection(self, page_state: dict, inspection: dict, entrypoints: list[dict], candidates: list[dict]) -> None:
         self._conn.execute("INSERT OR IGNORE INTO page_states(page_state_id,scan_id,entity_json,inspection_json) VALUES(?,?,?,?)",
@@ -348,10 +406,31 @@ class SQLiteStore:
             "INSERT INTO assessments(assessment_id,scan_id,object_id,rule_id,rule_version,entity_json) VALUES(?,?,?,?,?,?)",
             (assessment["assessmentId"], assessment["scanId"], assessment["objectRef"], assessment["rule"]["ruleId"], assessment["rule"]["version"], json.dumps(assessment, ensure_ascii=False, separators=(",", ":"))),
         )
+        scan = self._conn.execute("SELECT run_id FROM scans WHERE scan_id=?", (assessment["scanId"],)).fetchone()
+        if scan:
+            self._append_runtime_event_raw({
+                "eventId": f"event-{uuid.uuid4().hex}", "scanId": assessment["scanId"], "runId": scan["run_id"],
+                "sequence": self._next_event_sequence(assessment["scanId"]), "occurredAt": assessment.get("decidedAt") or self._now(),
+                "monotonicOffsetMs": self._monotonic_offset_ms(assessment["scanId"]), "source": "host", "category": "decision",
+                "name": "assessment.committed", "phase": "finish", "severity": "info", "outcome": "succeeded",
+                "summary": f"Assessment committed: {assessment['result']}", "correlation": {
+                    "operationId": assessment["commitOperationRef"], "objectRef": assessment["objectRef"],
+                    "assessmentRef": assessment["assessmentId"], "findingRefs": assessment["findingRefs"],
+                    "evidenceRefs": assessment["evidenceRefs"], "caseRef": assessment["caseRefs"][0],
+                }, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"},
+                "attributes": {"result": assessment["result"], "coverageComplete": assessment["coverage"]["complete"]},
+                "durationMs": 0,
+            })
 
     def get_assessment(self, assessment_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM assessments WHERE assessment_id=?", (assessment_id,)).fetchone()
         return json.loads(row[0]) if row else None
+
+    def update_assessment(self, assessment: dict) -> None:
+        self._conn.execute(
+            "UPDATE assessments SET entity_json=? WHERE assessment_id=?",
+            (json.dumps(assessment, ensure_ascii=False, separators=(",", ":")), assessment["assessmentId"]),
+        )
 
     def get_assessment_for_object_rule(self, scan_id: str, object_id: str, rule: dict) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM assessments WHERE scan_id=? AND object_id=? AND rule_id=? AND rule_version=?", (scan_id, object_id, rule["ruleId"], rule["version"])).fetchone()
@@ -362,15 +441,32 @@ class SQLiteStore:
             "INSERT INTO issues(issue_id,scan_id,assessment_id,object_id,entity_json) VALUES(?,?,?,?,?)",
             (issue["issueId"], issue["scanId"], issue["assessmentRef"], issue["objectRef"], json.dumps(issue, ensure_ascii=False, separators=(",", ":"))),
         )
+        scan = self._conn.execute("SELECT run_id FROM scans WHERE scan_id=?", (issue["scanId"],)).fetchone()
+        if scan:
+            self._append_runtime_event_raw({
+                "eventId": f"event-{uuid.uuid4().hex}", "scanId": issue["scanId"], "runId": scan["run_id"],
+                "sequence": self._next_event_sequence(issue["scanId"]), "occurredAt": issue.get("createdAt") or self._now(),
+                "monotonicOffsetMs": self._monotonic_offset_ms(issue["scanId"]), "source": "host", "category": "decision",
+                "name": "issue.created", "phase": "instant", "severity": "info", "outcome": "succeeded",
+                "summary": "Issue projection created from committed Assessment", "correlation": {
+                    "assessmentRef": issue["assessmentRef"], "objectRef": issue["objectRef"], "evidenceRefs": issue["evidenceRefs"],
+                }, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"}, "attributes": {},
+            })
 
     def get_issue(self, issue_id: str) -> dict | None:
         row = self._conn.execute("SELECT entity_json FROM issues WHERE issue_id=?", (issue_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def update_issue(self, issue: dict) -> None:
+        self._conn.execute(
+            "UPDATE issues SET entity_json=? WHERE issue_id=?",
+            (json.dumps(issue, ensure_ascii=False, separators=(",", ":")), issue["issueId"]),
+        )
+
     def list_entities(self, table: str, scan_id: str | None = None) -> list[dict]:
         allowed = {"page_states", "entrypoints", "page_candidates", "audit_objects", "object_verifications", "reverse_cases", "action_attempts", "request_observations", "evidence", "screenshots", "dimension_findings", "pending_decisions", "assessments", "issues"}
         if table not in allowed:
-            raise ValueError("不允许读取未知实体表")
+            raise ValueError("Reading an unknown entity table is not allowed")
         if scan_id is None:
             rows = self._conn.execute(f"SELECT entity_json FROM {table} ORDER BY rowid").fetchall()
         else:
@@ -380,6 +476,151 @@ class SQLiteStore:
     def list_operations(self, scan_id: str) -> list[dict]:
         rows = self._conn.execute("SELECT * FROM operations WHERE scan_id=? ORDER BY rowid", (scan_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    def list_runtime_events(self, scan_id: str) -> list[dict]:
+        rows = self._conn.execute("SELECT event_json FROM runtime_events WHERE scan_id=? ORDER BY sequence", (scan_id,)).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def append_runtime_event(self, event: dict) -> dict:
+        """Persist a trusted component event under the Host-owned sequence."""
+        normalized = dict(event)
+        normalized["eventId"] = normalized.get("eventId") or f"event-{uuid.uuid4().hex}"
+        normalized["sequence"] = self._next_event_sequence(normalized["scanId"])
+        normalized["occurredAt"] = normalized.get("occurredAt") or self._now()
+        normalized["monotonicOffsetMs"] = self._monotonic_offset_ms(normalized["scanId"])
+        self._append_runtime_event_raw(normalized)
+        return normalized
+
+    def ensure_integrity_event(self, scan: dict) -> None:
+        existing = self._conn.execute("SELECT 1 FROM runtime_events WHERE scan_id=? AND json_extract(event_json, '$.name')='integrity.validation.completed'", (scan["scanId"],)).fetchone()
+        if existing:
+            return
+        self._append_runtime_event(scan, "integrity", "integrity.validation.completed", "instant", "warning", "succeeded", "Runtime event integrity validation completed with declared limitations")
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _append_agent_decision_events(self, op: dict) -> None:
+        reason = op.get("decisionReason")
+        turn_id = op.get("agentTurnId")
+        if not isinstance(reason, str) or not reason.strip() or not turn_id:
+            return
+        scan_id = op["scanId"]
+        scan = self._conn.execute("SELECT run_id FROM scans WHERE scan_id=?", (scan_id,)).fetchone()
+        if not scan:
+            return
+        correlation = {"agentTurnId": turn_id, "requestId": op["requestId"], "operationId": op["operationId"]}
+        event = {
+            "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
+            "sequence": self._next_event_sequence(scan_id), "occurredAt": op.get("acceptedAt") or self._now(),
+            "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "source": "agent", "category": "decision",
+            "name": "agent.decision.recorded", "phase": "instant", "severity": "info", "outcome": "succeeded",
+            "summary": self._sanitize_summary(reason), "correlation": correlation,
+            "privacy": {"classification": "internal", "sanitizationStatus": "sanitized"},
+            "attributes": {"tool": op["tool"]},
+        }
+        self._append_runtime_event_raw(event)
+        telemetry = op.get("modelTelemetry") or {}
+        if telemetry.get("durationMs") is not None:
+            model_event = {
+                "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
+                "sequence": self._next_event_sequence(scan_id), "occurredAt": op.get("acceptedAt") or self._now(),
+                "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "durationMs": telemetry["durationMs"],
+                "source": "model", "category": "model", "name": "model.call.finished", "phase": "finish",
+                "severity": "info", "outcome": "succeeded", "summary": "Model produced a public tool decision",
+                "correlation": correlation, "privacy": {"classification": "sensitive_metadata", "sanitizationStatus": "not_required"},
+                "attributes": {"retryCount": telemetry.get("retryCount", 0)},
+            }
+            self._append_runtime_event_raw(model_event)
+
+    @staticmethod
+    def _sanitize_summary(value: str) -> str:
+        sanitized = " ".join(value.strip().split())[:1024]
+        sanitized = re.sub(r"(?i)(password|passwd|token|secret|cookie|authorization)\s*[=:]\s*[^\s,;]+", r"\1=[REDACTED]", sanitized)
+        return sanitized or "Agent recorded a tool decision"
+
+    def _append_operation_event(self, op: dict, phase: str) -> None:
+        scan_id = op.get("scanId") or op.get("scan_id")
+        scan = self._conn.execute("SELECT run_id FROM scans WHERE scan_id=?", (scan_id,)).fetchone()
+        if not scan:
+            return
+        status = op.get("status")
+        if phase == "start":
+            outcome, severity, summary = "started", "info", f"Operation started: {op.get('tool', 'unknown')}"
+        else:
+            outcome = {"succeeded": "succeeded", "rejected": "rejected", "failed_known": "failed", "result_unknown": "unknown"}.get(status, "unknown")
+            severity = "info" if outcome == "succeeded" else ("warning" if outcome == "rejected" else "error")
+            summary = f"Operation finished: {op.get('tool', 'unknown')} ({status})"
+        correlation = {"requestId": op.get("requestId") or op.get("request_id"), "operationId": op.get("operationId") or op.get("operation_id")}
+        correlation = {key: value for key, value in correlation.items() if value}
+        event = {
+            "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
+            "sequence": self._next_event_sequence(scan_id),
+            "occurredAt": op.get("acceptedAt") if phase == "start" else (op.get("endedAt") or self._now()),
+            "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "source": "host", "category": "tool", "name": "operation.started" if phase == "start" else "operation.finished",
+            "phase": phase, "severity": severity, "outcome": outcome, "summary": summary[:1024],
+            "correlation": correlation, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"}, "attributes": {"tool": op.get("tool", "unknown"), "status": status or "unknown"},
+        }
+        if phase == "finish":
+            event["durationMs"] = max(0, int(op.get("durationMs") or 0))
+        self._append_runtime_event_raw(event)
+        kind = op.get("operationKind") or op.get("operation_kind")
+        if kind in {"browser_action", "recovery"}:
+            category = "browser" if kind == "browser_action" else "recovery"
+            phase_event = dict(event)
+            phase_event.update({
+                "eventId": f"event-{uuid.uuid4().hex}", "sequence": self._next_event_sequence(scan_id),
+                "source": category, "category": category,
+                "name": f"{category}.operation.started" if phase == "start" else f"{category}.operation.finished",
+                "summary": f"{category.replace('_', ' ').title()} operation {phase}: {op.get('tool', 'unknown')}",
+            })
+            self._append_runtime_event_raw(phase_event)
+        if phase == "finish" and op.get("tool") == "perform_action" and outcome == "succeeded":
+            gate_event = {
+                "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
+                "sequence": self._next_event_sequence(scan_id), "occurredAt": op.get("endedAt") or self._now(),
+                "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "source": "host", "category": "safety",
+                "name": "host.gate.passed", "phase": "instant", "severity": "info", "outcome": "succeeded",
+                "summary": "Host safety gate allowed browser action", "correlation": correlation,
+                "privacy": {"classification": "internal", "sanitizationStatus": "not_required"},
+                "attributes": {"tool": op.get("tool", "unknown"), "status": status or "unknown"},
+            }
+            self._append_runtime_event_raw(gate_event)
+        if phase == "finish" and outcome in {"rejected", "failed", "unknown"}:
+            code = op.get("errorCode") or op.get("error_code") or "OPERATION_FAILED"
+            gate_event = {
+                "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
+                "sequence": self._next_event_sequence(scan_id), "occurredAt": op.get("endedAt") or self._now(),
+                "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "source": "host", "category": "safety",
+                "name": "host.gate.rejected", "phase": "instant", "severity": severity,
+                "outcome": "blocked" if outcome != "unknown" else "unknown", "summary": f"Host gate stopped operation: {code}",
+                "correlation": correlation, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"},
+                "attributes": {"tool": op.get("tool", "unknown"), "errorCode": code},
+            }
+            self._append_runtime_event_raw(gate_event)
+
+    def _append_runtime_event(self, scan: dict, category: str, name: str, phase: str, severity: str, outcome: str, summary: str) -> None:
+        event = {
+            "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan["scanId"], "runId": scan["runId"],
+            "sequence": self._next_event_sequence(scan["scanId"]), "occurredAt": self._now(), "monotonicOffsetMs": self._monotonic_offset_ms(scan["scanId"]),
+            "source": "host", "category": category, "name": name, "phase": phase, "severity": severity,
+            "outcome": outcome, "summary": summary[:1024], "privacy": {"classification": "internal", "sanitizationStatus": "not_required"}, "attributes": {},
+        }
+        if phase == "finish":
+            event["durationMs"] = 0
+        self._append_runtime_event_raw(event)
+
+    def _next_event_sequence(self, scan_id: str) -> int:
+        row = self._conn.execute("SELECT COALESCE(MAX(sequence), 0) + 1 FROM runtime_events WHERE scan_id=?", (scan_id,)).fetchone()
+        return int(row[0])
+
+    def _monotonic_offset_ms(self, scan_id: str) -> int:
+        row = self._conn.execute("SELECT started_monotonic_ns FROM scans WHERE scan_id=?", (scan_id,)).fetchone()
+        return max(0, int((time.monotonic_ns() - row[0]) / 1_000_000)) if row and row[0] else 0
+
+    def _append_runtime_event_raw(self, event: dict) -> None:
+        self._conn.execute("INSERT INTO runtime_events(event_id,scan_id,run_id,sequence,event_json) VALUES(?,?,?,?,?)", (event["eventId"], event["scanId"], event["runId"], event["sequence"], json.dumps(event, ensure_ascii=False, separators=(",", ":"))))
 
     def insert_bootstrap_key(self, key: str, operation_id: str, digest: str) -> None:
         self._conn.execute("INSERT INTO bootstrap_idempotency(idempotency_key,operation_id,request_digest) VALUES(?,?,?)", (key, operation_id, digest))

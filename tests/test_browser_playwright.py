@@ -10,15 +10,17 @@ from pathlib import Path
 
 from assayer_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
                           HostCore, HostError, LoginResult, LoginSecret,
-                          PlaywrightBrowserBackend,
+                          PlaywrightBrowserBackend, ProductMcpToolTransport, RuntimeRouter,
                           create_recoverable_browser_adapter_bundle)
 
 
 PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
 <body><main><h1>Orders</h1><form role='search' aria-label='Order filters'>
 <label>Order number <input name='order-number'></label>
-<button type='button'>Query</button><button type='reset'>Reset</button>
-</form><table><tbody><tr><td>Order result</td></tr></tbody></table></main></body></html>"""
+<label>Status <select name='status'><option value=''>All</option><option value='open'>Open</option><option value='closed'>Closed</option></select></label>
+<button type='button' onclick="document.querySelector('tbody').innerHTML='<tr><td>Filtered result</td></tr>'">Query</button>
+<button type='reset' onclick="document.querySelector('tbody').innerHTML='<tr><td>Order result</td></tr><tr><td>Second result</td></tr>'">Reset</button>
+</form><table><tbody><tr><td>Order result</td></tr><tr><td>Second result</td></tr></tbody></table></main></body></html>"""
 
 WEBSOCKET_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>WebSocket Orders</title></head>
 <body><main><form role='search' aria-label='Order filters'><button type='button'>Query</button></form></main>
@@ -28,11 +30,17 @@ HASH_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Hash Orders</titl
 <body><main><form role='search' aria-label='Hash filters'><input><button type='button'>Query</button><button type='reset'>Reset</button></form>
 <table><tbody><tr><td>Hash result</td></tr></tbody></table></main></body></html>"""
 
+READONLY_CONTROL_PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Readonly Filters</title></head>
+<body><main><form role='search' aria-label='Readonly filters'>
+<label>Status <input readonly value='Pending'></label><label>Applicant <input></label>
+<button type='button'>Query</button><button type='reset'>Reset</button>
+</form><table><tbody><tr><td>Pending request</td></tr></tbody></table></main></body></html>"""
+
 TAB_PAGE = b"""<!doctype html><html><head><title>Tab App</title></head><body>
 <nav><a class='workspace-tabs__item active' onclick='show(0)'>Overview</a><a class='workspace-tabs__item' onclick='show(1)'>Details</a></nav>
 <main id='content'>Loading</main><script>
 const tabs=[...document.querySelectorAll('.workspace-tabs__item')];
-function show(index){tabs.forEach((tab,i)=>tab.classList.toggle('active',i===index));if(index===1){fetch('/tab-data').then(r=>r.text()).then(v=>content.innerHTML=`<form role="search" aria-label="Detail filters"><label>${v}<input></label><button type="button">Query</button></form>`);}}
+function show(index){tabs.forEach((tab,i)=>tab.classList.toggle('active',i===index));if(index===1){fetch('/tab-data').then(r=>r.text()).then(v=>content.innerHTML=`<form role="search" aria-label="Detail filters"><label>${v}<input value="pending"></label><button type="button">Query</button><button type="button" onclick="this.form.querySelector('input').value=''">Reset</button></form>`);}}
 fetch('/startup-data').then(r=>r.text()).then(v=>content.textContent=v);
 </script></body></html>"""
 
@@ -82,6 +90,8 @@ class SiteHandler(BaseHTTPRequestHandler):
             body = WEBSOCKET_PAGE
         elif self.path == "/hash-app":
             body = HASH_PAGE
+        elif self.path == "/readonly-control-page":
+            body = READONLY_CONTROL_PAGE
         elif self.path == "/tab-app":
             body = TAB_PAGE
         elif self.path == "/startup-data":
@@ -131,9 +141,21 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         try:
-            import playwright.sync_api  # noqa: F401
+            from playwright.sync_api import sync_playwright
         except ImportError:
             raise unittest.SkipTest("Playwright optional dependency is not installed")
+        with sync_playwright() as playwright:
+            executable = Path(playwright.chromium.executable_path)
+            if executable.is_file():
+                # Complete one real browser lifecycle before leaving Playwright.
+                # Merely reading executable_path and stopping immediately can
+                # leave Playwright 1.62's connection initializer pending.
+                browser = playwright.chromium.launch(
+                    channel="chromium", headless=True, timeout=30_000,
+                )
+                browser.close()
+        if not executable.is_file():
+            raise unittest.SkipTest("Playwright Chromium is not installed")
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), SiteHandler)
         SiteHandler.server_port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -148,10 +170,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         session = BrowserSession("scan-live", BrowserProfile(), backend=PlaywrightBrowserBackend())
         try:
-            try:
-                session.open()
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            session.open()
             bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             vault = CredentialVault()
             vault.put("credential-live", LoginSecret("local-user", "local-password"))
@@ -184,6 +203,11 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     })
                     self.assertEqual(page["route"], "/orders")
                     self.assertEqual(verified["result"]["rebindStatus"], "matched")
+                    self.assertEqual(
+                        [item["semanticAction"] for item in verified["result"]["controls"]],
+                        ["filter_input", "filter_input", "query", "reset"],
+                    )
+                    self.assertEqual(verified["result"]["lists"][0]["relationship"], "same_container")
                     stored = core._store.get_page_state(started["currentPageStateId"])
                     self.assertEqual(stored["url"], f"{origin}/orders")
                     self.assertNotIn("ticket", json.dumps(stored))
@@ -227,10 +251,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
     def test_real_url_runtime_assembles_anonymous_browser_core(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         with tempfile.TemporaryDirectory() as output:
-            try:
-                runtime = BrowserHostRuntime(f"{origin}/orders", output)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            runtime = BrowserHostRuntime(f"{origin}/orders", output)
             try:
                 invalid = {
                     "protocolVersion": "1.0", "requestId": "runtime-invalid", "agentTurnId": "runtime-invalid",
@@ -254,15 +275,94 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 runtime.close()
             self.assertEqual(runtime.session.state, "closed")
 
+    def test_dynamic_router_binds_real_browser_at_start_and_fails_abandoned_scan(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        with tempfile.TemporaryDirectory() as output_root:
+            router = RuntimeRouter(output_root, lease_timeout_seconds=60)
+            try:
+                started_response = router.handle({
+                    "protocolVersion": "1.0", "requestId": "router-live-start",
+                    "agentTurnId": "router-live-turn-1", "tool": "start_audit",
+                    "idempotencyKey": "router-live-start",
+                    "input": {"url": f"{origin}/orders", "ruleRegistryVersion": "1.0.0",
+                              "outputDir": "auto", "browserProfile": "default", "authMode": "anonymous"},
+                })
+                self.assertEqual(started_response["status"], "ok")
+                started = started_response["result"]
+                page = router.handle({
+                    "protocolVersion": "1.0", "requestId": "router-live-page",
+                    "scanId": started["scanId"], "runId": started["runId"],
+                    "agentTurnId": "router-live-turn-2", "tool": "inspect_page",
+                    "idempotencyKey": "router-live-page", "expectedRunRevision": started["runRevision"],
+                    "input": {"pageStateId": started["currentPageStateId"], "include": ["route", "objects"]},
+                })
+                self.assertEqual(page["status"], "ok")
+                self.assertEqual(page["result"]["route"], "/orders")
+                scan_output = Path(output_root).resolve() / started["scanId"]
+                self.assertTrue(scan_output.is_dir())
+                self.assertEqual(scan_output.parent, Path(output_root).resolve())
+            finally:
+                router.close()
+            state = router.protocol_state(started["scanId"], started["runId"])
+            self.assertEqual(state["scanStatus"], "failed")
+
+    def test_product_mcp_facade_starts_real_browser_from_url_only(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        with tempfile.TemporaryDirectory() as output_root:
+            router = RuntimeRouter(output_root, lease_timeout_seconds=60)
+            adapter = ProductMcpToolTransport(router)
+            try:
+                started = adapter.call_tool("start_audit", {
+                    "url": f"{origin}/orders",
+                    "decisionReason": "Start the requested anonymous frontend audit.",
+                })["structuredContent"]
+                self.assertEqual(started["status"], "ok")
+                self.assertNotIn("protocolVersion", started)
+                self.assertNotIn("scanId", started["result"])
+                page = adapter.call_tool("inspect_page", {
+                    "pageStateId": started["result"]["currentPageStateId"],
+                    "include": ["route", "objects"],
+                    "decisionReason": "Inspect the current page and discover objects.",
+                })["structuredContent"]
+                self.assertEqual(page["status"], "ok")
+                self.assertEqual(page["result"]["route"], "/orders")
+                self.assertEqual(len(page["result"]["candidateRefs"]), 1)
+            finally:
+                adapter.close()
+
+    def test_real_router_lease_expiry_fails_scan_without_partial_or_ledger(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        with tempfile.TemporaryDirectory() as output_root:
+            router = RuntimeRouter(output_root, lease_timeout_seconds=0.2)
+            try:
+                started_response = router.handle({
+                    "protocolVersion": "1.0", "requestId": "lease-start",
+                    "agentTurnId": "lease-turn-1", "tool": "start_audit",
+                    "idempotencyKey": "lease-start",
+                    "input": {"url": f"{origin}/orders", "ruleRegistryVersion": "1.0.0",
+                              "outputDir": "auto", "browserProfile": "default", "authMode": "anonymous"},
+                })
+                started = started_response["result"]
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    router.sweep_expired()
+                    state = router.protocol_state(started["scanId"], started["runId"])
+                    if state and state["scanStatus"] == "failed":
+                        break
+                    time.sleep(0.05)
+                state = router.protocol_state(started["scanId"], started["runId"])
+                self.assertEqual(state["scanStatus"], "failed")
+                self.assertNotEqual(state["scanStatus"], "partial")
+                self.assertFalse((Path(output_root) / started["scanId"] / "audit-ledger.json").exists())
+            finally:
+                router.close()
+
     def test_real_url_runtime_blocks_websocket_without_navigation_deadlock(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         SiteHandler.websocket_handshakes = 0
         profile = BrowserProfile(navigation_timeout_ms=3_000, operation_timeout_ms=3_000)
         with tempfile.TemporaryDirectory() as output:
-            try:
-                runtime = BrowserHostRuntime(f"{origin}/websocket-page", output, profile=profile)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            runtime = BrowserHostRuntime(f"{origin}/websocket-page", output, profile=profile)
             started_at = time.monotonic()
             try:
                 result = runtime.probe(f"{origin}/websocket-page")
@@ -278,10 +378,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         url = f"{origin}/hash-app#/workspace?token=secret"
         with tempfile.TemporaryDirectory() as output:
-            try:
-                runtime = BrowserHostRuntime(url, output)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            runtime = BrowserHostRuntime(url, output)
             try:
                 result = runtime.probe(url)
                 self.assertEqual(result["status"], "ok")
@@ -297,10 +394,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         SiteHandler.startup_reads = 0
         SiteHandler.tab_reads = 0
         with tempfile.TemporaryDirectory() as output:
-            try:
-                runtime = BrowserHostRuntime(f"{origin}/tab-app", output)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            runtime = BrowserHostRuntime(f"{origin}/tab-app", output)
             try:
                 result = runtime.probe(f"{origin}/tab-app")
                 self.assertEqual(result["status"], "ok")
@@ -317,28 +411,18 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
             finally:
                 runtime.close()
 
-    def test_real_url_runtime_completes_rule_driven_lifecycle_without_site_adapter(self):
+    def test_real_url_runtime_smoke_does_not_create_agent_assessments(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         with tempfile.TemporaryDirectory() as output:
+            runtime = BrowserHostRuntime(f"{origin}/orders", output)
             try:
-                runtime = BrowserHostRuntime(f"{origin}/orders", output)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
-            try:
-                response = runtime.audit(f"{origin}/orders")
+                response = runtime.smoke(f"{origin}/orders")
                 self.assertEqual(response["status"], "ok")
-                self.assertEqual(response["result"]["completion"]["scanStatus"], "completed")
-                self.assertEqual(response["result"]["assessmentCount"], 1)
-                self.assertEqual(response["result"]["pages"][0]["decisions"][0]["result"], "scanned_no_issue")
-                ledger = json.loads((Path(output) / "audit-ledger.json").read_text())
-                self.assertEqual(ledger["assessments"][0]["result"], "scanned_no_issue")
-                tools = [item["tool"] for item in ledger["operations"]]
-                for expected in ("begin_case", "perform_action", "capture_evidence", "restore_case",
-                                 "prepare_decision", "commit_decision", "complete_audit"):
-                    self.assertIn(expected, tools)
-                self.assertEqual(len(ledger["screenshots"]), 1)
-                self.assertEqual(ledger["screenshots"][0]["sanitizationStatus"], "not_performed")
-                self.assertFalse(any(path.suffix == ".html" for path in Path(output).rglob("*")))
+                self.assertEqual(response["result"]["mode"], "host_smoke")
+                self.assertFalse(response["result"]["publishable"])
+                self.assertEqual(response["result"]["assessmentCount"], 0)
+                self.assertEqual(response["result"]["issueCount"], 0)
+                self.assertFalse((Path(output) / "audit-ledger.json").exists())
             finally:
                 runtime.close()
 
@@ -346,18 +430,74 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         url = f"{origin}/hash-app#/workspace?token=secret"
         with tempfile.TemporaryDirectory() as output:
+            runtime = BrowserHostRuntime(url, output)
             try:
-                runtime = BrowserHostRuntime(url, output)
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
-            try:
-                response = runtime.audit(url)
+                response = runtime.smoke(url)
                 self.assertEqual(response["status"], "ok")
-                self.assertEqual(response["result"]["completion"]["scanStatus"], "completed")
-                ledger = json.loads((Path(output) / "audit-ledger.json").read_text())
-                self.assertEqual(ledger["cases"][0]["recovery"]["finalStatus"], "restored")
-                self.assertNotIn("token", json.dumps(ledger))
-                self.assertNotIn("secret", json.dumps(ledger))
+                self.assertEqual(response["result"]["mode"], "host_smoke")
+                self.assertFalse(response["result"]["publishable"])
+                self.assertNotIn("token", json.dumps(response))
+                self.assertNotIn("secret", json.dumps(response))
+            finally:
+                runtime.close()
+
+    def test_real_chromium_refresh_replays_active_tab_for_case_restore(self):
+        origin = f"http://127.0.0.1:{self.server.server_port}"
+        url = f"{origin}/tab-app"
+        with tempfile.TemporaryDirectory() as output:
+            runtime = BrowserHostRuntime(url, output)
+            try:
+                start = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-start", "agentTurnId": "tab-restore-1",
+                    "tool": "start_audit", "idempotencyKey": "tab-restore-start",
+                    "input": {"url": url, "ruleRegistryVersion": "1.0.0", "outputDir": output,
+                              "browserProfile": "default", "authMode": "anonymous"},
+                })["result"]
+                page = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-page", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-2", "tool": "inspect_page",
+                    "idempotencyKey": "tab-restore-page", "expectedRunRevision": start["runRevision"],
+                    "input": {"pageStateId": start["currentPageStateId"], "include": ["safeEntrypoints"]},
+                })["result"]
+                details = next(item for item in page["entrypoints"] if item["label"] == "Details")
+                explored = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-explore", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-3", "tool": "explore_entrypoint",
+                    "idempotencyKey": "tab-restore-explore", "expectedRunRevision": start["runRevision"],
+                    "input": {"pageStateId": start["currentPageStateId"], "entrypointId": details["entrypointId"]},
+                })["result"]
+                inspected = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-object", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-4", "tool": "inspect_object",
+                    "idempotencyKey": "tab-restore-object", "expectedRunRevision": explored["runRevision"],
+                    "input": {"candidateId": explored["candidateRefs"][0]},
+                })["result"]
+                case = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-case", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-5", "tool": "begin_case",
+                    "idempotencyKey": "tab-restore-case", "expectedRunRevision": explored["runRevision"],
+                    "input": {"objectId": inspected["objectId"], "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                              "kind": "observation", "purpose": "Verify active-tab replay recovery", "plannedCoverageDimensions": ["filter_present"]},
+                })["result"]
+                reset = next(item for item in inspected["controls"] if item["semanticAction"] == "reset")
+                action = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-action", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-6", "tool": "perform_action",
+                    "idempotencyKey": "tab-restore-action", "expectedRunRevision": case["runRevision"],
+                    "input": {"pageStateId": explored["pageStateId"], "caseId": case["caseId"],
+                              "objectId": inspected["objectId"], "type": "activate_reset", "intent": "Verify active-tab replay recovery",
+                              "parameters": {"controlRef": reset["controlRef"]}},
+                })["result"]
+                restored = runtime.handle({
+                    "protocolVersion": "1.0", "requestId": "tab-restore-finish", "scanId": start["scanId"],
+                    "runId": start["runId"], "agentTurnId": "tab-restore-7", "tool": "restore_case",
+                    "idempotencyKey": "tab-restore-finish", "expectedRunRevision": action["runRevision"],
+                    "input": {"caseId": case["caseId"], "pageStateId": explored["pageStateId"],
+                              "objectId": inspected["objectId"], "fallback": "refresh_and_replay_safe_entrypoints"},
+                })
+                self.assertEqual(restored["status"], "ok")
+                self.assertEqual(restored["result"]["finalStatus"], "restored")
+                self.assertEqual(runtime.core._store.get_case(case["caseId"])["recovery"]["attempts"][-1]["outcome"], "restored")
             finally:
                 runtime.close()
 
@@ -366,10 +506,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         profile = BrowserProfile(navigation_timeout_ms=100, operation_timeout_ms=100)
         session = BrowserSession("scan-timeout", profile, backend=PlaywrightBrowserBackend())
         try:
-            try:
-                session.open()
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            session.open()
             bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             with self.assertRaises(BrowserSessionFailure):
                 bundle.page.navigate(f"{origin}/slow-page")
@@ -381,10 +518,7 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         session = BrowserSession("scan-crash", BrowserProfile(), backend=PlaywrightBrowserBackend())
         try:
-            try:
-                context = session.open()
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            context = session.open()
             bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             bundle.page.navigate(f"{origin}/orders")
             bundle.page.observe("page-crash-001")
@@ -397,14 +531,12 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         finally:
             session.close()
 
-    def _run_action(self, page_name, action_type="expand", restore=False, return_case=False, capture=False, return_evidence=False):
+    def _run_action(self, page_name, action_type="expand", restore=False, return_case=False, capture=False,
+                    return_evidence=False, parameters=None, pre_actions=None):
         origin = f"http://127.0.0.1:{self.server.server_port}"
         session = BrowserSession(f"scan-{page_name}", BrowserProfile(), backend=PlaywrightBrowserBackend())
         try:
-            try:
-                session.open()
-            except Exception as error:
-                self.skipTest(f"Playwright Chromium is not installed: {type(error).__name__}")
+            session.open()
             bundle = create_recoverable_browser_adapter_bundle(session, allowed_origin=origin)
             vault = CredentialVault()
             vault.put(f"credential-{page_name}", LoginSecret("local-user", "local-password"))
@@ -439,17 +571,23 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                         "protocolVersion": "1.0", "requestId": f"{page_name}-case", "scanId": started["scanId"],
                         "runId": started["runId"], "agentTurnId": "turn-action-4", "tool": "begin_case",
                         "idempotencyKey": f"{page_name}-case", "expectedRunRevision": 1,
-                        "input": {"objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.0.0"},
-                                  "kind": "observation", "purpose": "验证筛选动作",
+                        "input": {"objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                                  "kind": "observation", "purpose": "Verify filter actions",
                                   "plannedCoverageDimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"]},
                     })["result"]
-                    result = core.handle({
-                        "protocolVersion": "1.0", "requestId": f"{page_name}-action", "scanId": started["scanId"],
-                        "runId": started["runId"], "agentTurnId": "turn-action-5", "tool": "perform_action",
-                        "idempotencyKey": f"{page_name}-action", "expectedRunRevision": 2,
-                        "input": {"pageStateId": started["currentPageStateId"], "caseId": case["caseId"],
-                                  "objectId": object_id, "type": action_type, "intent": "观察筛选区", "parameters": {}},
-                    })
+                    result = None
+                    actions = list(pre_actions or []) + [(action_type, parameters or {})]
+                    revision = 2
+                    for action_index, (current_type, current_parameters) in enumerate(actions):
+                        result = core.handle({
+                            "protocolVersion": "1.0", "requestId": f"{page_name}-action-{action_index}", "scanId": started["scanId"],
+                            "runId": started["runId"], "agentTurnId": f"turn-action-{5 + action_index}", "tool": "perform_action",
+                            "idempotencyKey": f"{page_name}-action-{action_index}", "expectedRunRevision": revision,
+                            "input": {"pageStateId": started["currentPageStateId"], "caseId": case["caseId"],
+                                      "objectId": object_id, "type": current_type, "intent": "Observe the filter region",
+                                      "parameters": current_parameters},
+                        })
+                        revision = result["runRevision"]
                     persisted_evidence = None
                     if capture:
                         result = core.handle({
@@ -471,6 +609,8 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                     if return_case:
                         return result, core._store.get_case(case["caseId"])
                     if return_evidence:
+                        if persisted_evidence is None and result.get("result", {}).get("interactionEvidenceRef"):
+                            persisted_evidence = core._store.get_evidence(result["result"]["interactionEvidenceRef"])
                         return result, persisted_evidence
                     return result
                 finally:
@@ -527,6 +667,70 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
         self.assertEqual(evidence["kind"], "runtime_dom")
         self.assertTrue(evidence.get("caseRef"))
         self.assertNotIn("screenshotRefs", evidence)
+
+    def test_real_chromium_synthetic_input_uses_opaque_ref_and_targeted_restore(self):
+        result, case = self._run_action(
+            "orders", action_type="input_synthetic_value", restore=True, return_case=True,
+            parameters={"controlRef": "control-browser-0-0", "valueClass": "valid"},
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(case["actions"][0]["inverseAction"]["type"], "restore_value")
+        self.assertEqual(len(case["actions"][0]["resultEvidenceRefs"]), 1)
+        self.assertEqual([item["method"] for item in case["recovery"]["attempts"]], ["targeted_inverse"])
+
+    def test_real_chromium_readonly_input_is_rejected_before_browser_action(self):
+        result = self._run_action(
+            "readonly-control", action_type="input_synthetic_value",
+            parameters={"controlRef": "control-browser-0-0", "valueClass": "valid"},
+        )
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "ACTION_BLOCKED")
+        self.assertEqual(result["runRevision"], 2)
+
+    def test_real_chromium_readonly_filter_still_exposes_editable_input(self):
+        result, case = self._run_action(
+            "readonly-control", action_type="input_synthetic_value", restore=True, return_case=True,
+            parameters={"controlRef": "control-browser-0-1", "valueClass": "valid"},
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(case["recovery"]["finalStatus"], "restored")
+
+    def test_real_chromium_query_records_list_difference_as_interaction_evidence(self):
+        result, evidence = self._run_action(
+            "orders", action_type="activate_query", return_evidence=True,
+            parameters={"controlRef": "control-browser-0-2"},
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(evidence["kind"], "runtime_interaction")
+        content = evidence["payload"]["content"]
+        self.assertEqual(content["actionType"], "activate_query")
+        self.assertEqual(content["diff"]["changedListRefs"], ["list-browser-0"])
+
+    def test_real_chromium_safe_option_selection_restores_original_selection(self):
+        result, case = self._run_action(
+            "orders", action_type="select_synthetic_option", restore=True, return_case=True,
+            parameters={"controlRef": "control-browser-0-1", "valueClass": "valid"},
+        )
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["finalStatus"], "restored")
+        self.assertEqual(case["actions"][0]["inverseAction"]["type"], "restore_value")
+
+    def test_real_chromium_reset_proves_control_and_list_restoration(self):
+        result, evidence = self._run_action(
+            "orders", action_type="activate_reset", return_evidence=True,
+            parameters={"controlRef": "control-browser-0-3"},
+            pre_actions=[
+                ("input_synthetic_value", {"controlRef": "control-browser-0-0", "valueClass": "valid"}),
+                ("activate_query", {"controlRef": "control-browser-0-2"}),
+            ],
+        )
+        self.assertEqual(result["status"], "ok")
+        content = evidence["payload"]["content"]
+        self.assertEqual(content["actionType"], "activate_reset")
+        self.assertTrue(content["diff"]["controlStateChanged"])
+        self.assertEqual(content["diff"]["changedListRefs"], ["list-browser-0"])
 
 
 if __name__ == "__main__":

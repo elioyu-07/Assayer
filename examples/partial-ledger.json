@@ -23,11 +23,11 @@
     "startedAt": "2026-08-30T12:00:00Z",
     "endedAt": "2026-08-30T12:20:00Z",
     "loginStatus": "succeeded",
-    "ruleRegistryDigest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "ruleRegistryDigest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "frozenRules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     ],
     "capabilities": [
@@ -45,7 +45,7 @@
           "entrypointId": "entry-partial-001",
           "reason": {
             "code": "CAPABILITY_MISSING",
-            "message": "交互能力不可用，无法安全完成覆盖。"
+            "message": "Interaction capability is unavailable, so coverage cannot be completed safely."
           }
         }
       ],
@@ -53,48 +53,47 @@
         {
           "rule": {
             "ruleId": "FUA-10",
-            "version": "1.0.0"
+            "version": "1.1.0"
           },
           "assessmentCount": 0,
           "resultCounts": {},
           "coverageComplete": false,
-          "reason": "缺少 interaction capability。"
+          "reason": "The interaction capability is missing."
         }
       ],
       "unprocessedEntrypointRefs": [
         "entry-partial-001"
       ],
-      "completionReason": "安全收束为 partial，未将能力缺失误报为通过。"
+      "completionReason": "Converged safely as partial without misreporting a capability gap as a pass."
     },
     "terminalReason": {
       "code": "COVERAGE_INCOMPLETE",
-      "message": "存在已披露的未完成范围。"
+      "message": "Disclosed unfinished scope remains."
     },
     "conclusionsValid": true
   },
   "ruleRegistry": {
     "registryId": "registry-001",
     "registryVersion": "1.0.0",
-    "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "digest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "createdAt": "2026-08-30T08:00:00Z",
     "rules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "enabled",
-        "name": "列表筛选必须同时提供查询和重置",
+        "name": "List filters must provide both query and reset",
         "owner": "product-owner",
-        "document": "rules/FUA-10.md",
+        "document": "rules/FUA-10-v1.1.md",
         "objectKinds": [
           "filter_region"
         ],
         "requiredCapabilities": [
           "runtime",
-          "dom",
-          "interaction"
+          "dom"
         ],
         "capabilityMissingOutcome": "needs_review",
-        "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+        "coverageContract": "rules/FUA-10-v1.1.md#minimum-coverage-contract",
         "coverageDimensions": [
           "filter_present",
           "query_action",
@@ -139,17 +138,17 @@
           "P2",
           "P3"
         ],
-        "regressionSuite": "rules/FUA-10.md#样本与回归",
-        "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
+        "regressionSuite": "rules/FUA-10-v1.1.md#samples-and-regression",
+        "contentDigest": "aa6071142da7d5b7a668765d0dfd9de5751dea28275486dc2847f276978e9232",
         "examples": {
           "positive": [
-            "筛选条件、查询和重置均存在"
+            "Filter conditions, query, and reset are all present"
           ],
           "negative": [
-            "筛选条件和查询存在，但没有重置"
+            "Filter conditions and query are present, but reset is absent"
           ],
           "regression": [
-            "对象身份歧义时必须 needs_review"
+            "Ambiguous object identity must produce needs_review"
           ]
         }
       }
@@ -162,7 +161,7 @@
       "url": "https://test.example.com/orders",
       "origin": "https://test.example.com",
       "route": "/orders",
-      "title": "订单列表",
+      "title": "Order list",
       "stateKind": "page",
       "observedAtRevision": 2,
       "observedAt": "2026-08-30T12:01:00Z",
@@ -174,12 +173,12 @@
       "safeEntrypoints": [
         {
           "entrypointId": "entry-partial-001",
-          "label": "进入筛选交互",
-          "intent": "安全打开筛选区",
+          "label": "Enter filter interaction",
+          "intent": "Open the filter region safely",
           "status": "unprocessed",
           "reason": {
             "code": "CAPABILITY_MISSING",
-            "message": "交互能力不可用。"
+            "message": "Interaction capability is unavailable."
           }
         }
       ],
@@ -192,12 +191,12 @@
       "scanId": "scan-partial-001",
       "pageStateRef": "page-partial-001",
       "kind": "safe_action",
-      "label": "进入筛选交互",
+      "label": "Enter filter interaction",
       "status": "unprocessed",
       "discoveredAtRevision": 2,
       "reason": {
         "code": "CAPABILITY_MISSING",
-        "message": "交互能力不可用。"
+        "message": "Interaction capability is unavailable."
       }
     }
   ],

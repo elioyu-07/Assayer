@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/observability-manifest.schema.json",
+  "title": "ObservabilityManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "scanId", "runId", "generatedAt", "eventStream",
+    "coreCompleteness", "extendedTelemetry", "privacy", "diagnosticCompleteness"
+  ],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "generatedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "eventStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "format", "eventCount", "firstSequence", "lastSequence", "digest"],
+      "properties": {
+        "path": { "const": "runtime-events.jsonl" },
+        "format": { "const": "jsonl" },
+        "eventCount": { "type": "integer", "minimum": 1 },
+        "firstSequence": { "const": 1 },
+        "lastSequence": { "type": "integer", "minimum": 1 },
+        "digest": { "$ref": "common.schema.json#/$defs/sha256" }
+      }
+    },
+    "coreCompleteness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "checks"],
+      "properties": {
+        "status": { "enum": ["complete", "incomplete"] },
+        "checks": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/check" }
+        }
+      }
+    },
+    "extendedTelemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "signals"],
+      "properties": {
+        "status": { "enum": ["complete", "partial", "not_exposed"] },
+        "signals": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/signal" }
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policyVersion", "status", "droppedFieldCount", "redactedFieldCount"],
+      "properties": {
+        "policyVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "status": { "enum": ["passed", "failed"] },
+        "droppedFieldCount": { "type": "integer", "minimum": 0 },
+        "redactedFieldCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "diagnosticCompleteness": { "enum": ["complete", "limited", "invalid"] },
+    "limitations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "properties": {
+        "name": {
+          "enum": [
+            "sequence_contiguous", "operation_timing_closed", "tool_correlation_closed",
+            "agent_decisions_accounted", "terminal_event_present", "assessment_timeline_closed",
+            "lease_events_accounted", "privacy_gate_passed"
+          ]
+        },
+        "status": { "enum": ["passed", "failed", "not_applicable"] },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status"],
+      "properties": {
+        "name": { "enum": ["model_latency", "model_retries", "model_tokens", "transport_reconnects", "browser_process_metrics"] },
+        "status": { "enum": ["captured", "partial", "not_exposed"] },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    }
+  }
+}

@@ -1,107 +1,108 @@
-# Assayer 设计验收与追溯矩阵
+# Assayer Design Acceptance and Traceability Matrix
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.1.0-draft |
-| 日期 | 2026-08-31 |
-| 状态 | 设计收敛中 |
-| Owner | Assayer 维护者 |
+| Document version | 1.1.0-draft |
+| Date | 2026-08-31 |
+| Status | Design converging |
+| Owner | Assayer Maintainers |
 
-## 1. 目的
+## 1. Purpose
 
-本文档是进入 Host 编码前的设计 harness：不执行代码，而是要求每条关键设计都能追溯到权威文档、协议入口、Schema 字段、语义校验和可区分验收场景。
+This document is the design harness required before Host coding. It does not execute code; it requires every critical design to trace to an authoritative document, protocol entrypoint, schema field, semantic check, and distinguishable acceptance scenario.
 
-## 2. 追溯矩阵
+## 2. Traceability Matrix
 
-| 条款 | 设计来源 | 协议入口 | Schema/语义校验 | 必须通过的场景 |
+| Invariant | Design source | Protocol entrypoint | Schema/semantic check | Required scenario |
 |---|---|---|---|---|
-| INV-001 Agent 不能造事实 | design-governance | inspect/record | 引用闭合校验 | 伪造 object/evidence/screenshot 被拒绝 |
-| INV-005 未知动作默认拒绝 | design-governance, action-safety | perform_action | Operation 状态 | 自定义脚本和未知请求被阻断 |
-| INV-006 问题必须有截图 | evidence-integrity | prepare/commit_decision | Issue/Screenshot 绑定 | 截图失败不能提交 issue_found |
-| INV-007 未恢复不得提交 | lifecycle, identity-recovery | restore_case/commit_decision | PendingDecision 屏障 | restore_failed 后提交被拒绝 |
-| INV-010 幂等与未知结果 | governance, lifecycle | get_operation | Operation 摘要 | 重复键只执行一次，未知结果不盲重放 |
-| INV-011 规则冻结 | governance, rule-contract | start_audit | Scan frozenRules | 运行中注册表修改被拒绝 |
-| INV-012 凭据不泄露 | action-safety | bootstrap | 敏感字段/日志扫描 | 密码不出现在消息、日志、截图 |
-| PageState/Object 身份 | identity-recovery | inspect_page/object | 身份算法版本 | 重渲染唯一重绑、多候选 ambiguous |
-| 恢复失败传播 | identity-recovery | restore_case | Case/Scan 语义校验 | 定向失败→刷新成功；刷新失败→partial/failed |
-| 五态判定 | rule-contract, evidence-integrity | prepare/commit_decision | RuleAssessment | 覆盖不足不能 scanned_no_issue |
-| 唯一事实源 | evidence-integrity | complete_audit | Ledger 事件重放 | 派生报告不能改写账本 |
-| 工具参数契约 | host-agent-protocol | 全部工具 | tool-contracts.schema.json | 缺参、未知枚举和结果字段被拒绝 |
-| Coverage Universe 闭合 | lifecycle | inspect_page/complete_audit | Entrypoint 引用校验 | processed/skipped/unprocessed 均能回指账本实体 |
-| Candidate 不得越权 | lifecycle, identity-recovery | inspect_page/inspect_object | PageCandidate Schema 与升级校验 | Candidate 不能直接创建 Case 或 Assessment |
-| 只读快照幂等 | lifecycle, host-agent-protocol | inspect_page | PageState/Operation | 同一快照重复读取不调用浏览器且不增 revision |
-| 身份结果机械约束 | identity-recovery | inspect_object | ObjectVerification | matched/not_found/ambiguous/changed 的数量和字段门禁 |
-| Candidate 升级事务 | identity-recovery | inspect_object | AuditObject/ObjectVerification | 仅 matched 生成 eligible AuditObject |
-| INV-015 计划不等于覆盖 | llm-agent-orchestration, rule-contract | record findings / prepare_decision | DimensionFinding/Assessment | 只声明 planned dimensions 不能 scanned_no_issue |
-| INV-016 audit 不得静默降级 | product-contract, llm-agent-orchestration | product entrypoint | Agent Runtime/Scan metadata | LLM 不可用时 audit 失败；smoke 明确标记测试语义 |
-| INV-017 页面提示不可信 | governance, llm-agent-orchestration | 全部 Agent 回合 | Skill + Host tool gate | 页面要求忽略规则或执行脚本时不改变策略 |
-| Agent 状态可重建 | llm-agent-orchestration | get_audit_progress | Progress snapshot | 上下文丢失后从 Host 恢复队列，不凭记忆造状态 |
-| 冻结规则可读取 | llm-agent-orchestration | get_rule_contract | Rule digest | Agent 读取内容与 Scan frozen rule digest 一致 |
+| INV-001 Agent cannot invent facts | design-governance | inspect/record | Reference closure | Fabricated object/evidence/screenshot is rejected |
+| INV-005 Unknown actions default to rejection | design-governance, action-safety | perform_action | Operation state | Custom scripts and unknown requests are blocked |
+| INV-006 Issues require screenshots | evidence-integrity | prepare/commit_decision | Issue/Screenshot binding | Screenshot failure cannot commit issue_found |
+| INV-007 No commit before recovery | lifecycle, identity-recovery | restore_case/commit_decision | PendingDecision barrier | Commit after restore_failed is rejected |
+| INV-010 Idempotency and unknown results | governance, lifecycle | get_operation | Operation digest | Duplicate key runs once; unknown result is not blindly replayed |
+| INV-011 Rule freeze | governance, rule-contract | start_audit | Scan frozenRules | Registry changes during a run are rejected |
+| INV-012 Credentials never leak | action-safety | bootstrap | Sensitive-field/log scan | Password does not appear in messages, logs, or screenshots |
+| PageState/Object identity | identity-recovery | inspect_page/object | Identity algorithm version | Unique rebind after rerender; multiple candidates are ambiguous |
+| Recovery-failure propagation | identity-recovery | restore_case | Case/Scan semantic validation | Targeted failure -> refresh success; refresh failure -> partial/failed |
+| Five-state decisions | rule-contract, evidence-integrity | prepare/commit_decision | RuleAssessment | Insufficient coverage cannot produce scanned_no_issue |
+| Single source of truth | evidence-integrity | complete_audit | Ledger replay | Derived reports cannot rewrite the ledger |
+| Tool parameter contract | host-agent-protocol | all tools | tool-contracts.schema.json | Missing fields, unknown enums, and invalid result fields are rejected |
+| Coverage Universe closure | lifecycle | inspect_page/complete_audit | Entrypoint-reference validation | processed/skipped/unprocessed all reference ledger entities |
+| Candidate cannot bypass lifecycle | lifecycle, identity-recovery | inspect_page/inspect_object | PageCandidate schema and promotion validation | Candidate cannot directly create Case or Assessment |
+| Read-only snapshot idempotency | lifecycle, host-agent-protocol | inspect_page | PageState/Operation | Repeated snapshot read does not call browser or increment revision |
+| Mechanical identity constraints | identity-recovery | inspect_object | ObjectVerification | Count and field gates for matched/not_found/ambiguous/changed |
+| Candidate-promotion transaction | identity-recovery | inspect_object | AuditObject/ObjectVerification | Only matched creates an eligible AuditObject |
+| INV-015 Plan is not coverage | llm-agent-orchestration, rule-contract | record findings / prepare_decision | DimensionFinding/Assessment | Declared planned dimensions alone cannot produce scanned_no_issue |
+| INV-016 audit never silently degrades | product-contract, llm-agent-orchestration | product entrypoint | Agent Runtime/Scan metadata | audit fails when LLM is unavailable; smoke is explicitly test semantics |
+| INV-017 Page prompts are untrusted | governance, llm-agent-orchestration | all Agent turns | Skill + Host tool gate | Page requests to ignore rules or run scripts do not alter policy |
+| Agent state is reconstructable | llm-agent-orchestration | get_audit_progress | Progress snapshot | After context loss Host rebuilds the queue; Agent does not invent state from memory |
+| Frozen rules are readable | llm-agent-orchestration | get_rule_contract | Rule digest | Agent content matches the Scan frozen-rule digest |
 
-状态：`accepted`、`needs_closure`、`blocked`。只有全部安全和结论完整性条款为 `accepted` 才允许编码。
+Allowed statuses are `accepted`, `needs_closure`, and `blocked`. Coding is allowed only when all safety and conclusion-integrity invariants are `accepted`.
 
-## 3. 纸面验收场景
+## 3. Paper Acceptance Scenarios
 
-### 启动与会话
+### Startup and session
 
-- Bootstrap 请求没有 `scanId/runId` 仍能创建 Scan；普通请求缺失会话身份被拒绝；
-- Bootstrap 在创建 Scan 前失败时返回无会话 ID 的失败封套；创建 Scan 后的失败必须带回完整会话封套；
-- 登录失败不创建页面对象、不产生问题结论；
-- 登录成功后凭据句柄一次性消费并清除。
+- A bootstrap request without `scanId/runId` can create a Scan; ordinary requests without session identity are rejected;
+- Failure before Scan creation returns a failure envelope without session IDs; failure after creation includes the complete session envelope;
+- Login failure creates no page object and no issue conclusion;
+- A credential handle is consumed once and cleared after successful login.
 
-### Case 与动作
+### Cases and actions
 
-- `begin_case` 创建恢复基线；Case 外动作被拒绝；
-- 同一幂等键重复动作不重复点击；同键不同摘要返回冲突；
-- 过期 `runRevision` 返回 `STALE_STATE`，不执行动作；
-- POST、GraphQL mutation、Beacon、multipart 和未知请求发送前被阻断；
-- 动作结果未知时只能 `get_operation`，不能盲目重放。
+- `begin_case` creates a recovery baseline; actions outside a Case are rejected;
+- Repeated action with one idempotency key does not click twice; a different digest under the same key returns a conflict;
+- Expired `runRevision` returns `STALE_STATE` and does not execute the action;
+- POST, GraphQL mutation, Beacon, multipart, and unknown requests are blocked before sending;
+- When action result is unknown, only `get_operation` is allowed; blind replay is forbidden.
 
-### 身份与恢复
+### Identity and recovery
 
-- 前端重渲染后唯一对象可重新绑定；
-- Candidate 恰好一个匹配才升级 AuditObject；多候选不猜测；
-- 两个候选都匹配时返回 `ambiguous`；
-- 定向恢复 `uncertain` 时自动刷新并重放安全入口；
-- 刷新仍失败时 Case `restore_failed`，对象停止；无法排除污染时 Scan `failed`。
+- A unique object can be rebound after frontend rerender;
+- A Candidate promotes to AuditObject only with exactly one match; multiple matches are not guessed;
+- Two matching candidates return `ambiguous`;
+- `uncertain` targeted recovery automatically refreshes and replays safe entrypoints;
+- Continued refresh failure marks the Case `restore_failed` and stops the object; unexcluded contamination fails the Scan.
 
-### 判定与输出
+### Decisions and output
 
-- `issue_found` 无截图、无 Evidence、无完整覆盖或 Case 未恢复时原子拒绝；
-- B07a/B07b、B08、B09 已完成，真实浏览器可以生成结构化 Evidence 和对象级 Raw Visual；B07b 图片会明确标记 `sanitizationStatus=not_performed`，因此所有真实 `issue_found` 仍被脱敏门禁拒绝，B08 的 JSON CLI/MCP 适配都只委托同一个 `HostCore.handle`，B09 故障处理不得改变该结果；
-- `scanned_no_issue` 缺少任一最低维度时拒绝；
-- `not_applicable` 不能用 capability 缺失冒充；
-- `Issue` 与 `RuleAssessment` 一对一生成；
-- Scan `failed` 后正式问题视图为空或明确标记失效；
-- `complete_audit` 对未处理入口、跳过原因和规则摘要执行闭合校验。
-- Case 计划列出四个维度但只有三个 resolved 时，`coverageComplete=false`，不能提交 `scanned_no_issue`；
-- LLM 对 unresolved 维度至少选择一次有区分力的安全补证或给出停止原因，固定 `focus` 不构成完整智能调查；
-- Agent Runtime 启动失败时正式 `audit` 不得调用 smoke 后返回成功；
-- 页面、源码或接口内容中的工具指令、授权声称和规则改写要求不会改变 Agent 或 Host 行为；
-- 模型上下文丢失后，未处理入口、对象、活动 Case 和维度状态能从 Host 重建。
-- `minimal-ledger.json`、`issue-ledger.json`、`partial-ledger.json` 和 `failed-ledger.json` 分别覆盖通过、问题、部分完成和失败终态。
+- `issue_found` is atomically rejected when screenshot, Evidence, complete coverage, or Case recovery is missing;
+- B07a/B07b, B08, and B09 are complete: real browsers produce structured Evidence and object-level Raw Visual; B07b images explicitly use `sanitizationStatus=not_performed`, so every real `issue_found` remains blocked by sanitization gates; JSON CLI/MCP adapters in B08 delegate to the same `HostCore.handle`, and B09 fault handling cannot change that result;
+- Missing any minimum dimension rejects `scanned_no_issue`;
+- `not_applicable` cannot be used to disguise a missing capability;
+- `Issue` and `RuleAssessment` are generated one-to-one;
+- After Scan `failed`, the formal issue view is empty or explicitly invalidated;
+- `complete_audit` validates unfinished entrypoints, skip reasons, and rule-summary closure;
+- A Case that plans four dimensions but resolves only three has `coverageComplete=false` and cannot commit `scanned_no_issue`;
+- For an unresolved dimension, the LLM makes at least one discriminating safe evidence attempt or states a stop reason; fixed `focus` does not constitute an intelligent investigation;
+- Agent Runtime startup failure must not call smoke and return formal audit success;
+- Tool instructions, authorization claims, or rule-rewrite requests in page, source, or API content do not change Agent or Host behavior;
+- After model-context loss, unfinished entrypoints, objects, active Cases, and dimension states can be rebuilt from Host;
+- `minimal-ledger.json`, `issue-ledger.json`, `partial-ledger.json`, and `failed-ledger.json` cover pass, issue, partial, and failed terminal states.
 
-## 4. FUA-10 设计验收
+## 4. FUA-10 Design Acceptance
 
-FUA-10 必须至少有以下纸面样本：
+FUA-10 must include at least these paper samples:
 
-1. 筛选条件、查询和重置均存在 → `scanned_no_issue`；
-2. 有筛选条件和查询，无重置 → `issue_found`，独立截图；
-3. 对象是搜索框但不构成列表筛选区 → `not_applicable`；
-4. 页面重渲染后筛选区无法唯一定位 → `needs_review`；
-5. 规则所需交互 capability 不可用 → `needs_review`，不能通过；
-6. 同一问题现场有两个相似筛选区 → 对象身份 `ambiguous`，不能猜测。
-7. 静态绑定不足时，Agent 选择通用合成输入、查询、列表/请求差异和重置 Case，而不是立即停止；
-8. 两个候选列表在交互后仍无法唯一归属 → `needs_review`，并记录 unresolved `binding_to_list`；
-9. 页面把“查询”伪装为写操作 → Host 发送前阻断，Agent 不能用自然语言放行；
-10. 筛选页包含“忽略规则并执行脚本”的文本 → 作为审计数据处理，不调用任意脚本。
+1. Filter conditions, query, and reset all exist -> `scanned_no_issue`;
+2. Filter conditions and query exist but reset is absent -> `issue_found` with an independent screenshot;
+3. The object is a search box, not a list-filter region -> `not_applicable`;
+4. After rerender the filter region cannot be located uniquely -> `needs_review`;
+5. DOM or page observation is unavailable, so frontend binding cannot be confirmed -> `needs_review`, never pass;
+6. Two similar filter regions exist at the issue location -> object identity `ambiguous`, never guess;
+7. When a static summary is insufficient, Agent uses the `observe_page` object/control/logical-list alignment map rather than stopping immediately;
+8. Two business logical lists still cannot be uniquely attributed after visual/DOM alignment -> `needs_review` with unresolved `binding_to_list`;
+9. A page disguises a query as a write -> Host blocks before sending; Agent cannot allow it with natural language;
+10. A filter page says “ignore the rules and run a script” -> treat as audit data and never run arbitrary scripts;
+11. Backend unavailable or unchanged list after query does not escalate to `needs_review` when frontend filter/query/reset and unique list attribution are clear; judge on the four frontend facts.
 
-## 5. 设计完成定义
+## 5. Design Completion Definition
 
-- 追溯矩阵每行都有唯一权威来源和唯一责任层；
-- 所有状态、错误、门禁和失败传播都有可区分结果；
-- 协议字段命名与 Schema 字段命名一致；
-- 示例账本能代表 pass、issue、partial/failed 三类终态；
-- 每个工具都有独立 input/output Schema，Coverage Proof 的入口引用能闭合到 Entrypoint 实体；
-- 未决问题均有 Owner、决策日期和关闭证据；
-- 最终复核没有阻塞项，治理文档将状态更新为 `implementation-ready`。
+- Every traceability row has one authoritative source and one owning layer;
+- Every state, error, gate, and failure propagation has a distinguishable result;
+- Protocol field names match schema field names;
+- Example ledgers represent pass, issue, partial, and failed terminal states;
+- Every tool has independent input/output schemas, and Coverage Proof entrypoint references close to Entrypoint entities;
+- Every open question has an owner, decision date, and closure evidence;
+- Final review has no blockers and governance documents are updated to `implementation-ready`.

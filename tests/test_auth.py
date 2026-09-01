@@ -162,7 +162,7 @@ class AuthenticationBoundaryTest(unittest.TestCase):
         adapter = ExplodingAuthAdapter()
         outcome = LoginCoordinator().authenticate("https://test.example.com", secret, adapter)
         self.assertEqual(outcome.error_code, "INTERNAL_FAILURE")
-        self.assertEqual(outcome.reason, "登录适配器执行失败")
+        self.assertEqual(outcome.reason, "Login adapter failed")
         self.assertTrue(secret.is_cleared)
         self.assertTrue(adapter.secret_ref.is_cleared)
 

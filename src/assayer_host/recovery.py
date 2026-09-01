@@ -34,7 +34,7 @@ class UnavailableRecoveryAdapter:
     """Default adapter. It never claims that an unobserved browser is clean."""
     def restore(self, case, target, page_state, method):
         checks = tuple(RecoveryCheck(dimension, "unknown") for dimension in RECOVERY_DIMENSIONS)
-        return RecoveryAttempt(method, "failed", checks, "浏览器恢复适配器未配置")
+        return RecoveryAttempt(method, "failed", checks, "Browser recovery adapter is not configured")
 
 
 class DeterministicRecoveryAdapter:

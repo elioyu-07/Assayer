@@ -1,328 +1,330 @@
-# Assayer 产品契约
+# Assayer Product Contract
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.2.0-draft |
-| 创建日期 | 2026-08-30 |
-| 状态 | 设计收敛中 |
-| 业务 Owner | 产品 Owner |
-| 基线 | B12 Host smoke 完成，C01 LLM 调查设计基线 |
-| 阻断未决问题 | 以 [设计验收与追溯](verification-and-traceability.md) 为准 |
+| Document version | 1.3.0-draft |
+| Created | 2026-08-30 |
+| Status | Alpha user-journey baseline awaiting confirmation |
+| Business owner | Product Owner |
+| Baseline | B12 Host smoke completed; C01 LLM investigation design baseline |
+| Blocking open questions | Governed by [Verification and Traceability](verification-and-traceability.md) |
 
-本文档只拥有产品目标、范围、用户可见承诺和第一版完成条件。系统不变量、生命周期、动作安全、证据事务和规则文件分别由 [设计治理](design-governance.md)、[领域模型](domain-model-and-lifecycle.md)、[动作安全](action-safety-and-credentials.md)、[证据完整性](evidence-and-decision-integrity.md) 和 [规则契约](rule-contract.md) 拥有。
+This document owns only product goals, scope, user-visible commitments, and first-version completion conditions. [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md) owns the current Alpha end-to-end journey and sole completion gate. System invariants, lifecycle, action safety, evidence transactions, and rule files are owned by [Design Governance](design-governance.md), [Domain Model](domain-model-and-lifecycle.md), [Action Safety](action-safety-and-credentials.md), [Evidence Integrity](evidence-and-decision-integrity.md), and [Rule Contract](rule-contract.md), respectively.
 
-## 1. 产品定义
+## 1. Product Definition
 
-Assayer 是一个运行在 Codex 中的前端质量审计垂直智能体。它面向测试/预发布环境，对真实运行的 Web 页面进行规范驱动的反向审计，替代人工完成常规页面检查、取证和初步判定。
+Assayer is a frontend-quality vertical agent that runs in Codex. It performs standards-driven reverse audits against real Web pages in test and pre-release environments, replacing routine manual inspection, evidence collection, and preliminary decisions.
 
-Assayer 不是通用爬虫、静态代码扫描器或视觉截图工具。它的正式结论必须来自一个真实页面上的“待检查对象”（例如按钮、字段、表格、表单、列表、提示区域或业务区域），并能回溯到该对象的证据和病灶截图。
+Assayer is not a general crawler, static-code scanner, or screenshot tool. Every formal conclusion must originate from an audit object on a real page, such as a button, field, table, form, list, message area, or business region, and must trace back to object evidence and a defect-focused screenshot.
 
-## 2. 第一版目标
+## 2. First-Version Goals
 
-第一版必须能够：
+This section describes the target capability set, not what Alpha has already delivered. The externally acceptable scope, user steps, and completion conditions are defined by [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md). Alpha first fixes anonymous URL audits; account login, SSO/MFA, source attribution proof, automatic screenshot sanitization, and resume remain later capabilities.
 
-1. 使用账号密码登录一个测试/预发布站点；
-2. 从入口页面开始，探索同站点可达的页面、弹窗、抽屉、Tab、详情页和编辑页；
-3. 识别常见业务待检查对象；
-4. 按当前规则注册表中已启用的规则生成反向 Case，并优先检查边界、非法和异常场景；
-5. 结合页面运行态、可用源码、请求和视觉证据进行判断；
-6. 对证据充分的问题自动生成正式问题项；
-7. 为每个正式问题提供与页面病灶对应的独立截图；
-8. 输出问题报告、完整审计账本、覆盖证明和失败/部分完成诊断。
+The first version must be able to:
 
-第一版不承诺发现当前注册表之外的全部前端问题。规范之外的明显问题只能作为“额外观察/新规则建议”展示，不计入正式问题结论。
+1. Sign in to a test or pre-release site with a username and password;
+2. Starting from an entry page, explore reachable same-site pages, dialogs, drawers, tabs, detail pages, and edit pages;
+3. Identify common business audit objects;
+4. Generate reverse Cases for enabled rules in the frozen registry, prioritizing boundary, invalid, and exceptional scenarios;
+5. Decide from page runtime facts, available source, requests, and visual evidence;
+6. Automatically create formal issues when evidence is sufficient;
+7. Provide a separate screenshot corresponding to the page defect for every formal issue;
+8. Produce an issue report, complete audit ledger, coverage proof, and failed/partial diagnostics.
 
-当前实现已经完成真实浏览器 Host 生命周期和确定性 smoke runner，但尚未把 LLM 接入调查循环。smoke runner 不能替代本节第 3–6 项中的 Agent 语义职责，也不能作为第一版智能审计完成声明。正式运行边界见 [LLM 调查编排设计](llm-agent-orchestration.md)。
+The first version does not promise to find every frontend issue outside the current registry. Obvious out-of-rule concerns may be shown only as additional observations or new-rule proposals and do not count as formal issues.
 
-当前列出的 14 条规范只是第一版基线，不是产品能力上限。Assayer 必须支持后续持续增加、修改、停用和版本化审计规范，而不要求重写 Agent 调查流程、Host 核心、主账本或报告模型。
+The current implementation includes the real-browser Host lifecycle, dynamic MCP, and Codex Agent investigation entrypoint. A real-URL smoke run validates only the Host fact chain; it does not replace Agent semantic responsibilities in items 3-6 or prove intelligent-audit completion. See [LLM Investigation Orchestration](llm-agent-orchestration.md) for the formal runtime boundary.
 
-## 3. 使用边界与前置条件
+The 14 listed standards are an initial baseline, not a product ceiling. Assayer must support adding, changing, disabling, and versioning rules without rewriting the Agent investigation flow, Host core, primary ledger, or report model.
 
-### 3.1 输入
+## 3. Usage Boundaries and Prerequisites
 
-- URL：必填，作为运行态审计入口；
-- 源码路径：可选，仅用于补充当前运行页面对象的源码证据；
-- 账号密码：每次任务临时输入，由 Host 登录模块使用；不得进入 Agent 上下文、命令参数、日志、报告或截图；
-- 运行配置：目标域名、浏览器配置、规范版本和输出位置。
+### 3.1 Inputs
 
-### 3.2 环境
+- URL: required runtime audit entrypoint;
+- Source path: optional supplementary source evidence for objects on the current runtime page;
+- Username and password: supplied temporarily per task and used by the Host login module; never placed in Agent context, command arguments, logs, reports, or screenshots;
+- Runtime configuration: target domains, browser profile, rule version, and output location.
 
-- 第一版只支持 Codex；
-- 目标为测试/预发布环境；
-- 环境必须使用合成或已脱敏数据；
-- 账号使用常规权限，不假设存在“只读账号”；
-- 登录失败时立即停止，不生成页面问题结论。
+### 3.2 Environment
 
-### 3.3 范围
+- The first version supports Codex only;
+- Targets are test or pre-release environments;
+- Environments use synthetic or sanitized data;
+- Accounts use ordinary permissions; a read-only account is not assumed;
+- Login failure stops the run immediately and produces no page-issue conclusion.
 
-- 从入口 URL 出发，只探索同站点可达页面；
-- 允许打开详情、Tab、抽屉、编辑页等页面状态；
-- 不做无边界全站爬取；
-- FUA-14“外部链接业务上下文”暂不纳入第一版，保留编号但标记为停用；
-- 暂不支持 source-only 审计：没有运行页面就不创建正式待检查对象；
-- 暂不支持断点续跑；任务中断后已有结论作废，只保留失败诊断；
-- 暂不做误报自动传播和规则自动修改。
+### 3.3 Scope
 
-### 3.4 结论有效性
+- Explore only reachable same-site pages from the entry URL;
+- Opening detail views, tabs, drawers, edit pages, and other page states is allowed;
+- Do not perform unbounded site-wide crawling;
+- FUA-14, external-link business context, is excluded from the first version; retain its number but mark it disabled;
+- Source-only audits are unsupported: without a runtime page, no formal audit object is created;
+- Resume is unsupported: after interruption, existing conclusions are invalid and only failure diagnostics remain;
+- Do not automatically propagate false-positive learning or modify rules.
 
-- `completed`：声明范围完成，已越过恢复屏障且未失效的正式问题有效；
-- `partial`：只保留已完成且未失效的判定，未处理范围和原因必须披露；
-- `failed`：登录、浏览器、网络、凭据、账本或环境完整性失败，所有正式问题结论失效，只保留诊断。
+### 3.4 Conclusion Validity
 
-聚合审计账本是唯一事实源；问题 JSON、摘要/诊断 Markdown 和截图目录都是只读派生输出。当前版本不生成 HTML。
+- `completed`: declared scope is complete; formal issues that passed the recovery barrier and remain valid may be delivered;
+- `partial`: retain only completed, non-invalidated decisions and disclose unfinished scope and reasons;
+- `failed`: login, browser, network, credentials, ledger, or environment-integrity failure invalidates all formal issues; retain diagnostics only.
 
-仓库附带的 deterministic Harness 只验证上述契约、状态机和产物链，不访问真实站点，不构成对第一版真实浏览器能力的替代或完成声明。
+The aggregate audit ledger is the only source of truth. Issue JSON, summary/diagnostic Markdown, and screenshot directories are read-only derivatives. The current version does not generate HTML.
 
-## 4. 核心概念
+The repository's deterministic Harness validates contracts, state machines, and artifact chains only. It does not access real sites and cannot substitute for or prove first-version real-browser capability.
 
-### 4.1 待检查对象
+## 4. Core Concepts
 
-页面上实际出现、且至少适用一条有效规范的对象。对象可以是单个 DOM 元素，也可以是由多个元素组成的业务区域，例如：
+### 4.1 Audit Object
 
-- 删除按钮；
-- 金额字段；
-- 查询区域；
-- 表格及其列；
-- 大型业务录入表单；
-- 上传/批量导入区域；
-- 错误提示区域；
-- 附件区域。
+An audit object appears on the page and has at least one applicable enabled rule. It may be one DOM element or a business region composed of multiple elements, for example:
 
-页面只是探索和上下文容器，不是正式问题的最小单位。
+- Delete button;
+- Amount field;
+- Query region;
+- Table and its columns;
+- Large business-entry form;
+- Upload or bulk-import region;
+- Error-message region;
+- Attachment region.
 
-### 4.2 审计结果
+A page is an exploration and context container, not the smallest formal-issue unit.
 
-每个待检查对象对每条适用规范产生一种结果：
+### 4.2 Audit Result
 
-- `issue_found`：证据充分，确认存在问题；
-- `scanned_no_issue`：达到该规范的覆盖要求，本次未发现问题；
-- `not_applicable`：该规范不适用于当前对象；
-- `needs_review`：证据不足、源码/运行态冲突或无法可靠判断；
-- `noise`：确认是规则噪声或不属于规范问题。
+Every object-rule pair produces one result:
 
-`scanned_no_issue` 只表示在本次实际覆盖的页面、状态和对象范围内未发现违规，不代表整个系统绝对没有问题。
+- `issue_found`: sufficient evidence confirms an issue;
+- `scanned_no_issue`: the rule's coverage requirement was met and no issue was found in this run;
+- `not_applicable`: the rule does not apply to this object;
+- `needs_review`: evidence is insufficient, source/runtime facts conflict, or a reliable decision is impossible;
+- `noise`: confirmed rule noise or outside rule scope.
 
-### 4.3 正式问题
+`scanned_no_issue` means only that no violation was found within the pages, states, and objects actually covered. It is not a claim that the whole system is issue-free.
 
-只有 `issue_found` 才能生成正式问题项。每个正式问题必须：
+### 4.3 Formal Issue
 
-- 绑定一个具体待检查对象；
-- 绑定一条规范；
-- 引用可追溯证据；
-- 有对应的页面病灶截图；
-- 说明问题、影响、判断理由和建议。
+Only `issue_found` creates a formal issue. Every formal issue must:
 
-一个对象可以违反多条规范；此时生成多个问题项，每个问题项独立截图并挂在同一对象下。
+- Bind one concrete audit object;
+- Bind one rule;
+- Reference traceable evidence;
+- Include a corresponding defect-focused screenshot;
+- Explain the problem, impact, rationale, and recommendation.
 
-## 5. 角色与职责
+One object may violate multiple rules. In that case, create separate issues and screenshots under the same object.
+
+## 5. Roles and Responsibilities
 
 ### 5.1 Codex Agent
 
-Agent 是审计员，负责：
+The Agent is the auditor. It:
 
-- 选择下一个待检查对象；
-- 判断哪些规范实际适用；
-- 为适用规范生成反向 Case；
-- 决定下一步需要补充什么证据；
-- 综合运行态、源码、请求和视觉证据；
-- 输出 `issue_found`、`scanned_no_issue`、`not_applicable`、`needs_review` 或 `noise`；
-- 说明每个结论的证据和理由。
+- Selects the next audit object;
+- Decides which rules actually apply;
+- Generates reverse Cases for applicable rules;
+- Determines what additional evidence is needed;
+- Synthesizes runtime, source, request, and visual evidence;
+- Produces `issue_found`, `scanned_no_issue`, `not_applicable`, `needs_review`, or `noise`;
+- Explains the evidence and rationale for every conclusion.
 
-Agent 不得：
+The Agent must not:
 
-- 绕过 Host 执行任意浏览器操作；
-- 执行或授权危险写操作；
-- 创造不存在的对象、选择器、源码位置或证据 ID；
-- 把未经确认的审计假设当作规范；
-- 修改原始规则证据或直接改写规范库。
+- Bypass the Host to execute arbitrary browser actions;
+- Execute or authorize dangerous writes;
+- Invent objects, selectors, source locations, or evidence IDs;
+- Treat an unconfirmed audit assumption as a rule;
+- Modify original rule evidence or rewrite the rule library directly.
 
-### 5.2 Host（审计执行器）
+### 5.2 Host (Audit Executor)
 
-Host 是 Assayer 的执行程序，第一版由 Python 实现，负责：
+The Host is the Assayer executor, implemented in Python for the first version. It:
 
-- 登录和浏览器生命周期；
-- 页面导航、DOM/网络/视觉采集；
-- 执行 Agent 请求的受控动作；
-- 以按钮语义判断动作意图，并独立拦截潜在写请求；
-- Case 动作日志、定向恢复验证和必要时的刷新兜底；
-- 生成稳定对象 ID、证据 ID 和截图引用；
-- 校验证据、对象、截图和结论之间的绑定；
-- 写入账本、诊断和报告。
+- Manages login and browser lifecycle;
+- Navigates pages and collects DOM, network, and visual facts;
+- Executes controlled Agent-requested actions;
+- Classifies intent from control semantics and independently intercepts potential write requests;
+- Logs Case actions, verifies targeted recovery, and refreshes when necessary;
+- Generates stable object IDs, evidence IDs, and screenshot references;
+- Validates bindings among evidence, objects, screenshots, and conclusions;
+- Writes ledgers, diagnostics, and reports.
 
-Host 不负责替 Agent 做业务语义判断。
+The Host does not make business-semantic decisions for the Agent.
 
-### 5.3 Skill / Policy
+### 5.3 Skill and Policy
 
-Skill 以 Markdown 为主，规则参数和状态以 YAML/JSON 表达，负责：
+The Skill uses primarily Markdown, with rule parameters and state in YAML/JSON. It defines:
 
-- 审计流程和 Agent 行为规范；
-- 当前注册表中已确认规则的反向 Case 原则；
-- 对象类型和规范适用性知识；
-- 通过、问题、噪声和待复核的判断标准；
-- 证据要求、反例和覆盖要求；
-- 输出术语和报告格式。
+- Audit workflow and Agent behavior;
+- Reverse-Case principles for confirmed registry rules;
+- Object types and rule-applicability knowledge;
+- Pass, issue, noise, and review criteria;
+- Evidence requirements, counterexamples, and coverage requirements;
+- Output terminology and report format.
 
-你是规则语义的最终 Owner。Agent 可以访谈和整理规则草案，但未获你确认并进入 `enabled` 状态的规则不能用于自动确认问题。
+The Product Owner is the final owner of rule semantics. The Agent may interview and draft rules, but a rule cannot confirm issues until the owner approves it and its state is `enabled`.
 
-## 6. 审计运行流程
+## 6. Audit Runtime Flow
 
 ```text
-启动任务
-  → Host 登录并建立浏览器上下文
-  → 从入口 URL 探索同站点页面和状态
-  → Host 采集候选对象
-  → Host 按对象类型筛选可能适用的规范
-  → Agent 选择待检查对象和适用规范
-  → Agent 调用 begin_case 生成反向 Case 和恢复基线
-  → Host 执行安全动作并采集前后状态
-  → 必要时定向绑定源码、请求和视觉证据
-  → Agent 调用 prepare_decision 提交语义判定
-  → Host 生成/校验独立病灶截图并建立 PendingDecision
-  → Host 定向恢复 Case 现场并校验；必要时刷新兜底
-  → Host commit_decision 原子写入判定，必要时派生问题项
-  → 进入下一个 Case 或对象
-  → Agent 提交覆盖证明并结束扫描
-  → Host 生成账本、报告和诊断
+Start task
+  -> Host signs in and establishes browser context
+  -> Explore same-site pages and states from the entry URL
+  -> Host collects candidate objects
+  -> Host filters potentially applicable rules by object type
+  -> Agent selects an audit object and applicable rules
+  -> Agent calls begin_case to freeze object/rule references and recovery baseline
+  -> Host performs safe actions and captures before/after states
+  -> Bind source, request, and visual evidence when needed
+  -> Agent calls prepare_decision with its semantic decision
+  -> Host creates and validates a defect screenshot and PendingDecision
+  -> Host performs targeted Case recovery and verification, with refresh fallback when needed
+  -> Host atomically commits the decision and derives an issue when applicable
+  -> Continue with the next Case or object
+  -> Facade assembles coverage from the Host ledger and completes the scan
+  -> Host generates ledger, report, and diagnostics
 ```
 
-Happy Path 只用于进入页面、打开只读区域和建立前置状态；正式审计优先执行反向、边界、非法和异常 Case。
+Happy Path actions only enter pages, open read-only regions, and establish preconditions. Formal audits prioritize reverse, boundary, invalid, and exceptional Cases.
 
-## 7. Agent 与 Host 的交互
+## 7. Agent-Host Interaction
 
-Agent 通过 MCP 调用 Host；CLI 与 MCP 必须复用同一套 Host 核心逻辑。
+The Agent calls the Host through MCP. CLI and MCP must reuse the same Host core.
 
-Codex 终端和桌面客户端必须使用同一套 Skill、冻结规则和 MCP Host。正式 `audit` 由 Codex Agent 调查循环驱动；确定性全链路运行器只作为 `smoke`/CI 使用。Agent Runtime 不可用时不得静默使用 smoke 结果冒充正式审计。
+Codex CLI and Desktop must use the same Skill, frozen rules, and MCP Host. Formal `audit` is driven by the Codex Agent investigation loop; the deterministic end-to-end runner is for `smoke` and CI only. When Agent Runtime is unavailable, smoke results must never be silently presented as a formal audit.
 
-第一版最小工具集合：
+The first-version minimum tool set is:
 
-- `start_audit`：创建任务并完成登录；
-- `inspect_page`：读取当前页面事实和候选对象；
-- `inspect_object`：读取一个待检查对象的上下文；
-- `perform_action`：执行滚动、聚焦、展开、切换、输入和刷新等动作；
-- `begin_case`：冻结对象/规则引用和恢复基线，创建 Case；
-- `restore_case`：按动作日志定向恢复 Case 现场、验证恢复结果，并在必要时刷新兜底；
-- `inspect_source`：查找当前对象对应的源码证据；
-- `capture_evidence`：保存页面状态、对象位置和病灶截图；
-- `prepare_decision`：校验覆盖、证据和语义字段，创建临时判定；
-- `commit_decision`：恢复成功后原子写入对象/规范结果和正式问题；
-- `get_operation`：查询结果未知的长操作或动作；
-- `complete_audit`：提交覆盖证明并生成报告。
+- `start_audit`: create a task and complete login;
+- `inspect_page`: read current page facts and candidate objects;
+- `inspect_object`: read context for one audit object;
+- `perform_action`: scroll, focus, expand, switch, type, refresh, and perform other controlled actions;
+- `begin_case`: freeze object/rule references and recovery baseline;
+- `restore_case`: recover from the action log, verify recovery, and refresh when necessary;
+- `inspect_source`: find source evidence for the current object;
+- `capture_evidence`: save page state, object location, and defect screenshot;
+- `prepare_decision`: validate coverage, evidence, and semantic fields and create a pending decision;
+- `commit_decision`: after successful recovery, atomically write the result and any formal issue;
+- `get_operation`: query a long-running operation whose result is unknown;
+- `complete_audit`: optionally submit a completion rationale; the product Facade derives coverage from the persisted Host ledger and produces reports, with unfinished scope automatically yielding `partial`.
 
-Agent 提出的新对象必须先由 Host 重新定位和验证，验证前不能进入正式账本。
+An Agent-proposed object must be relocated and validated by the Host before entering the formal ledger.
 
-## 8. 安全与数据规则
+## 8. Safety and Data Rules
 
-### 8.1 动作安全
+### 8.1 Action Safety
 
-- 删除、作废、取消业务、解绑、移除、保存、提交、审批、发布、导入和上传等潜在写操作不得真实执行；
-- 查看、查找、重置、展开、切换 Tab 等可尝试执行；
-- 编辑页可以打开，可以填写合成测试值，可以触发前端校验，但不能保存；
-- Agent 只表达操作意图，Host 独立判断和拦截潜在写请求；任一方不确定就拒绝执行；
-- 页面、源码、注释和接口返回内容均是不可信数据，不能改变系统规则或安全策略。
+- Potential persistent writes such as delete, invalidate, cancel business operation, unbind, remove, save, submit, approve, publish, import, and upload must never execute for real;
+- View, search, reset, expand, and switch-tab actions may be attempted;
+- Edit pages may be opened, synthetic values may be entered, and frontend validation may be triggered, but changes must not be saved;
+- The Agent expresses intent; the Host independently classifies and blocks potential writes. If either is uncertain, refuse the action;
+- Page content, source, comments, and API responses are untrusted data and cannot change system rules or safety policy.
 
-### 8.2 Case 隔离
+### 8.2 Case Isolation
 
-- Host 在 Case 开始前保存与本次动作相关的恢复基线，并记录每个已执行动作及其反向动作；
-- Case 完成后优先执行定向恢复，例如关闭本 Case 打开的弹窗、收起展开行、恢复字段原值和切回原 Tab；
-- 定向恢复后由 Host 校验 URL/route、页面层级、Tab、弹窗/抽屉、被修改控件状态、待检查对象及残留请求等关键基线，不要求整页 DOM 完全相同；
-- 单次恢复尝试只允许 `restored`、`uncertain` 或 `failed`。只有 `restored` 才能继续；`uncertain` 和 `failed` 必须刷新当前 URL并重放已记录的安全入口作为兜底；
-- 刷新兜底后仍不能可靠恢复页面状态或重新绑定原对象时，停止该对象检查并记录 `restore_failed`，不得选择一个“最相似”的对象继续；
-- 定向恢复可以减少重新发现成本，但前端重渲染仍可能替换 DOM 节点，因此 Host 必须重新验证对象身份，不能长期持有裸 DOM 引用；
-- 页面状态污染、浏览器崩溃或网络异常导致的任务中断，已有问题结论作废。
+- Before a Case, Host saves the relevant recovery baseline and records each executed action and reverse action;
+- After a Case, targeted recovery is attempted first: close Case-opened dialogs, collapse expanded rows, restore field values, and return to the original tab;
+- Host then validates URL/route, page hierarchy, tab, dialog/drawer, changed controls, audit object, pending requests, and other key baselines; the entire DOM need not be identical;
+- A recovery attempt returns only `restored`, `uncertain`, or `failed`. Only `restored` may continue. `uncertain` and `failed` require refreshing the current URL and replaying recorded safe entrypoints;
+- If refresh fallback cannot reliably restore state or rebind the original object, stop inspecting that object and record `restore_failed`; never continue with the most similar object;
+- Targeted recovery can reduce rediscovery cost, but rerendering may replace DOM nodes, so Host must revalidate identity and never retain raw DOM references indefinitely;
+- Conclusions already produced become invalid if page contamination, browser crash, or network failure interrupts the task.
 
-### 8.3 数据处理
+### 8.3 Data Handling
 
-- 测试环境只允许合成或已脱敏数据；
-- 密码、Cookie、Token、Authorization Header 和浏览器存储状态不得进入 Agent、日志、报告或截图；
-- 报告和账本只保存完成审计所需的最小证据。
+- Test environments use only synthetic or sanitized data;
+- Passwords, cookies, tokens, Authorization headers, and browser storage state never enter Agent context, logs, reports, or screenshots;
+- Reports and ledgers retain only the minimum evidence needed for the audit.
 
-## 9. 规范基线
+## 9. Rule Baseline
 
-第一版初始规则基线为：
+The initial first-version rule baseline is:
 
-- FUA-01：删除、作废、取消、解绑、移除等持久化变更必须有二次确认或等价保护；
-- FUA-02：无条件必填字段必须有清晰可见的前端标识；条件必填只检查提交校验；
-- FUA-03：所有发起网络请求的用户操作必须有可见响应，并防止请求期间重复触发；
-- FUA-04：表格内容实际截断且无法查看完整内容时，必须提供 tooltip、展开或等价查看方式；
-- FUA-05：超过 6 个输入项的业务录入表单，若没有草稿、暂存或自动保存，确认问题；
-- FUA-06：重复录入成本明显高的结构化数据，应提供模板化批量导入能力；是否繁琐由 Agent 根据页面事实判断；
-- FUA-07：批量导入必须同时提供可下载模板和字段/格式填写说明；
-- FUA-08：同一表格左、右固定列合计不得超过 5 列；
-- FUA-09：超过 10 列的表格必须支持显示/隐藏列配置；
-- FUA-10：存在筛选条件的列表页必须同时提供查询和重置能力；
-- FUA-11：金额、余额、费用、利率等字段附近必须明确显示单位；
-- FUA-12：数字/金额字段必须有与业务含义相符的数字类型、范围和精度约束；完全没有约束时可直接确认问题；
-- FUA-13：技术错误内容直接展示给用户时，确认问题；
-- FUA-15：图片、PDF、Office 等可在线查看的附件必须提供预览；压缩包和可执行文件不要求预览。
+- FUA-01: persistent changes such as delete, invalidate, cancel, unbind, or remove require confirmation or equivalent protection;
+- FUA-02: unconditionally required fields need a clear visible frontend marker; conditional requirements are checked only through submit validation;
+- FUA-03: every user action that starts a network request needs visible feedback and duplicate-trigger prevention while pending;
+- FUA-04: actually truncated table content requires a tooltip, expansion, or equivalent full-content access;
+- FUA-05: a business-entry form with more than six inputs is an issue when it provides no draft, temporary save, or autosave;
+- FUA-06: structured data with high repetitive-entry cost should offer template-based bulk import; the Agent judges burden from page facts;
+- FUA-07: bulk import must provide both a downloadable template and field/format instructions;
+- FUA-08: the total number of left- and right-fixed columns in one table must not exceed five;
+- FUA-09: tables with more than ten columns must support column visibility configuration;
+- FUA-10: a list page with filter conditions must provide both query and reset controls in the frontend, with visual/DOM evidence uniquely binding the filter region to the business list; requests, parameters, backend responses, and result correctness are out of scope;
+- FUA-11: amount, balance, fee, rate, and similar fields must clearly display their unit nearby;
+- FUA-12: numeric and monetary fields need type, range, and precision constraints appropriate to business meaning; no constraints at all may directly confirm an issue;
+- FUA-13: exposing technical error content directly to users is an issue;
+- FUA-15: attachments that support online viewing, including images, PDFs, and Office files, need preview; archives and executables do not.
 
-FUA-14 暂不执行，保留编号以避免历史追踪混乱。具体启用集合以 Scan 启动时冻结的规则注册表为准。
+FUA-14 is disabled but its number is retained for historical traceability. The enabled set is the registry snapshot frozen when the Scan starts.
 
-### 9.1 规范扩展契约
+### 9.1 Rule Extension Contract
 
-规范通过统一注册表接入，不得把“固定 14 条”写死在 Host、Agent 循环、账本或报告中。每条规范至少必须定义：
+Rules enter through a unified registry. The Host, Agent loop, ledger, and reports must not hard-code a fixed set of 14. Every rule defines at least:
 
-- 稳定且不可复用的规范 ID；
-- 名称、版本、状态和 Owner；
-- 适用的待检查对象及适用性判断依据；
-- 反向 Case 生成原则和最低覆盖要求；
-- 需要观察的页面、源码、请求或视觉事实；
-- `issue_found`、`scanned_no_issue`、`needs_review` 和 `noise` 的判定条件；
-- 默认严重度、允许的调整范围、反例和不适用场景；
-- 至少一组正例、反例和回归样本。
+- A stable, non-reusable rule ID;
+- Name, version, state, and owner;
+- Applicable object types and applicability evidence;
+- Reverse-Case principles and minimum coverage;
+- Required page, source, request, or visual facts;
+- Criteria for `issue_found`, `scanned_no_issue`, `needs_review`, and `noise`;
+- Default severity, permitted adjustment range, counterexamples, and non-applicable scenarios;
+- At least one positive, negative, and regression sample.
 
-新增规范必须经过 Owner 确认和回归验证后才能启用。修改规范必须生成新版本；历史报告继续引用运行时实际使用的旧版本，不得被新规则静默改写。
+New rules require owner approval and regression validation before enablement. Rule changes create a new version; historical reports retain the version actually used and are never silently rewritten.
 
-新增纯语义规范时，应优先只增加规范文件、注册信息和测试样本；只有出现新的采集或执行需求时，才允许为 Host 增加通用能力或受控适配器。新增规范不得绕过动作安全、证据 ID、固定判定状态和问题截图门槛。
+For a new semantic-only rule, prefer adding only a rule file, registry data, and samples. Add general Host capability or a controlled adapter only when collection or execution requirements are genuinely new. New rules cannot bypass action safety, evidence IDs, fixed decision states, or screenshot gates.
 
-## 10. 完成条件
+## 10. Completion Conditions
 
-一次扫描只有同时满足以下条件，才可标记为完成：
+A scan may be `completed` only when all conditions hold:
 
-- 登录成功；
-- 所有 Agent 声明已完成的页面和状态均有访问记录；
-- 所有可识别且适用规范的待检查对象都有处理记录；
-- 每条规范达到其已确认的覆盖要求，或明确标记为 `needs_review`；
-- 跳过的页面、状态、对象和动作都有原因；
-- 每个 `issue_found` 都绑定对象、规范、证据和病灶截图；
-- Agent 提交覆盖证明，说明已处理入口、未处理入口和停止原因；
-- Host 完成账本、报告和诊断校验。
+- Login succeeded;
+- Every page and state the Agent claims complete has a visit record;
+- Every identifiable audit object with an applicable rule has a processing record;
+- Every rule meets confirmed coverage or is explicitly `needs_review`;
+- Every skipped page, state, object, and action has a reason;
+- Every `issue_found` binds an object, rule, evidence, and defect screenshot;
+- Agent submits coverage proof naming processed entrypoints, unprocessed entrypoints, and stop reason;
+- Host validates the ledger, reports, and diagnostics.
 
-完成条件的状态转移和结论失效传播以 [领域模型与生命周期](domain-model-and-lifecycle.md) 为准；产品契约不重复定义协议字段。
+State transitions and invalidation follow [Domain Model and Lifecycle](domain-model-and-lifecycle.md); this product contract does not duplicate protocol fields.
 
-如果 Host 检测到重复状态或探索停滞，会提醒 Agent 重新规划；多次无进展后终止探索并标记 `partial`。但对象级 `needs_review` 本身不阻塞扫描完成。
+If Host detects repeated state or stalled exploration, it asks the Agent to replan. After repeated lack of progress, exploration ends as `partial`. Object-level `needs_review` alone does not block scan completion.
 
-## 11. 输出产物
+## 11. Output Artifacts
 
-第一版至少输出：
+The first version produces at least:
 
-- 主问题报告（JSON/Markdown，不生成 HTML）；
-- `audit-ledger.json`：本次扫描的唯一聚合事实账本；
-- `page-element-judgement.json`：页面、状态、对象和规范的判定关系；
-- `run-diagnostics.json` / `run-diagnostics.md`：阶段、覆盖、失败和 `partial` 原因；
-- `audit.log`：不含敏感信息的稳定阶段日志；
-- 对每个正式问题的独立病灶截图。
+- Primary issue report in JSON/Markdown, not HTML;
+- `audit-ledger.json`, the aggregate source of truth for the Scan;
+- `page-element-judgement.json`, relating pages, states, objects, and rules;
+- `run-diagnostics.json` and `run-diagnostics.md`, describing phases, coverage, failures, and `partial` reasons;
+- `audit.log`, a stable phase log without sensitive information;
+- One independent defect-focused screenshot per formal issue.
 
-主报告只展示 `issue_found`；`scanned_no_issue`、`not_applicable`、`needs_review` 和 `noise` 保留在账本和复核区域。
+The primary report displays only `issue_found`; the ledger and review area retain `scanned_no_issue`, `not_applicable`, `needs_review`, and `noise`.
 
-## 12. 明确不属于本契约的内容
+## 12. Explicit Non-Goals
 
-- 不保证覆盖所有前端体验问题；
-- 不允许 Agent 自主修改规范或学习规则；
-- 不允许把源码中未出现在运行页面的对象直接变成正式问题；
-- 不允许用“没有发现”冒充全站无问题；
-- 不允许用错误位置、入口页或猜测区域生成问题截图；
-- 不允许把模型置信度单独当作问题证据；
-- 不允许因技术实现方便而执行真实危险操作。
+- No guarantee of covering every frontend experience issue;
+- No autonomous Agent rule modification or learning;
+- No formal issue from source objects absent from the runtime page;
+- No claim that “nothing found” means the entire site is issue-free;
+- No issue screenshot of the wrong location, entry page, or guessed region;
+- No issue evidence based only on model confidence;
+- No real dangerous action for implementation convenience.
 
-## 13. 成功标准
+## 13. Success Criteria
 
-| ID | 标准 | 衡量方式 |
+| ID | Criterion | Measurement |
 |---|---|---|
-| SC-01 | 一个 FUA-10 正例能完成从对象发现到 `scanned_no_issue` 的完整闭环。 | 设计验收场景和后续垂直切片账本。 |
-| SC-02 | 一个 FUA-10 负例能生成对象级、规则级、带独立病灶截图的 `issue_found`。 | `Issue`、`Screenshot` 和引用闭合校验。 |
-| SC-03 | 任何未恢复 Case、截图失败、过期 revision 或未知写请求都不能产生有效正式问题。 | 追溯矩阵中的拒绝与失效场景。 |
-| SC-04 | 所有启用规则都能在不修改通用调查循环的情况下注册、冻结和版本化。 | 规则注册表与新增规则验收。 |
+| SC-01 | An FUA-10 positive case closes the complete loop from object discovery to `scanned_no_issue`. | Design acceptance scenario and vertical-slice ledger. |
+| SC-02 | An FUA-10 negative case creates an object-level, rule-level `issue_found` with an independent defect screenshot. | `Issue`, `Screenshot`, and reference-closure validation. |
+| SC-03 | An unrecovered Case, screenshot failure, stale revision, or unknown write request cannot produce a valid formal issue. | Rejection and invalidation scenarios in the traceability matrix. |
+| SC-04 | Every enabled rule can be registered, frozen, and versioned without changing the general investigation loop. | Registry and new-rule acceptance. |
 
-## 14. 关键决策、依赖与修订
+## 14. Decisions, Dependencies, and Revisions
 
-关键设计决策、依赖假设和修订记录分别维护在 [设计治理与系统不变量](design-governance.md) 和 Git 提交历史中；任何阻断问题必须回填 Owner、日期和关闭证据。
+Key design decisions and dependency assumptions are maintained in [Design Governance and System Invariants](design-governance.md); revision history is maintained in Git. Every blocking question must record an owner, date, and closure evidence.

@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from .browser_session import BrowserBackend, BrowserProfile, BrowserSession, BrowserSessionFailure
 from .errors import HostError
+from .locale_terms import inject_action_labels
 from .object_identity import ObjectMatch, ObjectVerification
 from .page import CandidateObservation, EntrypointObservation, PageObservation
 
@@ -45,7 +46,7 @@ class PlaywrightBrowserBackend:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as error:
-            raise RuntimeError("Playwright 未安装，不能启动真实浏览器") from error
+            raise RuntimeError("Playwright is not installed; a real browser cannot be started") from error
         self._playwright = sync_playwright().start()
         try:
             # The fixed Chromium channel uses the modern headless implementation
@@ -140,7 +141,7 @@ class BrowserLocatorRegistry:
     def resolve(self, source: dict, page_state: dict) -> tuple[ObjectMatch, ...]:
         page_id = page_state.get("pageStateId") or source.get("pageStateRef")
         if not isinstance(page_id, str) or not page_id:
-            raise HostError("INTERNAL_FAILURE", "对象匹配缺少 PageState")
+            raise HostError("INTERNAL_FAILURE", "Object matching is missing a PageState")
         with self._lock:
             if isinstance(source.get("locatorDigest"), str):
                 return self._by_digest.get((page_id, source["locatorDigest"]), ())
@@ -162,33 +163,76 @@ READONLY_PROBE_V1 = """() => {
     const box = element.getBoundingClientRect();
     return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0;
   };
+  const semanticAction = (element) => {
+    const type = clean(element.getAttribute('type') || '', 32).toLowerCase();
+    const tag = element.tagName.toLowerCase();
+    const label = clean(element.getAttribute('aria-label') || element.getAttribute('title') ||
+      element.innerText || element.labels?.[0]?.innerText || element.getAttribute('name') || '', 80).toLowerCase();
+    const resetLabels = __ASSAYER_RESET_ACTION_LABELS__;
+    const queryLabels = __ASSAYER_QUERY_ACTION_LABELS__;
+    if (type === 'reset' || resetLabels.some((term) => label.includes(term))) return 'reset';
+    if (['select', 'textarea'].includes(tag) || (tag === 'input' && !['button', 'submit', 'reset'].includes(type))) return 'filter_input';
+    if (queryLabels.some((term) => label.includes(term))) return 'query';
+    return 'other';
+  };
+  const controlKind = (element) => {
+    const tag = element.tagName.toLowerCase();
+    return ['input', 'select', 'textarea', 'button'].includes(tag) ? tag : 'other';
+  };
   const regionSelector = '[role="search"], form, [data-testid*="filter" i], [class*="filter" i]';
   const allRegions = [...document.querySelectorAll(regionSelector)].filter(visible).slice(0, 512);
   const regions = allRegions.map((element, index) => ({element, index}))
     .filter(({element}) => !allRegions.some((other) => other !== element && other.contains(element))).slice(0, 128);
+  const pageLists = [...document.querySelectorAll('table, [role="grid"], [role="list"], ul, ol')]
+    .filter(visible).slice(0, 128);
   const candidates = regions.map(({element, index}) => {
     const box = element.getBoundingClientRect();
     const role = clean(element.getAttribute('role') || (element.tagName === 'FORM' ? 'form' : 'region'), 64);
     const label = clean(element.getAttribute('aria-label') || element.querySelector('legend')?.textContent || element.textContent, 200);
     const material = ['filter_region', role, label, safeRoute, index].join('|');
+    const controls = [...element.querySelectorAll('input, select, textarea, button, [role="button"]')]
+      .filter(visible).slice(0, 128).map((control, controlIndex) => ({
+        controlRef: `control-browser-${index}-${controlIndex}`, kind: controlKind(control),
+        semanticAction: semanticAction(control), visible: true,
+        disabled: control.disabled === true || control.getAttribute('aria-disabled') === 'true',
+        readOnly: control.readOnly === true || control.getAttribute('aria-readonly') === 'true',
+        valueClass: ('value' in control) ? (String(control.value || '').length ? 'non_empty' : 'empty') : 'unknown'
+      }));
+    const owner = element.closest('section, main, article, [role="region"]') || element.parentElement;
+    const ownedIds = new Set(String(element.getAttribute('aria-controls') || '').split(/\\s+/).filter(Boolean));
+    const lists = pageLists.map((list, listIndex) => {
+      let relationship = 'unknown';
+      if (list.id && ownedIds.has(list.id)) relationship = 'aria_owned';
+      else if (owner && owner.contains(list)) relationship = 'same_container';
+      else if (element.parentElement && element.parentElement.contains(list)) relationship = 'nearby';
+      return {list, listIndex, relationship};
+    }).filter((item) => item.relationship !== 'unknown' || pageLists.length === 1).slice(0, 16)
+      .map(({list, listIndex, relationship}) => ({
+        listRef: `list-browser-${listIndex}`,
+        kind: list.tagName === 'TABLE' ? 'table' : (list.getAttribute('role') === 'grid' ? 'grid' : 'list'),
+        visible: true, relationship: relationship === 'unknown' ? 'nearby' : relationship
+      }));
     return {
       kind: 'filter_region', label: label || `filter-region-${index}`, role,
       locator_material: material, host_locator_id: `locator-browser-${index}`,
       identity_material: material, accessible_name: label, visible_text: clean(element.innerText, 1000),
       x: Math.max(0, box.x), y: Math.max(0, box.y), width: box.width, height: box.height,
-      viewport_width: innerWidth, viewport_height: innerHeight
+      viewport_width: innerWidth, viewport_height: innerHeight, controls, lists
     };
   });
   const filterEntrypoints = candidates.map((item) => ({
-    kind: 'safe_action', label: item.label, intent: 'inspect_filter_region', status: 'unprocessed'
+    kind: 'safe_action', label: item.label, intent: 'inspect_filter_region', status: 'unprocessed',
+    logicalIdentityMaterial: item.locator_material, targetLocatorMaterial: item.locator_material
   }));
   const tabSelector = '[role="tab"], a[class*="tabs__item"], button[class*="tabs__item"], .tabs button, .tab';
   const tabs = [...document.querySelectorAll(tabSelector)].filter(visible).slice(0, 64);
+  const tabLabels = tabs.map((element) => clean(element.getAttribute('aria-label') || element.innerText || element.textContent, 120));
   const tabEntrypoints = tabs.map((element) => ({
     kind: 'tab', label: clean(element.getAttribute('aria-label') || element.innerText || element.textContent, 120),
     intent: 'switch_tab',
     status: element.getAttribute('aria-selected') === 'true' || /(^|\\s)(active|is-active|selected)(\\s|$)/.test(String(element.className)) || element.getAttribute('data-active') === 'true' ? 'processed' : 'unprocessed',
-    hostLocatorId: `tab-browser-${tabs.indexOf(element)}`
+    hostLocatorId: `tab-browser-${tabs.indexOf(element)}`,
+    logicalIdentityMaterial: ['tab', tabLabels.join('|'), tabs.indexOf(element), tabLabels[tabs.indexOf(element)]].join('|')
   })).filter((item) => item.label);
   const active = tabs.find((element) => element.getAttribute('aria-selected') === 'true' ||
     /(^|\\s)(active|is-active|selected)(\\s|$)/.test(String(element.className)) || element.getAttribute('data-active') === 'true') || null;
@@ -206,6 +250,7 @@ READONLY_PROBE_V1 = """() => {
     networkSummary: {status: 'unavailable_until_B05'}
   };
 }"""
+READONLY_PROBE_V1 = inject_action_labels(READONLY_PROBE_V1)
 
 
 class BrowserReadOnlyPageAdapter:
@@ -244,11 +289,11 @@ class BrowserReadOnlyPageAdapter:
     @staticmethod
     def _origin(parsed) -> str:
         if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
-            raise HostError("INVALID_REQUEST", "URL 必须是不含用户信息的 http(s) 地址")
+            raise HostError("INVALID_REQUEST", "URL must be an http(s) address without user information")
         try:
             port = parsed.port
         except ValueError as error:
-            raise HostError("INVALID_REQUEST", "URL 端口无效") from error
+            raise HostError("INVALID_REQUEST", "URL port is invalid") from error
         host = parsed.hostname.lower()
         if ":" in host:
             host = f"[{host}]"
@@ -260,25 +305,25 @@ class BrowserReadOnlyPageAdapter:
         parsed = urlparse(url)
         origin = self._origin(parsed)
         if self._allowed_origin and origin != self._allowed_origin:
-            raise HostError("NAVIGATION_BLOCKED", "导航目标不在当前 Scan 允许 origin")
+                raise HostError("NAVIGATION_BLOCKED", "Navigation target is outside the origin allowed for this Scan")
 
         def operation(context):
             page = self._get_page(context)
             goto = getattr(page, "goto", None)
             if not callable(goto):
-                raise RuntimeError("浏览器 Page 不支持只读导航")
+                raise RuntimeError("The browser Page does not support read-only navigation")
             goto(url, wait_until="domcontentloaded", timeout=timeout_ms or self._session.profile.navigation_timeout_ms)
             observed = urlparse(page.url)
             observed_origin = self._origin(observed)
             if observed_origin != origin:
-                raise HostError("NAVIGATION_BLOCKED", "浏览器导航发生跨 origin 跳转")
+                raise HostError("NAVIGATION_BLOCKED", "Browser navigation crossed origins")
             return page.url
 
         return self._session.run_serial(operation)
 
     def observe(self, page_state_id: str) -> PageObservation:
         if not isinstance(page_state_id, str) or not page_state_id:
-            raise HostError("INVALID_REQUEST", "page_state_id 不能为空")
+            raise HostError("INVALID_REQUEST", "page_state_id cannot be empty")
 
         def operation(context):
             page = self._get_page(context)
@@ -287,13 +332,13 @@ class BrowserReadOnlyPageAdapter:
             try:
                 origin = self._origin(parsed)
             except HostError as error:
-                raise HostError("INTERNAL_FAILURE", "浏览器当前页面 URL 无效") from error
+                raise HostError("INTERNAL_FAILURE", "The current browser page URL is invalid") from error
             if self._allowed_origin and origin != self._allowed_origin:
-                raise HostError("NAVIGATION_BLOCKED", "当前页面不在允许 origin")
+                raise HostError("NAVIGATION_BLOCKED", "The current page is outside the allowed origin")
             title = page.title()
             dom = page.content()
             if not isinstance(dom, str) or len(dom.encode("utf-8")) > self.MAX_DOM_BYTES:
-                raise HostError("INTERNAL_FAILURE", "页面 DOM 超出只读采集上限")
+                raise HostError("INTERNAL_FAILURE", "Page DOM exceeds the read-only collection limit")
             snapshot = self._probe(page)
             safe_url = f"{origin}{parsed.path or '/'}"
             return self._materialize(page_state_id, safe_url, origin, parsed.path or "/", title, dom, snapshot)
@@ -315,16 +360,16 @@ class BrowserReadOnlyPageAdapter:
         try:
             value = page.evaluate(self.PROBE)
         except Exception as error:
-            raise BrowserSessionFailure("只读浏览器探针执行失败，浏览器上下文已失效") from error
+            raise BrowserSessionFailure("The read-only browser probe failed; the browser context is no longer valid") from error
         if not isinstance(value, dict):
-            raise HostError("INTERNAL_FAILURE", "只读浏览器探针返回格式无效")
+            raise HostError("INTERNAL_FAILURE", "The read-only browser probe returned an invalid format")
         text = value.get("visibleText", "")
         if not isinstance(text, str):
-            raise HostError("INTERNAL_FAILURE", "只读探针可见文本格式无效")
+            raise HostError("INTERNAL_FAILURE", "The read-only probe returned invalid visible text")
         entrypoints = value.get("entrypoints", [])
         candidates = value.get("candidates", [])
         if not isinstance(entrypoints, list) or not isinstance(candidates, list):
-            raise HostError("INTERNAL_FAILURE", "只读探针候选集合格式无效")
+            raise HostError("INTERNAL_FAILURE", "The read-only probe returned an invalid candidate collection")
         snapshot = BrowserSnapshot(
             visible_text=text[: self.MAX_TEXT_CHARS],
             entrypoints=tuple(entrypoints), candidates=tuple(candidates),
@@ -369,37 +414,50 @@ class BrowserReadOnlyPageAdapter:
     @staticmethod
     def _entrypoint(item: dict) -> EntrypointObservation:
         if not isinstance(item, dict):
-            raise HostError("INTERNAL_FAILURE", "只读探针入口不是对象")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint is not an object")
         required = ("kind", "label", "intent")
         if any(not isinstance(item.get(key), str) or not item[key] for key in required):
-            raise HostError("INTERNAL_FAILURE", "只读探针入口字段无效")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint has invalid fields")
         status = item.get("status", "unprocessed")
         if status not in {"unprocessed", "processed", "skipped"}:
-            raise HostError("INTERNAL_FAILURE", "只读探针入口状态无效")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint has an invalid status")
+        identity_material = item.get("logicalIdentityMaterial")
+        target_material = item.get("targetLocatorMaterial")
+        if identity_material is not None and (not isinstance(identity_material, str) or not identity_material or len(identity_material) > 2_000):
+            raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint has an invalid logical identity")
+        if target_material is not None and (not isinstance(target_material, str) or not target_material or len(target_material) > 2_000):
+            raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint has an invalid target identity")
         return EntrypointObservation(item["kind"], item["label"], item["intent"], status=status,
                                      reason_code=item.get("reason_code", "NOT_YET_EXPLORED"),
-                                     reason_message=item.get("reason_message", "入口尚未探索。"),
-                                     host_locator_id=item.get("hostLocatorId") if isinstance(item.get("hostLocatorId"), str) else None)
+                                     reason_message=item.get("reason_message", "Entrypoint has not been explored."),
+                                     host_locator_id=item.get("hostLocatorId") if isinstance(item.get("hostLocatorId"), str) else None,
+                                     logical_identity_material=identity_material,
+                                     target_locator_material=target_material)
 
     @staticmethod
     def _candidate(item: dict) -> tuple[CandidateObservation, tuple[str, ObjectMatch]]:
         if not isinstance(item, dict):
-            raise HostError("INTERNAL_FAILURE", "只读探针候选不是对象")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe candidate is not an object")
         required = ("kind", "label", "role", "locator_material", "host_locator_id", "identity_material",
                     "accessible_name", "visible_text")
         if any(not isinstance(item.get(key), str) or not item[key] for key in required):
-            raise HostError("INTERNAL_FAILURE", "只读探针候选字段无效")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe candidate has invalid fields")
         numbers = ("x", "y", "width", "height", "viewport_width", "viewport_height")
         if any(type(item.get(key)) not in {int, float} for key in numbers):
-            raise HostError("INTERNAL_FAILURE", "只读探针候选位置无效")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe candidate has an invalid location")
         if item["x"] < 0 or item["y"] < 0 or item["width"] <= 0 or item["height"] <= 0:
-            raise HostError("INTERNAL_FAILURE", "只读探针候选边界无效")
+            raise HostError("INTERNAL_FAILURE", "A read-only probe candidate has invalid bounds")
         if len(item["locator_material"]) > 2_000 or len(item["identity_material"]) > 2_000:
-            raise HostError("INTERNAL_FAILURE", "只读探针身份材料超出上限")
+            raise HostError("INTERNAL_FAILURE", "Read-only probe identity material exceeds the limit")
+        controls = item.get("controls", [])
+        lists = item.get("lists", [])
+        if not isinstance(controls, list) or not isinstance(lists, list):
+                raise HostError("INTERNAL_FAILURE", "Read-only probe controls or lists have an invalid format")
         candidate = CandidateObservation(item["kind"], item["label"], item["role"], item["locator_material"])
         match = ObjectMatch(item["host_locator_id"], item["identity_material"], item["role"], item["accessible_name"],
                             item["visible_text"], item["x"], item["y"], item["width"], item["height"],
-                            int(item["viewport_width"]), int(item["viewport_height"]))
+                            int(item["viewport_width"]), int(item["viewport_height"]),
+                            tuple(dict(control) for control in controls), tuple(dict(candidate_list) for candidate_list in lists))
         return candidate, (item["locator_material"], match)
 
     def refresh_locators(self, context: object, page_state_id: str) -> None:
@@ -435,9 +493,9 @@ class BrowserObjectIdentityAdapter:
                 self._refresh(context, page_id)
             matches = self._matcher(context, source, page_state)
             if not isinstance(matches, Sequence) or isinstance(matches, (str, bytes)):
-                raise HostError("INTERNAL_FAILURE", "对象匹配器返回格式无效")
+                raise HostError("INTERNAL_FAILURE", "Object matcher returned an invalid format")
             if any(not isinstance(item, ObjectMatch) for item in matches):
-                raise HostError("INTERNAL_FAILURE", "对象匹配器包含无效匹配")
+                raise HostError("INTERNAL_FAILURE", "Object matcher returned an invalid match")
             count = len(matches)
             if count == 0:
                 return ObjectVerification("not_found", 0, excluded_reasons=("no_required_dimensions",))

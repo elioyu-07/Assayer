@@ -1,161 +1,137 @@
-# Assayer 页面、对象身份与恢复契约
+# Assayer Page, Object Identity, and Recovery Contract
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.0.0-draft |
-| 日期 | 2026-08-30 |
-| 状态 | 设计收敛中 |
+| Document version | 1.0.0-draft |
+| Date | 2026-08-30 |
+| Status | Design converging |
 | Owner | Host Core Owner |
 
-## 1. 目的
+## 1. Purpose
 
-本文档定义 PageState 和 AuditObject 的逻辑身份、重新绑定规则、Case 恢复基线、等价判断及失败传播。目标不是让页面像素或 DOM 完全不变，而是可靠证明调查仍作用于同一逻辑对象，且 Case 没有留下影响后续调查的状态污染。
+This document defines logical PageState and AuditObject identity, rebinding, Case recovery baselines, equivalence, and failure propagation. It does not require identical pixels or DOM. It proves that investigation still targets the same logical object and that a Case left no state contamination affecting later work.
 
-## 2. 身份算法版本
+## 2. Identity Algorithm Versions
 
-每次 Scan 冻结以下版本：
+Every Scan freezes `pageIdentityAlgorithmVersion`, `objectIdentityAlgorithmVersion`, and `recoveryPolicyVersion`. Versions enter ScanRun and the final ledger. Incompatible behavior changes increment the major version; historical ledgers are interpreted using their recorded versions.
 
-- `pageIdentityAlgorithmVersion`
-- `objectIdentityAlgorithmVersion`
-- `recoveryPolicyVersion`
+## 3. PageState Identity
 
-算法版本进入 ScanRun 和最终账本。算法行为发生不兼容变化时提升主版本；历史账本始终按记录版本解释。
+PageState is an immutable observation snapshot with a Host-generated `pageStateId`.
 
-## 3. PageState 身份
+### 3.1 Required dimensions
 
-PageState 是不可变观察快照，由 Host 生成新的 `pageStateId`。身份材料分为三类：
+- Normalized origin;
+- Normalized route, including query parameters that participate in page identity;
+- Page layer: page/dialog/drawer/tab/detail/edit;
+- Parent PageState identity;
+- Active tab or equivalent region;
+- Key overlays affecting object reachability.
 
-### 3.1 必需维度
+### 3.2 Conditional dimensions
 
-- 规范化 origin；
-- 规范化 route，包括参与页面身份的 query 参数；
-- 页面层级：page/dialog/drawer/tab/detail/edit；
-- 父 PageState 身份；
-- 当前活动 Tab 或等价区域；
-- 影响对象可达性的关键 overlay 集合。
+- Case-related form value classes;
+- Expanded rows, pagination, filters, and selections;
+- Permission or business-mode markers that affect rule decisions;
+- Relevant pending requests.
 
-### 3.2 条件维度
+### 3.3 Dynamic material forbidden from direct identity use
 
-- 与当前 Case 相关的表单字段值类别；
-- 展开行、分页、筛选条件和选中项；
-- 影响规则判断的权限或业务模式标识；
-- 仍在进行的相关请求。
+- Timestamps, random IDs, and trace IDs;
+- Animation frames, cursor, hover, and other transient visuals;
+- Background polling unrelated to the current object and Case;
+- Raw whole-page DOM hash;
+- Identity claims injected through page content.
 
-### 3.3 禁止直接参与身份的动态材料
+Host stores `identityMaterialDigest` and a structured explanatory summary without credentials or unsanitized business data.
 
-- 时间戳、随机 ID、追踪 ID；
-- 动画帧、光标、hover 等瞬时视觉状态；
-- 与当前对象和 Case 无关的后台轮询结果；
-- 整页原始 DOM hash；
-- 可被页面内容注入的“身份说明”。
+## 4. AuditObject Identity
 
-Host 保存 `identityMaterialDigest` 和用于解释的结构化摘要；摘要不得包含凭据或未脱敏业务数据。
+AuditObject is a logical object, not a long-lived DOM node. Identity combines, in priority order:
 
-## 4. AuditObject 身份
+1. Host-verified component or stable business identifier;
+2. ARIA role, accessible name, and associated label;
+3. Owning business region, table column, or form path;
+4. Normalized structural path and adjacent stable anchors;
+5. Visible-text summary;
+6. Geometry only as the final disambiguator, never as sole identity.
 
-AuditObject 表示逻辑对象，不等于某个长期存活的 DOM 节点。对象身份材料按以下优先级组合：
+`hostLocatorId` is a short-lived handle within the current browser instance and is not persisted as a cross-run selector. `fingerprint` digests normalized identity material but does not guarantee relocation by digest alone.
 
-1. Host 已验证的组件或业务稳定标识；
-2. ARIA role、可访问名称和关联 label；
-3. 所属业务区域、表格列或表单路径；
-4. 规范化结构路径和相邻稳定锚点；
-5. 可见文本摘要；
-6. 几何位置只作末级消歧，不得单独确定身份。
+## 5. Rebinding
 
-`hostLocatorId` 只是当前浏览器实例中的短期句柄，不写入可跨运行复用的选择器。`fingerprint` 是上述规范化身份材料的摘要，不保证仅凭摘要即可重新定位。
+After navigation, refresh, tab switch, overlay change, rerender, or any action that may replace DOM, old node references are stale. Host rediscovers candidates and returns one result:
 
-## 5. 重新绑定
-
-任何导航、刷新、Tab 切换、overlay 开关、前端重渲染或可能替换 DOM 的动作后，原节点引用均视为过期。Host 必须重新发现候选并给出以下结果之一：
-
-| 结果 | 定义 | 后续行为 |
+| Result | Definition | Next behavior |
 |---|---|---|
-| `matched` | 恰好一个候选满足全部必需身份维度。 | 生成新 locator 句柄并继续。 |
-| `not_found` | 没有候选满足必需维度。 | 当前操作/恢复失败。 |
-| `ambiguous` | 多个候选均满足必需维度，无法可靠消歧。 | 不得选“最相似”对象；停止当前对象。 |
-| `changed` | 找到相关对象，但规则相关语义维度已经变化。 | 生成新对象候选；不得冒充原对象。 |
+| `matched` | Exactly one candidate satisfies every required identity dimension. | Create a new locator handle and continue. |
+| `not_found` | No candidate satisfies required dimensions. | Current operation or recovery fails. |
+| `ambiguous` | Multiple candidates satisfy required dimensions and cannot be disambiguated reliably. | Never choose the “closest”; stop this object. |
+| `changed` | A related object exists, but rule-relevant semantics changed. | Create a new candidate; never impersonate the original object. |
 
-重新绑定必须保存候选数量、匹配维度和排除理由作为诊断；不向 Agent 暴露可执行 selector。
+Rebinding stores candidate count, matched dimensions, and exclusion reasons as diagnostics and never exposes executable selectors to the Agent.
 
-## 6. Case 恢复基线
+## 6. Case Recovery Baseline
 
-`begin_case` 在任何动作前原子保存恢复基线，至少包含：
+Before any action, `begin_case` atomically saves at least:
 
-- 起始 PageState 引用和页面身份摘要；
-- 当前对象身份摘要和重新绑定材料；
-- 当前活动 Tab、overlay、展开区域；
-- 本 Case 可能修改的控件状态；
-- 当前 URL/route；
-- 相关 pending request 集合；
-- 写请求计数必须为 0；
-- 可用于刷新后恢复的安全入口链。
+- Initial PageState and page-identity summary;
+- Current object identity summary and rebinding material;
+- Active tab, overlays, and expanded regions;
+- Controls this Case may change;
+- Current URL/route;
+- Relevant pending-request set;
+- Write-request count fixed at zero;
+- Safe entrypoint chain for recovery after refresh.
 
-基线按 Case 计划声明的影响范围裁剪。Host 可以扩大必检范围，Agent 不能缩小安全必检范围。
+The baseline is trimmed to the Case's declared impact. Host may expand required checks; Agent cannot narrow safety checks.
 
-## 7. 动作日志与反向动作
+## 7. Action Log and Inverse Actions
 
-每个成功执行的动作记录：
+Every successful action records Operation/action ID, pre-action `runRevision`, target object, pre-action evidence, actual result, recovery mode (`inverse`, `noop`, or `refresh_only`), and Host-internal inverse parameters.
 
-- Operation 和动作 ID；
-- 动作前 `runRevision`；
-- 目标对象；
-- 动作前证据；
-- 实际执行结果；
-- `inverse`、`noop` 或 `refresh_only` 恢复方式；
-- 反向动作参数的 Host 内部引用。
+Agent cannot provide inverse selectors or scripts. Synthetic input records a safe restoration handle for the original value. Sensitive originals stay in Host memory and never enter the ledger.
 
-反向动作不能由 Agent 提供 selector 或脚本。输入合成值时必须记录原值的安全恢复句柄；原值如果包含敏感信息，只能保留在 Host 内存，不得写入账本。
-
-## 8. 恢复算法
+## 8. Recovery Algorithm
 
 ```text
-1. 冻结新的普通动作请求
-2. 等待相关只读请求在预算内结束
-3. 按动作日志逆序执行定向反向动作
-4. 重新绑定页面和对象
-5. 对必检维度逐项比较
-6. 全部 match → restored
-7. 无 mismatch 但存在 unknown → uncertain
-8. 任一关键 mismatch/写请求/反向动作失败 → failed
-9. uncertain 或 failed → 刷新原 URL并重放安全入口链
-10. 再次逐项验证并产生最终结果
+1. Freeze new ordinary action requests
+2. Wait within budget for relevant read-only requests
+3. Execute targeted inverse actions in reverse log order
+4. Rebind page and object
+5. Compare every required dimension
+6. All match -> restored
+7. No mismatch but any unknown -> uncertain
+8. Critical mismatch, write request, or inverse failure -> failed
+9. uncertain or failed -> refresh original URL and replay safe entrypoint chain
+10. Verify every dimension again and produce the final result
 ```
 
-恢复尝试的检查维度包括：
+Checks include `url_route`, `page_layer`, `active_tab`, `overlay_state`, `control_state`, `object_identity`, `pending_requests`, `write_request`, and supplementary `local_visual`.
 
-- `url_route`
-- `page_layer`
-- `active_tab`
-- `overlay_state`
-- `control_state`
-- `object_identity`
-- `pending_requests`
-- `write_request`
-- `local_visual`（仅作补充）
+`restored` requires every applicable required dimension to be `match`, with no `unknown`. Visual similarity cannot override structural or object-identity `unknown/mismatch`.
 
-`restored` 要求所有适用必检维度为 `match`，不能含 `unknown`。视觉匹配不能覆盖结构或对象身份的 `unknown/mismatch`。
+## 9. Failure Propagation
 
-## 9. 失败传播
-
-| 情况 | Case | Object | Scan | 已准备判定 |
+| Situation | Case | Object | Scan | Prepared decision |
 |---|---|---|---|---|
-| 定向失败、刷新恢复成功 | completed | 可继续 | 可继续 | 可提交 |
-| 对象无法唯一重新绑定，但无环境污染 | restore_failed | blocked | 通常 partial | invalidated |
-| pending request 无法确认结束 | restore_failed | blocked | failed | 全部 invalidated |
-| 检测到请求已产生持久化写入 | invalidated | blocked | failed | 全部 invalidated |
-| 浏览器崩溃导致状态无法证明 | invalidated | blocked | failed | 全部 invalidated |
+| Targeted recovery fails; refresh succeeds | completed | continue | continue | may commit |
+| Object cannot be uniquely rebound; no environmental contamination | restore_failed | blocked | usually partial | invalidated |
+| Pending request cannot be proven finished | restore_failed | blocked | failed | all invalidated |
+| Persistent write is detected | invalidated | blocked | failed | all invalidated |
+| Browser crash makes state unprovable | invalidated | blocked | failed | all invalidated |
 
-只有 Host 能决定恢复状态和污染范围。Agent 不得通过自然语言理由把失败降级为成功。
+Only Host decides recovery status and contamination scope. Agent cannot downgrade failure to success with natural-language rationale.
 
-## 10. 完成判据
+## 10. Completion Criteria
 
-身份与恢复实现只有同时满足以下条件才合格：
+Identity and recovery qualify only when:
 
-- 相同对象重渲染后能够可靠重新绑定；
-- 两个相似对象无法消歧时稳定返回 `ambiguous`；
-- 动态页面内容不会导致无意义的整页不一致；
-- Case 修改过的相关状态全部进入必检范围；
-- 写请求、未知 pending request 和对象丢失不能被视觉相似掩盖；
-- 每次恢复结果都能从账本中的基线、动作和检查记录复算。
+- The same object reliably rebinds after rerender;
+- Two indistinguishable similar objects consistently return `ambiguous`;
+- Dynamic page content does not create meaningless whole-page inequality;
+- Every relevant state changed by a Case enters required checks;
+- Visual similarity cannot hide a write request, unknown pending request, or lost object;
+- Every recovery result can be recomputed from ledger baseline, actions, and checks.
 
-当前 Host Core 已实现上述恢复屏障的确定性内核：定向尝试不满足全量 `match` 时固定进入刷新重放，未知 pending/写请求会使 Scan 失败，Host 重启会把遗留动作/恢复 Operation 收束为 `result_unknown`。B04 已实现 Playwright 页面快照、Session 内 locator registry 和动作前的唯一对象绑定；B05 已补齐安全动作、发送前拦截与动作后的强重新绑定；B06 已将 inverse、刷新回放、网络收束证明和九维真实浏览器检查接入同一 Session，并且不能降低上述判据。
+Host Core implements this deterministic recovery barrier: incomplete targeted `match` always enters refresh replay; unknown pending/write requests fail the Scan; Host restart converges orphan action/recovery Operations as `result_unknown`. B04 added Playwright snapshots, a Session locator registry, and unique pre-action binding. B05 added safe actions, pre-send interception, and strict post-action rebinding. B06 connected inverse actions, refresh replay, network-convergence proof, and nine-dimensional real-browser checks to the same Session without weakening these criteria.

@@ -42,10 +42,10 @@ class UnavailableObjectIdentityAdapter:
     """Production default; refuses to invent a browser object match."""
 
     def verify_candidate(self, candidate: dict, page_state: dict) -> ObjectVerification:
-        raise HostError("INTERNAL_FAILURE", "对象身份适配器未配置")
+        raise HostError("INTERNAL_FAILURE", "Object identity adapter is not configured")
 
     def rebind_object(self, audit_object: dict, page_state: dict) -> ObjectVerification:
-        raise HostError("INTERNAL_FAILURE", "对象身份适配器未配置")
+        raise HostError("INTERNAL_FAILURE", "Object identity adapter is not configured")
 
 
 class DeterministicObjectIdentityAdapter:
@@ -58,10 +58,10 @@ class DeterministicObjectIdentityAdapter:
             matched_dimensions=("role", "accessible_name", "business_region"),
             match=ObjectMatch(
                 host_locator_id="locator-orders-filter-001",
-                identity_material="filter_region|search|订单筛选|orders",
+                identity_material="filter_region|search|Order filters|orders",
                 role="search",
-                accessible_name="订单筛选",
-                visible_text="订单筛选 查询 重置",
+                accessible_name="Order filters",
+                visible_text="Order filters Query Reset",
                 x=20, y=80, width=640, height=120,
                 viewport_width=1280, viewport_height=800,
                 controls=(

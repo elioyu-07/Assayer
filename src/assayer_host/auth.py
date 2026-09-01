@@ -56,14 +56,14 @@ class LoginSecret:
         if value is None:
             return None
         if not isinstance(value, str):
-            return "登录失败"
+            return "Login failed"
         with self._lock:
             if not self._cleared:
                 for secret in (self._username.decode("utf-8"), self._password.decode("utf-8")):
                     if secret:
                         value = value.replace(secret, "[REDACTED]")
         value = re.sub(r"(?i)(password|passwd|token|secret)=([^&\s]+)", r"\1=[REDACTED]", value)
-        return " ".join(value.split())[:512] or "登录失败"
+        return " ".join(value.split())[:512] or "Login failed"
 
     def clear(self) -> None:
         with self._lock:
@@ -194,16 +194,16 @@ class LoginCoordinator:
             else:
                 phases.append("failed")
         except Exception:
-            error_code, reason = "INTERNAL_FAILURE", "登录适配器执行失败"
+            error_code, reason = "INTERNAL_FAILURE", "Login adapter failed"
             phases.append("failed")
         try:
             secret.clear()
         except Exception:
-            error_code, reason = "CREDENTIAL_CHANNEL_FAILED", "凭据清除失败"
+            error_code, reason = "CREDENTIAL_CHANNEL_FAILED", "Credential cleanup failed"
             result = None
         cleared = secret.is_cleared
         if not cleared:
-            error_code, reason = "CREDENTIAL_CHANNEL_FAILED", "凭据清除失败"
+            error_code, reason = "CREDENTIAL_CHANNEL_FAILED", "Credential cleanup failed"
             result = None
         phases.append("credential_cleared" if cleared else "credential_clear_failed")
         return LoginOutcome("succeeded" if result else "failed", result, error_code, reason, tuple(phases), cleared)
@@ -223,7 +223,7 @@ class LoginCoordinator:
             else:
                 phases.append("failed")
         except Exception:
-            error_code, reason = "INTERNAL_FAILURE", "匿名页面适配器执行失败"
+            error_code, reason = "INTERNAL_FAILURE", "Anonymous page adapter failed"
             phases.append("failed")
         return LoginOutcome("succeeded" if result else "failed", result, error_code, reason,
                             tuple(phases), True)
@@ -231,45 +231,45 @@ class LoginCoordinator:
     @staticmethod
     def _validate_result(result: object, secret: LoginSecret | None) -> tuple[str | None, str | None]:
         if not isinstance(result, LoginResult) or result.status not in {"succeeded", "failed"}:
-            return "INTERNAL_FAILURE", "登录适配器返回无效状态"
+            return "INTERNAL_FAILURE", "Login adapter returned an invalid status"
         if result.status == "failed":
             if result.current_page_state_id is not None or result.capabilities:
-                return "INTERNAL_FAILURE", "失败的登录结果包含页面事实"
+                return "INTERNAL_FAILURE", "A failed login result must not include page facts"
             if secret is not None:
                 reason = secret.redact(result.reason)
             else:
                 reason = LoginCoordinator._sanitize_anonymous_reason(result.reason)
-            return "LOGIN_FAILED", reason or "匿名页面访问失败"
+            return "LOGIN_FAILED", reason or "Anonymous page access failed"
         if not isinstance(result.current_page_state_id, str) or not result.current_page_state_id:
-            return "INTERNAL_FAILURE", "成功的登录结果缺少页面状态"
+            return "INTERNAL_FAILURE", "A successful login result is missing page state"
         capabilities = result.capabilities
         if (not isinstance(capabilities, tuple) or len(capabilities) != len(set(capabilities))
                 or any(not isinstance(item, str) or not item for item in capabilities)):
-            return "INTERNAL_FAILURE", "成功的登录结果包含无效能力集合"
+            return "INTERNAL_FAILURE", "A successful login result contains an invalid capability set"
         return None, None
 
     @staticmethod
     def _sanitize_anonymous_reason(value: object) -> str:
         if not isinstance(value, str):
-            return "匿名页面访问失败"
+            return "Anonymous page access failed"
         value = re.sub(r"(?i)(password|passwd|token|secret)=([^&\s]+)", r"\1=[REDACTED]", value)
-        return " ".join(value.split())[:512] or "匿名页面访问失败"
+        return " ".join(value.split())[:512] or "Anonymous page access failed"
 
 
 class UnavailableLoginAdapter:
     """Default adapter; prevents accidental success before browser integration."""
 
     def authenticate(self, url: str, secret: LoginSecret) -> LoginResult:
-        return LoginResult("failed", "浏览器登录适配器未配置")
+        return LoginResult("failed", "Browser login adapter is not configured")
 
     def authenticate_anonymous(self, url: str) -> LoginResult:
-        return LoginResult("failed", "匿名页面适配器未配置")
+        return LoginResult("failed", "Anonymous page adapter is not configured")
 
 
 class DeterministicLoginAdapter:
     """Test adapter; production code must provide a browser-backed adapter."""
 
-    def __init__(self, *, succeed: bool = True, reason: str = "登录适配器拒绝凭据"):
+    def __init__(self, *, succeed: bool = True, reason: str = "Login adapter rejected the credentials"):
         self.succeed = succeed
         self.reason = reason
 

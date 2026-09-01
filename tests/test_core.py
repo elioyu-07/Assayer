@@ -56,7 +56,7 @@ class FailingIssueStore(SQLiteStore):
 
 
 class SwitchingPageAdapter:
-    active_tab = "总览"
+    active_tab = "Overview"
 
     def observe(self, page_state_id):
         return PageObservation(
@@ -65,8 +65,8 @@ class SwitchingPageAdapter:
             identity_material=f"/app|tab|{self.active_tab}", visible_text=self.active_tab,
             active_tab=self.active_tab, structure_summary={"tabs": 2, "buttons": 0, "fields": 0, "tables": 0},
             entrypoints=(
-                EntrypointObservation("tab", "总览", "switch_tab", status="processed" if self.active_tab == "总览" else "unprocessed", host_locator_id="tab-browser-0"),
-                EntrypointObservation("tab", "明细", "switch_tab", status="processed" if self.active_tab == "明细" else "unprocessed", host_locator_id="tab-browser-1"),
+                EntrypointObservation("tab", "Overview", "switch_tab", status="processed" if self.active_tab == "Overview" else "unprocessed", host_locator_id="tab-browser-0"),
+                EntrypointObservation("tab", "Details", "switch_tab", status="processed" if self.active_tab == "Details" else "unprocessed", host_locator_id="tab-browser-1"),
             ), network_summary={"pendingReadRequests": 0, "observedWrites": 0},
         )
 
@@ -189,18 +189,73 @@ class HostCoreTest(unittest.TestCase):
         inspected = core.handle(session(started, input={"pageStateId": started["currentPageStateId"],
                                                         "include": ["route", "safeEntrypoints"]}))["result"]
         detail = next(core._store.get_entrypoint(ref) for ref in inspected["entrypointRefs"]
-                      if core._store.get_entrypoint(ref)["label"] == "明细")
+                      if core._store.get_entrypoint(ref)["label"] == "Details")
         explored = core.handle(session(started, tool="explore_entrypoint", key="explore-detail", revision=1,
                                        input={"pageStateId": started["currentPageStateId"],
                                               "entrypointId": detail["entrypointId"]}))
         self.assertEqual(explored["status"], "ok")
-        self.assertEqual(explored["result"]["activeTab"], "明细")
+        self.assertEqual(explored["result"]["activeTab"], "Details")
         self.assertEqual(explored["runRevision"], 2)
         self.assertNotEqual(explored["result"]["pageStateId"], started["currentPageStateId"])
         stored = core._store.get_page_state(explored["result"]["pageStateId"])
         self.assertEqual(stored["parentPageStateId"], started["currentPageStateId"])
         current = core._store.get_scan(started["scanId"])
         self.assertEqual(current["current_page_state_id"], explored["result"]["pageStateId"])
+
+    def test_completion_merges_reobserved_logical_tabs_without_hiding_new_destinations(self):
+        page_adapter = SwitchingPageAdapter()
+        core = self.make_core(page_adapter=page_adapter, entrypoint_adapter=SwitchingEntrypointAdapter(page_adapter))
+        started = bootstrap(core)["result"]
+        initial = core.handle(session(started, key="logical-tabs-initial", input={
+            "pageStateId": started["currentPageStateId"], "include": ["safeEntrypoints"],
+        }))["result"]
+        detail = next(item for item in initial["entrypoints"] if item["label"] == "Details")
+
+        before = core.build_completion_input(started["scanId"], started["runId"])
+        self.assertEqual(len(before["processedEntrypointRefs"]), 1)
+        self.assertEqual(len(before["unprocessedEntrypointRefs"]), 1)
+
+        core.handle(session(started, tool="explore_entrypoint", key="logical-tabs-detail", revision=1, input={
+            "pageStateId": started["currentPageStateId"], "entrypointId": detail["entrypointId"],
+        }))
+        after = core.build_completion_input(started["scanId"], started["runId"])
+        self.assertEqual(len(after["processedEntrypointRefs"]), 4)
+        self.assertEqual(after["unprocessedEntrypointRefs"], [])
+
+    def test_explore_entrypoint_blocks_navigation_until_case_decision_is_committed(self):
+        core = self.make_core(entrypoint_adapter=SwitchingEntrypointAdapter(SwitchingPageAdapter()))
+        started, _ = self.discover_candidate(core)
+        page = core._store.get_page_state(started["currentPageStateId"])
+        candidate = core._store.get_candidates(started["currentPageStateId"])[0]
+        object_id = core.handle(session(started, tool="inspect_object", key="barrier-verify",
+                                         input={"candidateId": candidate["candidateId"]}))["result"]["objectId"]
+        case = core.handle(session(started, tool="begin_case", key="barrier-case",
+                                   input={"objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                                          "kind": "observation", "purpose": "Verify the page object",
+                                          "plannedCoverageDimensions": ["filter_present"]}))
+        entrypoint = core._store.get_entrypoints(started["currentPageStateId"])[0]
+        revision = core._store.get_scan(started["scanId"])["run_revision"]
+        result = core.handle(session(started, tool="explore_entrypoint", key="barrier-explore", revision=revision,
+                                      input={"pageStateId": page["pageStateId"], "entrypointId": entrypoint["entrypointId"]}))
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["error"]["code"], "CASE_ACTIVE")
+        self.assertEqual(core._store.get_scan(started["scanId"])["current_page_state_id"], page["pageStateId"])
+
+    def test_build_completion_input_closes_candidate_backed_entry_after_formal_decision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
+            started = bootstrap(core)["result"]
+            with core._store.transaction() as connection:
+                connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
+            object_id, _ = self.committed_no_issue(core, started)
+            payload = core.build_completion_input(started["scanId"], started["runId"], "Automatic convergence")
+            self.assertEqual(payload["processedObjectRefs"], [object_id])
+            self.assertEqual(len(payload["processedEntrypointRefs"]), 1)
+            self.assertEqual(payload["unprocessedEntrypointRefs"], [])
+            self.assertEqual(payload["ruleSummaries"][0]["assessmentCount"], 1)
+            self.assertEqual(payload["ruleSummaries"][0]["resultCounts"], {"scanned_no_issue": 1})
+            result = core.handle(session(started, tool="complete_audit", key="auto-complete", revision=7, input=payload))
+            self.assertEqual(result["result"]["scanStatus"], "completed")
 
     def test_bootstrap_clears_consumed_secret_after_success(self):
         vault = CredentialVault()
@@ -299,7 +354,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(len(result["result"]["entrypointRefs"]), 1)
         self.assertEqual(adapter.calls, 1)
         candidate = core._store.get_candidates(started["currentPageStateId"])[0]
-        self.assertEqual(candidate["potentialRules"], [{"ruleId":"FUA-10","version":"1.0.0"}])
+        self.assertEqual(candidate["potentialRules"], [{"ruleId":"FUA-10","version":"1.1.0"}])
 
     def test_inspect_page_reuses_immutable_snapshot_for_new_read(self):
         adapter = CountingPageAdapter()
@@ -353,10 +408,10 @@ class HostCoreTest(unittest.TestCase):
         page = core.handle(session(started, key=f"{key}-discover", revision=revision, input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
         candidate_id = page["candidateRefs"][0]
         object_id = core.handle(session(started, tool="inspect_object", key=f"{key}-verify", revision=revision, input={"candidateId":candidate_id}))["result"]["objectId"]
-        response = core.handle(session(started, tool="begin_case", key=key, revision=revision, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"验证筛选能力","plannedCoverageDimensions":["filter_present","query_action","reset_action","binding_to_list"]}))
+        response = core.handle(session(started, tool="begin_case", key=key, revision=revision, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},"kind":"observation","purpose":"Verify filter capabilities","plannedCoverageDimensions":["filter_present","query_action","reset_action","binding_to_list"]}))
         return object_id, response
 
-    def perform_action(self, core, started, object_id, case_id, *, key="action-1", revision=2, action_type="focus", intent="观察筛选区", parameters=None):
+    def perform_action(self, core, started, object_id, case_id, *, key="action-1", revision=2, action_type="focus", intent="Observe the filter region", parameters=None):
         return core.handle(session(started, tool="perform_action", key=key, revision=revision, input={"pageStateId":started["currentPageStateId"],"caseId":case_id,"objectId":object_id,"type":action_type,"intent":intent,"parameters":parameters or {}}))
 
     def restore_case(self, core, started, object_id, case_id, *, key="restore-1", revision=3):
@@ -368,24 +423,30 @@ class HostCoreTest(unittest.TestCase):
             input_data["caseId"] = case_id
         return core.handle(session(started, tool="capture_evidence", key=key, revision=revision, input=input_data))
 
+    def observe_page(self, core, started, object_id, *, case_id=None, key="observe-page-1", revision=2):
+        input_data = {"pageStateId": started["currentPageStateId"], "objectId": object_id}
+        if case_id:
+            input_data["caseId"] = case_id
+        return core.handle(session(started, tool="observe_page", key=key, revision=revision, input=input_data))
+
     def record_findings(self, core, started, object_id, case_id, evidence_id, *, result="scanned_no_issue", revision=4, dimensions=None, key="findings"):
         dimensions = dimensions or ["filter_present", "query_action", "reset_action", "binding_to_list"]
         statuses = {dimension:"satisfied" for dimension in dimensions}
         if result == "issue_found": statuses["reset_action"] = "violated"
         if result == "needs_review": statuses[dimensions[-1]] = "unresolved"
         response = core.handle(session(started, tool="record_findings", key=key, revision=revision,
-            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
-                   "findings":[{"dimension":dimension,"status":status,"reasonText":"测试 Evidence 支持维度状态",
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},
+                   "findings":[{"dimension":dimension,"status":status,"reasonText":"Test Evidence supports the dimension state",
                                 "evidenceRefs":[evidence_id],"caseRefs":[case_id]} for dimension, status in statuses.items()]}))
         return response["result"]["findingRefs"]
 
     def prepare_input(self, object_id, case_id, evidence_id, *, finding_refs=None, result="issue_found", raw_visual_ref=None):
-        data = {"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":result,
-                "reasonText":"Host 证据支持该判定","findingRefs":finding_refs or ["finding-placeholder"],
+        data = {"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},"result":result,
+                "reasonText":"Host evidence supports this decision","findingRefs":finding_refs or ["finding-placeholder"],
                 "evidenceRefs":[evidence_id],"caseRefs":[case_id]}
         if result == "issue_found":
-            data.update({"rawVisualRef":raw_visual_ref,"severity":"P2","title":"筛选区缺少重置",
-                         "message":"筛选区只有查询动作。","impact":"用户无法一键恢复筛选条件。","recommendation":"增加绑定同一列表的重置动作。"})
+            data.update({"rawVisualRef":raw_visual_ref,"severity":"P2","title":"Filter region lacks reset",
+                         "message":"The filter region provides only a query action.","impact":"Users cannot restore filter conditions in one action.","recommendation":"Add a reset action bound to the same list."})
         return data
 
     def committed_no_issue(self, core, started):
@@ -404,9 +465,9 @@ class HostCoreTest(unittest.TestCase):
         entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
         return {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],
                 "processedEntrypointRefs":[] if partial else [entrypoint_id],"skippedEntrypoints":[],
-                "ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.0.0"},"assessmentCount":assessment_count,
+                "ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.1.0"},"assessmentCount":assessment_count,
                                   "resultCounts":{"scanned_no_issue":assessment_count},"coverageComplete":True}],
-                "unprocessedEntrypointRefs":[entrypoint_id] if partial else [],"completionReason":"覆盖验证完成"}
+                "unprocessedEntrypointRefs":[entrypoint_id] if partial else [],"completionReason":"Coverage verification completed"}
 
     def test_inspect_object_matched_upgrades_candidate(self):
         core = self.make_core()
@@ -416,26 +477,52 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(result["runRevision"], 1)
         audit_object = core._store.get_audit_object(result["result"]["objectId"])
         self.assertEqual(audit_object["status"], "eligible")
-        self.assertEqual(audit_object["potentialRules"], [{"ruleId":"FUA-10","version":"1.0.0"}])
+        self.assertEqual(audit_object["potentialRules"], [{"ruleId":"FUA-10","version":"1.1.0"}])
         self.assertTrue(result["result"]["controls"])
         self.assertTrue(result["result"]["lists"])
         self.assertNotIn("selector", json.dumps(result["result"]))
         self.assertNotIn("hostLocatorId", json.dumps(result["result"]))
 
+    def test_observe_page_persists_model_context_and_visual_reference(self):
+        core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
+        started, candidate_id = self.discover_candidate(core)
+        object_id = self.inspect_candidate(core, started, candidate_id)["result"]["objectId"]
+        result = self.observe_page(core, started, object_id, revision=1)
+        self.assertEqual(result["status"], "ok")
+        observation = result["result"]["observation"]
+        self.assertEqual(observation["kind"], "runtime_visual")
+        self.assertEqual(observation["visual"]["status"], "captured")
+        self.assertEqual(observation["visual"]["sanitizationStatus"], "sanitized")
+        evidence = core._store.get_evidence(result["result"]["evidenceId"])
+        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        self.assertEqual(evidence["kind"], "runtime_visual")
+        self.assertEqual(evidence["payload"]["content"]["observationScope"], "viewport")
+        self.assertEqual(screenshot["kind"], "raw_visual")
+        self.assertEqual(screenshot["status"], "captured")
+
     def test_get_rule_contract_reads_frozen_digest_without_revision_change(self):
         core = self.make_core()
         started = bootstrap(core)["result"]
         request = session(started, tool="get_rule_contract", key="rule-contract",
-                          input={"rule":{"ruleId":"FUA-10","version":"1.0.0"}})
+                          input={"rule":{"ruleId":"FUA-10","version":"1.1.0"}})
         result = core.handle(request)
         self.assertEqual(result["status"], "ok")
-        self.assertIn("最低覆盖契约", result["result"]["content"])
-        self.assertEqual(result["result"]["contentDigest"], core._rules[("FUA-10", "1.0.0")]["contentDigest"])
+        self.assertIn("Minimum Coverage Contract", result["result"]["content"])
+        self.assertEqual(result["result"]["contentDigest"], core._rules[("FUA-10", "1.1.0")]["contentDigest"])
         self.assertEqual(result["runRevision"], 1)
-        core._rules[("FUA-10", "1.0.0")]["contentDigest"] = "0" * 64
+        core._rules[("FUA-10", "1.1.0")]["contentDigest"] = "0" * 64
         failed = core.handle(session(started, tool="get_rule_contract", key="rule-contract-tampered",
-                                     input={"rule":{"ruleId":"FUA-10","version":"1.0.0"}}))
+                                     input={"rule":{"ruleId":"FUA-10","version":"1.1.0"}}))
         self.assertEqual(failed["error"]["code"], "RULE_CONTRACT_INTEGRITY_FAILED")
+
+    def test_fua_10_current_contract_is_frontend_only(self):
+        core = self.make_core()
+        rule = core._rules[("FUA-10", "1.1.0")]
+        self.assertEqual(rule["requiredCapabilities"], ["runtime", "dom"])
+        content = (Path(__file__).parents[1] / rule["document"]).read_text(encoding="utf-8")
+        self.assertIn("This rule audits frontend behavior only", content)
+        self.assertIn("whether the list content changes after an action", content)
+        self.assertIn("Backend unavailability", content)
 
     def test_progress_rebuilds_investigation_from_effective_findings(self):
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
@@ -466,10 +553,10 @@ class HostCoreTest(unittest.TestCase):
         old_ref = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"],
                                        dimensions=["binding_to_list"], key="finding-old")[0]
         replacement = core.handle(session(started, tool="record_findings", key="finding-new", revision=5,
-            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
-                   "findings":[{"dimension":"binding_to_list","status":"unresolved","reasonText":"现有证据无法确认绑定",
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},
+                   "findings":[{"dimension":"binding_to_list","status":"unresolved","reasonText":"Current evidence cannot confirm the binding",
                                 "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id],"supersedesRef":old_ref}]}))
-        latest = core._store.get_latest_findings(started["scanId"], object_id, {"ruleId":"FUA-10","version":"1.0.0"})
+        latest = core._store.get_latest_findings(started["scanId"], object_id, {"ruleId":"FUA-10","version":"1.1.0"})
         self.assertEqual([item["findingId"] for item in latest], replacement["result"]["findingRefs"])
         self.assertEqual(len(core._store.list_entities("dimension_findings", started["scanId"])), 2)
 
@@ -490,7 +577,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertNotIn("objectId", result["result"])
 
     def test_inspect_object_changed_returns_replacement_candidate(self):
-        match = ObjectMatch("locator-new","filter_region|search|新筛选区","search","新筛选区","新筛选区",20,80,640,120,1280,800)
+        match = ObjectMatch("locator-new","filter_region|search|new-filter-region","search","New filter region","New filter region",20,80,640,120,1280,800)
         adapter = DeterministicObjectIdentityAdapter(ObjectVerification("changed", 1, changed_dimensions=("accessible_name",), match=match))
         core = self.make_core(identity_adapter=adapter)
         started, candidate_id = self.discover_candidate(core)
@@ -528,7 +615,7 @@ class HostCoreTest(unittest.TestCase):
         core = self.make_core()
         started = bootstrap(core)["result"]
         object_id, first = self.begin_case(core, started)
-        second = core.handle(session(started, tool="begin_case", key="case-2", revision=2, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"重复验证","plannedCoverageDimensions":["filter_present"]}))
+        second = core.handle(session(started, tool="begin_case", key="case-2", revision=2, input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},"kind":"observation","purpose":"Repeat verification","plannedCoverageDimensions":["filter_present"]}))
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["error"]["code"], "CASE_ALREADY_ACTIVE")
         self.assertEqual(second["runRevision"], 2)
@@ -554,19 +641,60 @@ class HostCoreTest(unittest.TestCase):
         core = self.make_core(action_adapter=DeterministicActionAdapter())
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
-        result = self.perform_action(core, started, object_id, case_result["result"]["caseId"], action_type="input_synthetic_value", parameters={"value":"do-not-persist","nested":{"label":"private"}})
+        result = self.perform_action(core, started, object_id, case_result["result"]["caseId"], action_type="focus", parameters={"value":"do-not-persist","nested":{"label":"private"}})
         stored = core._store.get_action_attempt(result["result"]["actionId"])
         serialized = str(stored)
         self.assertNotIn("do-not-persist", serialized)
         self.assertNotIn("private", serialized)
         self.assertEqual(stored["parameters"]["value"]["valueClass"], "redacted_string")
 
+    def test_synthetic_input_requires_owned_control_ref_and_records_interaction_evidence(self):
+        interaction = {
+            "actionType": "input_synthetic_value", "controlRef": "control-filter-input-001",
+            "syntheticValueClass": "valid",
+            "before": {"controls": [{"controlRef": "control-filter-input-001", "valueClass": "empty"}], "lists": [], "page": {}},
+            "after": {"controls": [{"controlRef": "control-filter-input-001", "valueClass": "non_empty"}], "lists": [], "page": {}},
+            "diff": {"changedListRefs": [], "controlStateChanged": True, "loadingStateChanged": False},
+        }
+        adapter = DeterministicActionAdapter(ActionExecution(interaction=interaction))
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.perform_action(
+            core, started, object_id, case_result["result"]["caseId"],
+            action_type="input_synthetic_value",
+            parameters={"controlRef": "control-filter-input-001", "valueClass": "valid"},
+        )
+        self.assertEqual(result["status"], "ok")
+        evidence_ref = result["result"]["interactionEvidenceRef"]
+        evidence = core._store.get_evidence(evidence_ref)
+        self.assertEqual(evidence["kind"], "runtime_interaction")
+        self.assertEqual(evidence["caseRef"], case_result["result"]["caseId"])
+        action = core._store.get_action_attempt(result["result"]["actionId"])
+        self.assertEqual(action["parameters"], {"controlRef": "control-filter-input-001", "valueClass": "valid"})
+        case = core._store.get_case(case_result["result"]["caseId"])
+        self.assertEqual(case["actions"][0]["inverseAction"]["type"], "restore_value")
+        self.assertEqual(case["actions"][0]["resultEvidenceRefs"], [evidence_ref])
+
+    def test_synthetic_input_rejects_unknown_control_and_raw_value(self):
+        adapter = DeterministicActionAdapter()
+        core = self.make_core(action_adapter=adapter)
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        result = self.perform_action(
+            core, started, object_id, case_result["result"]["caseId"],
+            action_type="input_synthetic_value",
+            parameters={"controlRef": "control-invented", "valueClass": "valid", "value": "unsafe"},
+        )
+        self.assertEqual(result["error"]["code"], "INVALID_REQUEST")
+        self.assertEqual(adapter.calls, 0)
+
     def test_write_request_is_blocked_before_send_and_not_replayed(self):
         adapter = DeterministicActionAdapter(ActionExecution(requests=(NetworkRequest("POST", "https://test.example.com/orders/save"),)))
         core = self.make_core(action_adapter=adapter)
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
-        request = session(started, tool="perform_action", key="write", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        request = session(started, tool="perform_action", key="write", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe the filter region","parameters":{}})
         first = core.handle(request)
         second = core.handle(request)
         self.assertEqual(first["error"]["code"], "REQUEST_BLOCKED")
@@ -579,7 +707,7 @@ class HostCoreTest(unittest.TestCase):
         core = self.make_core(action_adapter=adapter)
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
-        request = session(started, tool="perform_action", key="unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        request = session(started, tool="perform_action", key="unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe the filter region","parameters":{}})
         first = core.handle(request)
         retry = core.handle(request)
         self.assertEqual(first["error"]["code"], "REQUEST_RESULT_UNKNOWN")
@@ -598,7 +726,7 @@ class HostCoreTest(unittest.TestCase):
             first = self.make_core(store=first_store, action_adapter=first_adapter)
             started = bootstrap(first)["result"]
             object_id, case_result = self.begin_case(first, started)
-            request = session(started, tool="perform_action", key="restart-unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+            request = session(started, tool="perform_action", key="restart-unknown", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe the filter region","parameters":{}})
             first.handle(request)
             first_store.close(); self.cores.remove(first)
             second_adapter = DeterministicActionAdapter()
@@ -634,8 +762,8 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(adapter.calls, ["targeted_inverse", "refresh_replay"])
 
     def test_restore_failure_with_unknown_pending_fails_scan(self):
-        failed = RecoveryAttempt("targeted_inverse", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "pending 请求未收束")
-        refresh = RecoveryAttempt("refresh_replay", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "刷新仍未知")
+        failed = RecoveryAttempt("targeted_inverse", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "Pending requests did not converge")
+        refresh = RecoveryAttempt("refresh_replay", "failed", (RecoveryCheck("url_route", "match"), RecoveryCheck("page_layer", "match"), RecoveryCheck("active_tab", "match"), RecoveryCheck("overlay_state", "match"), RecoveryCheck("control_state", "match"), RecoveryCheck("object_identity", "match"), RecoveryCheck("pending_requests", "unknown"), RecoveryCheck("write_request", "unknown")), "State remained unknown after refresh")
         adapter = DeterministicRecoveryAdapter(targeted=failed, refresh=refresh)
         core = self.make_core(recovery_adapter=adapter)
         started = bootstrap(core)["result"]
@@ -660,7 +788,7 @@ class HostCoreTest(unittest.TestCase):
             core = self.make_core(store=store)
             started = bootstrap(core)["result"]
             object_id, case_result = self.begin_case(core, started)
-            request = session(started, tool="perform_action", key="interrupted", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察","parameters":{}})
+            request = session(started, tool="perform_action", key="interrupted", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe","parameters":{}})
             operation = core._new_operation(request, started["scanId"], "browser_action", core._request_digest(request), "running", 2)
             with core._store.transaction():
                 core._store.insert_operation(operation)
@@ -701,7 +829,7 @@ class HostCoreTest(unittest.TestCase):
             self.assertTrue((Path(tmp) / screenshot["path"]).exists())
 
     def test_capture_visual_rejection_is_persisted_not_promoted(self):
-        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={"status":"failed"}, raw_visual=RawVisualCapture(status="ambiguous", reason="对象定位不唯一"))
+        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={"status":"failed"}, raw_visual=RawVisualCapture(status="ambiguous", reason="Object location is not unique"))
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
@@ -712,7 +840,7 @@ class HostCoreTest(unittest.TestCase):
 
     def test_capture_rejects_visual_bound_to_wrong_box(self):
         raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nwrong-box", width=1280, height=800,
-                               bounding_box={"x":0,"y":0,"width":10,"height":10}, annotation="错误位置")
+                               bounding_box={"x":0,"y":0,"width":10,"height":10}, annotation="Wrong location")
         capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=raw)
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture))
         started = bootstrap(core)["result"]
@@ -815,11 +943,69 @@ class HostCoreTest(unittest.TestCase):
     def test_prepare_needs_review_requires_structured_blocker(self):
         core = self.make_core()
         started = bootstrap(core)["result"]
-        data = {"objectId":"object-001","rule":{"ruleId":"FUA-10","version":"1.0.0"},"result":"needs_review",
-                "reasonText":"证据冲突","findingRefs":["finding-001"],"evidenceRefs":[],"caseRefs":["case-001"]}
+        data = {"objectId":"object-001","rule":{"ruleId":"FUA-10","version":"1.1.0"},"result":"needs_review",
+                "reasonText":"Evidence conflicts","findingRefs":["finding-001"],"evidenceRefs":[],"caseRefs":["case-001"]}
         with self.assertRaises(HostError) as caught:
             core.handle(session(started, tool="prepare_decision", key="prepare-no-blocker", input=data))
         self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+
+    def test_prepare_rejects_binding_review_without_page_observation(self):
+        core = self.make_core(
+            evidence_adapter=DeterministicEvidenceAdapter(),
+            recovery_adapter=DeterministicRecoveryAdapter(),
+        )
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        evidence = self.capture_evidence(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        evidence_id = evidence["result"]["evidenceId"]
+        finding_refs = self.record_findings(
+            core, started, object_id, case_id, evidence_id, result="needs_review",
+        )
+        data = self.prepare_input(
+            object_id, case_id, evidence_id,
+            finding_refs=finding_refs, result="needs_review",
+        )
+        data["blocker"] = {
+            "code": "BINDING_UNRESOLVED",
+            "message": "The current DOM summary cannot uniquely identify the list bound to the filter region",
+        }
+        result = core.handle(session(
+            started, tool="prepare_decision", key="prepare-binding-without-observation",
+            revision=5, input=data,
+        ))
+        self.assertEqual(result["error"]["code"], "EVIDENCE_INSUFFICIENT")
+        self.assertIn("observe_page", result["error"]["message"])
+
+    def test_prepare_accepts_binding_review_with_page_observation(self):
+        core = self.make_core(
+            evidence_adapter=DeterministicEvidenceAdapter(),
+            recovery_adapter=DeterministicRecoveryAdapter(),
+        )
+        started = bootstrap(core)["result"]
+        object_id, case_result = self.begin_case(core, started)
+        case_id = case_result["result"]["caseId"]
+        observation = self.observe_page(core, started, object_id, case_id=case_id, revision=2)
+        self.restore_case(core, started, object_id, case_id, revision=3)
+        evidence_id = observation["result"]["evidenceId"]
+        finding_refs = self.record_findings(
+            core, started, object_id, case_id, evidence_id, result="needs_review",
+        )
+        data = self.prepare_input(
+            object_id, case_id, evidence_id,
+            finding_refs=finding_refs, result="needs_review",
+        )
+        data["blocker"] = {
+            "code": "BINDING_UNRESOLVED",
+            "message": "Multiple logical lists in the viewport still prevent unique attribution",
+        }
+        result = core.handle(session(
+            started, tool="prepare_decision", key="prepare-binding-with-observation",
+            revision=5, input=data,
+        ))
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("pendingDecisionId", result["result"])
 
     def test_prepare_rejects_case_before_recovery_barrier(self):
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
@@ -837,7 +1023,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         page = core.handle(session(started, key="partial-discover", input={"pageStateId":started["currentPageStateId"],"include":["objects"]}))["result"]
         object_id = self.inspect_candidate(core, started, page["candidateRefs"][0], key="partial-inspect")["result"]["objectId"]
-        case = core.handle(session(started, tool="begin_case", key="partial-case", input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},"kind":"observation","purpose":"局部覆盖","plannedCoverageDimensions":["filter_present"]}))["result"]
+        case = core.handle(session(started, tool="begin_case", key="partial-case", input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},"kind":"observation","purpose":"Partial coverage","plannedCoverageDimensions":["filter_present"]}))["result"]
         evidence = self.capture_evidence(core, started, object_id, case_id=case["caseId"], revision=2)
         self.restore_case(core, started, object_id, case["caseId"], revision=3)
         finding_refs = self.record_findings(core, started, object_id, case["caseId"], evidence["result"]["evidenceId"], dimensions=["filter_present"])
@@ -855,8 +1041,8 @@ class HostCoreTest(unittest.TestCase):
         statuses = {dimension:"satisfied" for dimension in ["filter_present", "query_action", "reset_action", "binding_to_list"]}
         statuses["binding_to_list"] = "unresolved"
         recorded = core.handle(session(started, tool="record_findings", key="unresolved-findings", revision=4,
-            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
-                   "findings":[{"dimension":dimension,"status":status,"reasonText":"逐维结论",
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},
+                   "findings":[{"dimension":dimension,"status":status,"reasonText":"Per-dimension conclusion",
                                 "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id]}
                                for dimension, status in statuses.items()]}))
         data = self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"],
@@ -873,13 +1059,13 @@ class HostCoreTest(unittest.TestCase):
         old_ref = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"],
                                        revision=3, dimensions=["query_action"], key="supersede-source")[0]
         result = core.handle(session(started, tool="record_findings", key="supersede-wrong-dimension", revision=4,
-            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.0.0"},
-                   "findings":[{"dimension":"reset_action","status":"satisfied","reasonText":"错误替代目标",
+            input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},
+                   "findings":[{"dimension":"reset_action","status":"satisfied","reasonText":"Wrong supersession target",
                                 "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id],"supersedesRef":old_ref}]}))
         self.assertEqual(result["error"]["code"], "INVALID_SUPERSEDES_REFERENCE")
 
     def test_prepare_rejects_failed_raw_visual(self):
-        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=RawVisualCapture(status="ambiguous", reason="对象歧义"))
+        capture = EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=RawVisualCapture(status="ambiguous", reason="Object is ambiguous"))
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(capture), recovery_adapter=DeterministicRecoveryAdapter())
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
@@ -894,7 +1080,7 @@ class HostCoreTest(unittest.TestCase):
     def test_prepare_rejects_captured_visual_without_image_sanitization(self):
         with tempfile.TemporaryDirectory() as tmp:
             raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nunsanitized", width=1280, height=800,
-                                   bounding_box={"x":20,"y":80,"width":640,"height":120}, annotation="对象区域",
+                                   bounding_box={"x":20,"y":80,"width":640,"height":120}, annotation="Object region",
                                    sanitized=False, sanitization_status="not_performed")
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=raw)), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
@@ -987,7 +1173,7 @@ class HostCoreTest(unittest.TestCase):
             case["status"] = "restore_failed"
             case["recovery"]["finalStatus"] = "failed"
             case["endedAt"] = core._now()
-            case["restoreReason"] = {"code":"TEST_INVALIDATION","message":"测试使恢复屏障失效"}
+            case["restoreReason"] = {"code":"TEST_INVALIDATION","message":"Test invalidated the recovery barrier"}
             core._store.update_case(case)
         result = core.handle(session(started, tool="commit_decision", key="stale-commit", revision=6,
                                      input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
@@ -1052,12 +1238,16 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(ledger["scan"]["status"], "completed")
             self.assertEqual(ledger["scan"]["coverageProof"]["processedObjectRefs"], [object_id])
             self.assertEqual(len(ledger["assessments"]), 1)
-            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log"}
+            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log", "runtime-events.jsonl", "observability-manifest.json"}
             self.assertEqual(set(result["result"]["artifactPaths"]), expected)
             self.assertTrue(all((Path(tmp) / name).exists() for name in expected))
             self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).iterdir()))
             issues = json.loads((Path(tmp) / "issues.json").read_text())
             self.assertEqual(issues["issues"], [])
+            diagnostics = json.loads((Path(tmp) / "run-diagnostics.json").read_text())
+            self.assertEqual(diagnostics["assessmentTimelines"][0]["assessmentId"], ledger["assessments"][0]["assessmentId"])
+            self.assertEqual(diagnostics["attributions"][0]["layer"], "unattributed")
+            self.assertIn("recommendation", diagnostics["attributions"][0])
             self.assertEqual(DerivedReportBuilder().render(ledger), DerivedReportBuilder().render(ledger))
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])
@@ -1117,14 +1307,14 @@ class HostCoreTest(unittest.TestCase):
             committed = core.handle(session(started, tool="commit_decision", key="report-commit", revision=6,
                                             input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
             entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
-            complete_input = {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],"processedEntrypointRefs":[entrypoint_id],"skippedEntrypoints":[],"ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.0.0"},"assessmentCount":1,"resultCounts":{"issue_found":1},"coverageComplete":True}],"unprocessedEntrypointRefs":[],"completionReason":"问题和覆盖均已确认"}
+            complete_input = {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],"processedEntrypointRefs":[entrypoint_id],"skippedEntrypoints":[],"ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.1.0"},"assessmentCount":1,"resultCounts":{"issue_found":1},"coverageComplete":True}],"unprocessedEntrypointRefs":[],"completionReason":"Issue and coverage are confirmed"}
             core.handle(session(started, tool="complete_audit", key="report-complete", revision=7, input=complete_input))
             report = json.loads((Path(tmp) / "issues.json").read_text())
             self.assertEqual(len(report["issues"]), 1)
             self.assertEqual(report["issues"][0]["issueId"], committed["result"]["issueId"])
             self.assertEqual(report["issues"][0]["screenshotRef"], prepared["result"]["screenshotRef"])
             summary = (Path(tmp) / "audit-summary.md").read_text()
-            self.assertIn("筛选区缺少重置", summary)
+            self.assertIn("Filter region lacks reset", summary)
 
     def test_failed_scan_view_hides_formally_recorded_issue(self):
         ledger = json.loads(Path("examples/issue-ledger.json").read_text())
@@ -1155,7 +1345,7 @@ class HostCoreTest(unittest.TestCase):
         core = self.make_core(action_adapter=adapter)
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
-        request = session(started, tool="perform_action", key="action-1", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"观察筛选区","parameters":{}})
+        request = session(started, tool="perform_action", key="action-1", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe the filter region","parameters":{}})
         result = core.handle(request)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")

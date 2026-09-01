@@ -76,21 +76,21 @@ class ActionPage:
         self.route_request = None
         self.locator_instance = FakeLocator(self)
         self.probe = {
-            "visibleText": "订单列表 查询",
+            "visibleText": "Orders Query",
             "route": "/orders",
             "stateKind": "page",
             "entrypoints": [],
             "candidates": [{
-                "kind": "filter_region", "label": "订单筛选", "role": "search",
+                "kind": "filter_region", "label": "Order filters", "role": "search",
                 "locator_material": "orders-filter", "host_locator_id": "locator-browser-0",
-                "identity_material": "filter_region|search|订单筛选|orders", "accessible_name": "订单筛选",
-                "visible_text": "查询", "x": 20, "y": 80, "width": 640, "height": 120,
+                "identity_material": "filter_region|search|Order filters|orders", "accessible_name": "Order filters",
+                "visible_text": "Query", "x": 20, "y": 80, "width": 640, "height": 120,
                 "viewport_width": 1280, "viewport_height": 800,
             }],
         }
 
     def title(self): return "Orders"
-    def content(self): return "<form role='search'>查询</form>"
+    def content(self): return "<form role='search'>Query</form>"
     def evaluate(self, expression, arg=None): return self.probe
     def locator(self, selector): return self.locator_instance
     def wait_for_timeout(self, timeout): return None
@@ -130,7 +130,7 @@ class BrowserSafeActionAdapterTest(unittest.TestCase):
             method, "https://test.example.com/action", resource_type="fetch")))
         adapter = BrowserSafeActionAdapter(session, page_adapter, guard)
         target = {"identity": {"hostLocatorId": "locator-browser-0",
-                                "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|订单筛选|orders")}}
+                                "fingerprint": BrowserLocatorRegistry.digest("filter_region|search|Order filters|orders")}}
         page_state = {"pageStateId": "page-001", "origin": "https://test.example.com"}
         return session, adapter, target, page_state
 

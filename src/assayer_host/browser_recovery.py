@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from typing import Callable
 
 
-RECOVERY_PROBE_V1 = """({targetIndex}) => {
+RECOVERY_PROBE_V1 = r"""({targetIndex}) => {
+  const clean = (value, limit = 240) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit);
   const visible = (element) => {
     if (!element) return false;
     const style = getComputedStyle(element);
@@ -26,8 +27,12 @@ RECOVERY_PROBE_V1 = """({targetIndex}) => {
   const regions = [...document.querySelectorAll('[role="search"], form, [data-testid*="filter" i], [class*="filter" i]')]
     .filter(visible).slice(0, 128);
   const target = regions[targetIndex] || null;
-  const tabs = [...document.querySelectorAll('[role="tab"]')].filter(visible);
-  const selectedTab = tabs.findIndex((item) => item.getAttribute('aria-selected') === 'true');
+  const tabSelector = '[role="tab"], a[class*="tabs__item"], button[class*="tabs__item"], .tabs button, .tab';
+  const tabs = [...document.querySelectorAll(tabSelector)].filter(visible);
+  const activeTab = tabs.find((item) => item.getAttribute('aria-selected') === 'true' ||
+    /(^|\s)(active|is-active|selected)(\s|$)/.test(String(item.className)) ||
+    item.getAttribute('data-active') === 'true') || null;
+  const selectedTab = activeTab ? tabs.indexOf(activeTab) : -1;
   const dialogs = [...document.querySelectorAll('[role="dialog"], dialog[open]')].filter(visible);
   const modals = dialogs.filter((item) => item.getAttribute('aria-modal') === 'true');
   const drawers = [...document.querySelectorAll('[role="complementary"], [data-drawer], [class*="drawer" i]')].filter(visible);
@@ -35,9 +40,10 @@ RECOVERY_PROBE_V1 = """({targetIndex}) => {
   const expanded = controls.map((item) => item.getAttribute('aria-expanded')).filter((value) => value !== null);
   const box = target?.getBoundingClientRect();
   return {
-    route: location.pathname,
+    route: location.hash.startsWith('#/') ? location.hash.slice(1).split('?')[0] : location.pathname,
     pageLayer: dialogs.length ? 'dialog' : 'page',
-    activeTab: {count: tabs.length, selectedIndex: selectedTab},
+    activeTab: {count: tabs.length, selectedIndex: selectedTab,
+      label: activeTab ? clean(activeTab.getAttribute('aria-label') || activeTab.innerText || activeTab.textContent, 120) : null},
     overlayState: {dialogs: dialogs.length, modals: modals.length, drawers: drawers.length},
     controlState: target ? {
       expanded, checked: controls.filter((item) => item.checked === true).length,
@@ -75,14 +81,14 @@ class BrowserRecoveryAdapter:
     def capture_baseline(self, case: dict, target: dict, page_state: dict | None) -> None:
         """Keep baseline facts in Session memory; never persist raw DOM/values."""
         if not page_state:
-            raise RuntimeError("恢复基线 PageState 不存在")
+            raise RuntimeError("Recovery baseline PageState does not exist")
         network = self._guard.summary()
         if network.get("trackingStatus") != "proven" or network.get("pendingReadRequests") != 0 or network.get("sentWrites") != 0:
-            raise RuntimeError("恢复基线网络状态不可证明为干净")
+            raise RuntimeError("Recovery baseline network state cannot be proven clean")
         locator_id = target.get("identity", {}).get("hostLocatorId", "")
         match = BrowserSafeActionAdapter.LOCATOR_ID.fullmatch(locator_id)
         if not match:
-            raise RuntimeError("恢复目标不是 Host 浏览器句柄")
+            raise RuntimeError("Recovery target is not a Host browser handle")
 
         def capture(context):
             page = self._page.page_for_context(context)
@@ -108,16 +114,17 @@ class BrowserRecoveryAdapter:
                 if not inverse:
                     continue
                 execution = self._actions.execute(
-                    {"operationId": operation_id, "type": inverse["type"], "parameters": inverse.get("parameters", {})},
+                    {"operationId": operation_id, "caseId": case.get("caseId"),
+                     "type": inverse["type"], "parameters": inverse.get("parameters", {})},
                     target, page_state or {},
                     lambda request: self._policy.classify_request(request, (page_state or {}).get("origin", "")),
                 )
                 if execution.status != "succeeded":
-                    return self._attempt(method, baseline, target, page_state, "failed", execution.diagnostic or "反向动作未完成")
+                    return self._attempt(method, baseline, target, page_state, "failed", execution.diagnostic or "Reverse action did not complete")
         elif method == "refresh_replay":
             self._refresh_to_baseline(baseline, operation_id, page_state or {})
         else:
-            return self._attempt(method, baseline, target, page_state, "failed", "未知恢复方法")
+            return self._attempt(method, baseline, target, page_state, "failed", "Unknown recovery method")
         return self._attempt(method, baseline, target, page_state, "restored", None)
 
     @staticmethod
@@ -132,19 +139,52 @@ class BrowserRecoveryAdapter:
         # that may contain a ticket or other transient secret.
         url = baseline.get("url")
         if not isinstance(url, str) or not url:
-            raise RuntimeError("恢复基线缺少安全 URL")
+            raise RuntimeError("Recovery baseline is missing a safe URL")
         parsed = urlparse(url)
         route = baseline.get("route")
         if isinstance(route, str) and route.startswith("/") and route != (parsed.path or "/"):
             # Rebuild only the sanitized SPA path. Raw fragment query material
             # is never persisted or replayed.
             url = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}#{route}"
+
+        active_tab = baseline.get("snapshot", {}).get("activeTab", {})
+        active_label = active_tab.get("label") if isinstance(active_tab, dict) else None
+
+        def refresh_and_replay(context):
+            page = self._page.page_for_context(context)
+            current = urlparse(str(page.url))
+            current_route = urlparse(current.fragment).path if current.fragment.startswith("/") else current.path
+            if self._page._origin(current) == self._page._origin(urlparse(url)) and current_route == route:
+                page.reload(wait_until="domcontentloaded", timeout=self._session.profile.navigation_timeout_ms)
+            else:
+                page.goto(url, wait_until="domcontentloaded", timeout=self._session.profile.navigation_timeout_ms)
+            page.wait_for_timeout(self._session.profile.network_idle_window_ms)
+            if isinstance(active_label, str) and active_label:
+                tabs = page.locator(BrowserEntrypointAdapter.TAB_SELECTOR)
+                matches = []
+                for index in range(min(tabs.count(), 64)):
+                    tab = tabs.nth(index)
+                    if not tab.is_visible():
+                        continue
+                    label = tab.get_attribute("aria-label") or tab.inner_text()
+                    if " ".join(str(label or "").split())[:120] == active_label:
+                        matches.append(tab)
+                if len(matches) != 1:
+                    raise RuntimeError("Active tab could not be replayed uniquely from the recovery baseline")
+                tab = matches[0]
+                active = tab.get_attribute("aria-selected") == "true" or any(
+                    item in str(tab.get_attribute("class") or "").split()
+                    for item in ("active", "is-active", "selected")
+                ) or tab.get_attribute("data-active") == "true"
+                if not active:
+                    tab.click()
+                    page.wait_for_timeout(self._session.profile.network_idle_window_ms)
+
         with self._guard.operation(
             operation_id,
             lambda request: self._policy.classify_request(request, page_state.get("origin", "")),
         ):
-            self._page.navigate(url)
-            self._page.settle_readonly()
+            self._session.run_serial(refresh_and_replay)
 
     def _attempt(self, method: str, baseline: dict, target: dict, page_state: dict | None,
                  outcome: str, reason: str | None) -> RecoveryAttempt:
@@ -158,9 +198,9 @@ class BrowserRecoveryAdapter:
         else:
             final = "restored"
         if final == "failed" and not reason:
-            reason = "恢复检查存在关键不匹配"
+            reason = "Recovery checks contain a critical mismatch"
         if final == "uncertain" and not reason:
-            reason = "恢复检查存在未知维度"
+            reason = "Recovery checks contain an unknown dimension"
         return RecoveryAttempt(method, final, tuple(checks), reason)
 
     def _checks(self, baseline: dict, target: dict, page_state: dict | None) -> list[RecoveryCheck]:
@@ -206,7 +246,7 @@ class BrowserRecoveryAdapter:
     def _snapshot(page: object, target_index: int) -> dict:
         value = page.evaluate(RECOVERY_PROBE_V1, {"targetIndex": target_index})
         if not isinstance(value, dict):
-            raise RuntimeError("恢复探针返回格式无效")
+            raise RuntimeError("Recovery probe returned an invalid format")
         return value
 
     @staticmethod

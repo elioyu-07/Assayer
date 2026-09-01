@@ -15,6 +15,16 @@
     "status": { "enum": ["discovered", "processed", "skipped", "unprocessed"] },
     "discoveredAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
     "hostLocatorId": { "type": "string", "pattern": "^tab-browser-[0-9]{1,3}$" },
+    "candidateRef": { "$ref": "common.schema.json#/$defs/entityId" },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithmVersion", "materialDigest"],
+      "properties": {
+        "algorithmVersion": { "$ref": "common.schema.json#/$defs/algorithmVersion" },
+        "materialDigest": { "$ref": "common.schema.json#/$defs/sha256" }
+      }
+    },
     "reason": { "$ref": "common.schema.json#/$defs/reason" }
   },
   "allOf": [{ "if": { "properties": { "status": { "enum": ["skipped", "unprocessed"] } }, "required": ["status"] }, "then": { "required": ["reason"] } }]

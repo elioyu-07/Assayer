@@ -1,19 +1,5 @@
-# 垂直切片 010：确定性报告派生
+# Vertical Slice 010: Deterministic Report Derivation
 
-## 交付内容
+Adds pure `DerivedReportBuilder`, which reads only schema-valid `audit-ledger.json`, never queries a browser, re-evaluates rules, or edits the ledger. It emits `issues.json` (valid `issue_found` only), `page-element-judgement.json` (all five states and references), `run-diagnostics.json`, Markdown summaries, and stable `audit.log` without request parameters or bodies. JSON uses sorted keys and stable indentation and records source-ledger SHA-256. Ledger and derived artifacts publish as one preflighted batch with conflict refusal and rollback. `complete_audit` returns relative artifact paths and never exposes absolute output roots.
 
-- 新增纯函数式 `DerivedReportBuilder`，只读取已经通过 Schema 校验的 `audit-ledger.json`，不查询浏览器、不重新判断规则、不修改账本。
-- 输出 `issues.json`：只展示有效 `issue_found`；Scan 失败或 Issue 已失效时从主问题列表隐藏，并保留 invalidatedIssueRefs。
-- 输出 `page-element-judgement.json`：按页面、对象、规则保留全部五态 Assessment、覆盖、Evidence、Case、截图和 blocker 引用。
-- 输出 `run-diagnostics.json`、`run-diagnostics.md`、`audit-summary.md` 和不含请求参数/正文的稳定 `audit.log`。
-- 全部 JSON 使用排序键和稳定缩进，并记录规范化源账本 SHA-256；Markdown 对换行和尖括号做中和，不解释或执行账本文本。
-- 账本和全部派生产物作为一个发布批次预检；任何同名内容冲突都会拒绝发布，新创建文件在失败时回滚。
-- `complete_audit` 返回相对 `artifactPaths`；所有文件权限为 `0600`，不暴露 Host 的绝对 outputDir。
-
-## 输出原则
-
-当前版本明确不生成 HTML。派生报告不能添加账本中不存在的问题、严重度、证据或结论，也不能把 `needs_review`、`noise`、`not_applicable` 或 `scanned_no_issue` 混入主问题列表。
-
-## 切片边界
-
-本切片完成只读报告派生；确定性端到端 Harness 与运行入口由[垂直切片 011](implementation-slice-011.md)实现。真实浏览器适配器仍是明确的后续集成边界。
+No HTML is generated. Derived reports cannot invent issues, severity, Evidence, or conclusions and cannot mix review/noise/non-applicable/no-issue states into the primary issue list. Slice 011 adds the end-to-end Harness and runtime entrypoint.

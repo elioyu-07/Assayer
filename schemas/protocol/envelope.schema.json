@@ -17,7 +17,7 @@
       "required": ["protocolVersion", "requestId", "agentTurnId", "tool", "idempotencyKey", "input"],
       "properties": {
         "protocolVersion": { "$ref": "#/$defs/protocolVersion" }, "requestId": { "$ref": "#/$defs/id" },
-        "agentTurnId": { "$ref": "#/$defs/id" }, "tool": { "const": "start_audit" },
+        "agentTurnId": { "$ref": "#/$defs/id" }, "decisionReason": { "type": "string", "minLength": 1, "maxLength": 480 }, "modelTelemetry": { "$ref": "#/$defs/modelTelemetry" }, "tool": { "const": "start_audit" },
         "idempotencyKey": { "$ref": "#/$defs/nonEmpty" }, "input": { "type": "object" }
       }
     },
@@ -26,7 +26,7 @@
       "required": ["protocolVersion", "requestId", "scanId", "runId", "agentTurnId", "tool", "idempotencyKey", "expectedRunRevision", "input"],
       "properties": {
         "protocolVersion": { "$ref": "#/$defs/protocolVersion" }, "requestId": { "$ref": "#/$defs/id" },
-        "scanId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" }, "agentTurnId": { "$ref": "#/$defs/id" },
+        "scanId": { "$ref": "#/$defs/id" }, "runId": { "$ref": "#/$defs/id" }, "agentTurnId": { "$ref": "#/$defs/id" }, "decisionReason": { "type": "string", "minLength": 1, "maxLength": 480 }, "modelTelemetry": { "$ref": "#/$defs/modelTelemetry" },
         "tool": { "$ref": "#/$defs/nonEmpty" }, "idempotencyKey": { "$ref": "#/$defs/nonEmpty" },
         "expectedRunRevision": { "type": "integer", "minimum": 0 }, "input": { "type": "object" }
       },
@@ -65,5 +65,6 @@
       "required": ["code", "message", "retryable", "requiredNextStep"],
       "properties": { "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" }, "message": { "$ref": "#/$defs/nonEmpty" }, "retryable": { "type": "boolean" }, "requiredNextStep": { "$ref": "#/$defs/nonEmpty" } }
     }
+    ,"modelTelemetry": { "type": "object", "additionalProperties": false, "properties": { "durationMs": { "type": "integer", "minimum": 0 }, "retryCount": { "type": "integer", "minimum": 0 } } }
   }
 }

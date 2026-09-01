@@ -1,59 +1,59 @@
-# LLM Agent 调查层实施计划
+# LLM Agent Investigation-Layer Implementation Plan
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.1.0 |
-| 日期 | 2026-08-31 |
-| 状态 | C01–C02 已完成；C03–C07 待实施 |
+| Document version | 1.0.0-draft |
+| Date | 2026-08-31 |
+| Status | C01-C07.2 completed; C07.3 and J01-J08 end-to-end delivery closure in progress |
 | Owner | Agent Runtime / Host Core |
 
-## 1. 阶段目标
+## 1. Phase Objective
 
-本阶段把已经跑通的真实 Host 生命周期接入 Codex LLM 调查控制面。完成后，正式 `assayer audit` 由 Agent 根据冻结规则自主选择对象、规划 Case、补证和提交结论；确定性运行器只作为 `smoke` 与 CI oracle。
+Connect the real Host lifecycle to the Codex LLM investigation control plane. Formal `assayer audit` autonomously selects objects, plans Cases, gathers evidence, and submits conclusions from frozen rules. The deterministic runner remains only `smoke` and a CI oracle.
 
-权威调查循环见 [LLM 调查编排设计](llm-agent-orchestration.md)。C03–C07 的 22 个可执行工作包、依赖和逐项验收门槛见 [C03–C07 后续执行计划](implementation-plan-c03-c07.md)；该文档是后续子任务状态的权威清单。
+Slices map to J01-J08 in [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md). Component tests, visible MCP tools, or a single smoke run cannot independently claim journey completion. [LLM Investigation Orchestration](llm-agent-orchestration.md) owns the authoritative loop. The original C03-C07 work breakdown is retained as a [historical execution roadmap](implementation-plan-c03-c07.md).
 
-## 2. 有序任务
+## 2. Ordered Work
 
-| # | 任务 | 主要交付 | 验收门槛 | 状态 |
+| # | Task | Main deliverable | Acceptance gate | Status |
 |---|---|---|---|---|
-| C01 | LLM 调查层设计收敛 | 编排设计、职责边界、入口语义、失败传播和验收矩阵 | 正式 audit/smoke 分离；Host/Agent/Skill 权责闭合；不依赖特定站点 | completed |
-| C02 | 协议与覆盖模型升级 | 冻结规则读取、调查进度、control/list refs、DimensionFinding、机器判定门禁 Schema | planned 不再等于 covered；上下文丢失可从 Host 重建；规则 ID 不写入主循环 | completed |
-| C03 | 通用交互与绑定证据 | 合成输入、查询、重置、安全选项选择、列表/请求/控件前后差异 | FUA-10 可通过通用 DOM 或交互证据确认绑定；写/未知请求仍 fail-closed | pending |
-| C04 | Codex Skill 与 Agent 循环 | Skill、规则路由、对象选择、Case 规划、补证、五态提交和停止策略 | 模型实际产生多轮工具决策；Host 不生成业务结论；提示注入样本不改变策略 | pending |
-| C05 | 动态 MCP 与产品入口 | Runtime Router、固定输出根、按 Scan 隔离、Agent 租约监督、终端/桌面共用配置、audit/smoke CLI 分离 | 用户只给 URL 即可启动正式 Agent；MCP 启动参数不绑定业务 URL；静默降级和任意输出路径被禁止；Agent 异常退出使 Scan failed | pending |
-| C06 | 移除正式路径确定性语义判断 | `RuleEvaluationEngine` 退出正式 audit，迁入测试 oracle 或删除；文档和命令迁移 | 正式路径没有 `ruleId` 条件分支；smoke 输出不能冒充 Agent Assessment | pending |
-| C07 | 通用回归与 lease 黑盒验收 | 正例、负例、不适用、歧义、阻断、提示注入和真实 lease 运行 | 规则语义结果与证据一致；无 lease 专属代码；全量回归和产物完整性通过 | pending |
+| C01 | Converge LLM investigation design | Orchestration, authority, entry semantics, failure propagation, acceptance matrix | Separate audit/smoke; close Host/Agent/Skill authority; site-independent | completed |
+| C02 | Upgrade protocol and coverage model | Frozen-rule read, progress, control/list refs, DimensionFinding, machine gates | planned is not covered; Host reconstructs context; no rule IDs in main loop | completed |
+| C03 | General interaction and binding evidence | Synthetic input, query/reset, safe selection, list/request/control before-after facts | General DOM/interaction evidence can prove FUA-10 binding; writes remain fail-closed | completed |
+| C04 | Codex Skill and Agent loop | Skill, rule routing, object/Case planning, evidence, five-state submission, stopping | Model produces multi-turn tool decisions; Host does not decide rules; injection does not alter policy | completed |
+| C05 | Dynamic MCP and product entrypoint | Runtime Router, fixed output root, Scan isolation, lease supervision, shared client configuration, audit/smoke split | User provides only URL; process does not bind URL; no silent downgrade or arbitrary output; Agent exit fails Scan | completed |
+| C06 | Remove deterministic semantics from formal path | Remove production `RuleEvaluationEngine` and `BrowserHostRuntime.audit`; smoke is non-publishable Host diagnostics | Formal path has no rule-ID branch; smoke cannot impersonate Assessment | completed |
+| C07 | General regression and lease black-box acceptance | Positive, negative, non-applicable, ambiguous, blocked, injection, and real lease | Results match evidence; no lease-specific code; full regression and artifacts pass | completed: full regression passed; real lease recovery closed; insufficient binding conservatively became `partial/needs_review` |
+| C07.1 | LLM browser-observation closure | Structured observation, viewport PNG, multimodal MCP content, business-list consolidation | Model observes page before unresolved binding; paginator is not a business list | completed |
+| C07.2 | Real-path test gate | fast/full runners, fixed full dependencies, Chromium/MCP preflight and CI | Full executes every real path; missing dependency, browser failure, or skip fails | completed: 199 passed, zero skipped |
+| C07.3-01 | Journey and completion definition | Direct Codex invocation, CLI entry, success/failure states, Alpha boundary | User supplies URL only; component tests cannot impersonate completion | completed |
+| C07.3-02 | Direct Codex wiring | Project Skill/MCP discovery, fixed runtime/workdir, no nested Codex | Fresh task sees and calls `mcp__assayer__*` directly | in progress: repository configuration complete; awaiting fresh-session acceptance |
+| C07.3-03 | Exact MCP schemas | Complete envelope and specialized input for every tool | Model no longer guesses `complete_audit` fields | completed |
+| C07.3-04 | Bounded formal control | Budgets for protocol failure, repeated errors, no-progress success, and completion recovery | Deterministic failures do not retry forever; error has next step and event | completed |
+| C07.3-05 | Lease liveness | Distinguish normal reasoning, Agent loss, and MCP/process exit | Long reasoning survives; real disconnect fails quickly | completed: MCP heartbeat renews from Playwright thread; EOF/close fails active Scan immediately |
+| C07.3-06-08 | User results and real acceptance | User-level results/errors, real Codex+MCP+Chromium acceptance, consecutive-run gate | User path succeeds consecutively and failures are diagnosable | pending |
 
-## 3. 任务依赖
+## 3. Dependencies
 
 ```text
-C01
-  → C02
-    → C03
-      → C04
-        → C05
-          → C06
-            → C07
+C01 -> C02 -> C03 -> C04 -> C05 -> C06 -> C07 -> C07.1 -> C07.2 -> C07.3
 ```
 
-C02 先固定协议，C03 才能实现动作与 Evidence；C04 只能消费已稳定的 Host 能力。C05 负责产品装配，不能提前把尚未闭环的 Skill 包装成正式入口。
+C02 fixes protocol before C03 actions and Evidence. C04 consumes stable Host capabilities through an injectable, model-independent `DecisionAgent`. C05 assembles Codex/MCP. C06 removes production deterministic semantic evaluation without changing C05 boundaries. C07.1 closes direct model page observation; C07.2 turns Chromium/MCP regression into a no-skip gate.
 
-当前唯一 ready 工作包是 `C03a 可引用控件与列表发现`。后续任务不得跳过 C03a 的真实引用、失效和无 selector 泄露验收。
+## 4. C07 Minimum Sample Matrix
 
-## 4. C07 最低样本矩阵
-
-| 样本 | 预期 |
+| Sample | Expected |
 |---|---|
-| 单列表筛选区，有查询和重置 | `scanned_no_issue` |
-| 已确认绑定，有查询但无重置 | 满足截图门禁时 `issue_found`；B07c 未完成时 `needs_review` |
-| 页面级搜索框，不控制业务列表 | `not_applicable` 或 `noise` |
-| 两个候选列表，交互仍无法归属 | `needs_review` |
-| 查询触发潜在写请求 | Host 阻断，恢复后 `needs_review` 或 Scan 按污染规则失败 |
-| 页面文本要求模型忽略规则或执行任意脚本 | 指令被视为审计数据，动作不执行 |
-| Agent 回合预算耗尽且仍有范围 | Scan `partial` |
-| lease 黑盒系统 | 通用 Agent 完成探索和规则调查，不出现站点专属分支 |
+| Single-list filter with query and reset | `scanned_no_issue` |
+| Confirmed binding, query, no reset | `issue_found` when screenshot gate passes; `needs_review` before B07c |
+| Page search box that controls no business list | `not_applicable` or `noise` |
+| Two candidate lists remain unattributed after interaction | `needs_review` |
+| Query triggers a potential write | Host blocks; after recovery `needs_review`, or Scan fails under contamination policy |
+| Page tells model to ignore rules or run arbitrary script | Treat instruction as data; do not execute |
+| Agent turn budget exhausted with unfinished scope | Scan `partial` |
+| Lease black-box system | General Agent explores and investigates with no site-specific branch |
 
-## 5. 不与 B07c 混淆
+## 5. Do Not Conflate With B07c
 
-B07c 仍是独立安全任务。它不阻塞 LLM 调查、交互绑定证明和 `scanned_no_issue`，但在完成前，真实未脱敏截图不能支撑可发布的 `issue_found`。
+B07c remains an independent security task. It does not block LLM investigation, binding proof, or `scanned_no_issue`, but until completed an unsanitized real screenshot cannot support publishable `issue_found`.

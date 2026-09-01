@@ -1,0 +1,114 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PLUGIN_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+MANIFEST="$PLUGIN_ROOT/.codex-plugin/plugin.json"
+WHEEL_DIR="$PLUGIN_ROOT/runtime/wheels"
+BUNDLE_MANIFEST="$PLUGIN_ROOT/runtime/bundle-manifest.json"
+
+if [ ! -f "$BUNDLE_MANIFEST" ] || [ ! -d "$WHEEL_DIR" ] || ! find "$WHEEL_DIR" -maxdepth 1 -name 'assayer-*.whl' -print -quit | grep -q .; then
+  echo "ASSAYER_BUNDLE_INCOMPLETE: the plugin does not contain its Assayer wheelhouse; reinstall a release bundle." >&2
+  exit 78
+fi
+
+EXPECTED_PYTHON=$(
+  sed -n 's/.*"pythonVersion"[[:space:]]*:[[:space:]]*"\([0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' "$BUNDLE_MANIFEST"
+)
+if [ -z "$EXPECTED_PYTHON" ]; then
+  echo "ASSAYER_BUNDLE_INCOMPLETE: runtime/bundle-manifest.json has no Python version." >&2
+  exit 78
+fi
+
+if [ -n "${ASSAYER_PYTHON:-}" ]; then
+  PYTHON_BIN=$ASSAYER_PYTHON
+else
+  PYTHON_BIN=""
+  for candidate in "python$EXPECTED_PYTHON" "python3" "/opt/homebrew/bin/python$EXPECTED_PYTHON"; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      PYTHON_BIN=$candidate
+      break
+    fi
+  done
+fi
+
+if [ -z "$PYTHON_BIN" ] || ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  echo "ASSAYER_PYTHON_MISSING: Python 3.11 or newer is required. Install Python or set ASSAYER_PYTHON." >&2
+  exit 78
+fi
+
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1; then
+  echo "ASSAYER_PYTHON_UNSUPPORTED: Python 3.11 or newer is required." >&2
+  exit 78
+fi
+
+PLUGIN_VERSION=$(
+  "$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["version"])' "$MANIFEST"
+)
+BASE_VERSION=${PLUGIN_VERSION%%+*}
+
+if ! "$PYTHON_BIN" - "$BUNDLE_MANIFEST" "$WHEEL_DIR" "$BASE_VERSION" <<'PY'
+import hashlib
+import json
+import platform
+import sys
+import sysconfig
+from pathlib import Path
+
+manifest_path, wheel_dir, expected_version = map(Path, sys.argv[1:])
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+runtime = manifest["runtime"]
+actual_python = f"{sys.version_info.major}.{sys.version_info.minor}"
+if manifest["pluginVersion"] != str(expected_version):
+    raise SystemExit("plugin version mismatch")
+if runtime["implementation"] != platform.python_implementation() or runtime["pythonVersion"] != actual_python:
+    raise SystemExit("python runtime mismatch")
+if runtime["platform"] != sysconfig.get_platform():
+    raise SystemExit("platform mismatch")
+for item in manifest["wheels"]:
+    wheel = wheel_dir / item["file"]
+    if not wheel.is_file() or hashlib.sha256(wheel.read_bytes()).hexdigest() != item["sha256"]:
+        raise SystemExit(f"wheel verification failed: {wheel.name}")
+PY
+then
+  echo "ASSAYER_BUNDLE_INCOMPATIBLE: this release bundle does not match the selected Python/platform or failed integrity verification." >&2
+  exit 78
+fi
+
+if [ -n "${XDG_CACHE_HOME:-}" ]; then
+  CACHE_ROOT=$XDG_CACHE_HOME
+elif [ -n "${HOME:-}" ]; then
+  CACHE_ROOT=$HOME/.cache
+else
+  echo "ASSAYER_CACHE_UNAVAILABLE: HOME or XDG_CACHE_HOME is required for the private runtime." >&2
+  exit 78
+fi
+
+RUNTIME_ROOT="$CACHE_ROOT/assayer/runtime-$PLUGIN_VERSION"
+VENV_ROOT="$RUNTIME_ROOT/venv"
+STAMP="$RUNTIME_ROOT/bundle-ready"
+
+if [ ! -x "$VENV_ROOT/bin/assayer-mcp" ] || [ ! -f "$STAMP" ]; then
+  mkdir -p "$RUNTIME_ROOT"
+  "$PYTHON_BIN" -m venv "$VENV_ROOT" || {
+    echo "ASSAYER_RUNTIME_CREATE_FAILED: Python could not create the private runtime." >&2
+    exit 78
+  }
+  "$VENV_ROOT/bin/python" -m pip install \
+    --quiet \
+    --no-cache-dir \
+    --disable-pip-version-check \
+    --no-index \
+    --find-links "$WHEEL_DIR" \
+    "assayer[browser,mcp]==$BASE_VERSION" 1>&2 || {
+      echo "ASSAYER_RUNTIME_INSTALL_FAILED: bundled Python dependencies could not be installed." >&2
+      exit 78
+    }
+  "$VENV_ROOT/bin/assayer-mcp" --help >/dev/null || {
+    echo "ASSAYER_RUNTIME_VERIFY_FAILED: the bundled MCP executable is not usable." >&2
+    exit 78
+  }
+  : > "$STAMP"
+fi
+
+exec "$VENV_ROOT/bin/assayer-mcp" --output-root "${ASSAYER_OUTPUT_ROOT:-${TMPDIR:-/tmp}/assayer-output}"

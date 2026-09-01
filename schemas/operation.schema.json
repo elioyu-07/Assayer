@@ -9,6 +9,7 @@
     "operationId": { "$ref": "common.schema.json#/$defs/entityId" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
     "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "agentTurnId": { "$ref": "common.schema.json#/$defs/entityId" },
     "caseRef": { "$ref": "common.schema.json#/$defs/entityId" },
     "tool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "operationKind": { "enum": ["bootstrap", "read", "browser_action", "recovery", "finding_record", "decision_preparation", "decision_commit", "lifecycle"] },
@@ -18,13 +19,16 @@
     "acceptedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
     "acceptedAtRevision": { "$ref": "common.schema.json#/$defs/runRevision" },
     "endedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "decisionReason": { "type": "string", "minLength": 1, "maxLength": 480 },
+    "modelTelemetry": { "type": "object", "additionalProperties": false, "properties": { "durationMs": { "type": "integer", "minimum": 0 }, "retryCount": { "type": "integer", "minimum": 0 } } },
     "resultEvidenceRefs": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
     "reason": { "$ref": "common.schema.json#/$defs/reason" }
   },
   "allOf": [
     {
       "if": { "properties": { "status": { "enum": ["succeeded", "rejected", "failed_known", "result_unknown"] } }, "required": ["status"] },
-      "then": { "required": ["endedAt"] }
+      "then": { "required": ["endedAt", "durationMs"] }
     },
     {
       "if": { "properties": { "status": { "enum": ["rejected", "failed_known", "result_unknown"] } }, "required": ["status"] },

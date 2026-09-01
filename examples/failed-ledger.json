@@ -23,11 +23,11 @@
     "startedAt": "2026-08-30T13:00:00Z",
     "endedAt": "2026-08-30T13:10:00Z",
     "loginStatus": "succeeded",
-    "ruleRegistryDigest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "ruleRegistryDigest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "frozenRules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     ],
     "capabilities": [
@@ -44,46 +44,45 @@
         {
           "rule": {
             "ruleId": "FUA-10",
-            "version": "1.0.0"
+            "version": "1.1.0"
           },
           "assessmentCount": 0,
           "resultCounts": {},
           "coverageComplete": false,
-          "reason": "初始探索期间检测到未知写请求。"
+          "reason": "An unknown write request was detected during initial exploration."
         }
       ],
       "unprocessedEntrypointRefs": [],
-      "completionReason": "检测到无法证明未发送的潜在写请求，立即终止扫描。"
+      "completionReason": "A potential write request could not be proven unsent, so the scan stopped immediately."
     },
     "terminalReason": {
       "code": "REQUEST_RESULT_UNKNOWN",
-      "message": "无法证明潜在写请求是否已发送，正式结论全部失效。"
+      "message": "Whether the potential write request was sent cannot be proven; all formal conclusions are invalid."
     },
     "conclusionsValid": false
   },
   "ruleRegistry": {
     "registryId": "registry-001",
     "registryVersion": "1.0.0",
-    "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "digest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "createdAt": "2026-08-30T08:00:00Z",
     "rules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "enabled",
-        "name": "列表筛选必须同时提供查询和重置",
+        "name": "List filters must provide both query and reset",
         "owner": "product-owner",
-        "document": "rules/FUA-10.md",
+        "document": "rules/FUA-10-v1.1.md",
         "objectKinds": [
           "filter_region"
         ],
         "requiredCapabilities": [
           "runtime",
-          "dom",
-          "interaction"
+          "dom"
         ],
         "capabilityMissingOutcome": "needs_review",
-        "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+        "coverageContract": "rules/FUA-10-v1.1.md#minimum-coverage-contract",
         "coverageDimensions": [
           "filter_present",
           "query_action",
@@ -128,17 +127,17 @@
           "P2",
           "P3"
         ],
-        "regressionSuite": "rules/FUA-10.md#样本与回归",
-        "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
+        "regressionSuite": "rules/FUA-10-v1.1.md#samples-and-regression",
+        "contentDigest": "aa6071142da7d5b7a668765d0dfd9de5751dea28275486dc2847f276978e9232",
         "examples": {
           "positive": [
-            "筛选条件、查询和重置均存在"
+            "Filter conditions, query, and reset are all present"
           ],
           "negative": [
-            "筛选条件和查询存在，但没有重置"
+            "Filter conditions and query are present, but reset is absent"
           ],
           "regression": [
-            "对象身份歧义时必须 needs_review"
+            "Ambiguous object identity must produce needs_review"
           ]
         }
       }

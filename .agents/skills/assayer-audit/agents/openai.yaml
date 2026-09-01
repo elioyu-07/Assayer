@@ -1,0 +1,11 @@
+interface:
+  display_name: "Assayer Audit"
+  short_description: "Run bounded, evidence-backed web audits"
+  default_prompt: "Use $assayer-audit to investigate this web URL through the Assayer Host tools."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "assayer"
+      description: "Local Assayer stdio MCP server"
+      transport: "stdio"

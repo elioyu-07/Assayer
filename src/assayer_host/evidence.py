@@ -35,8 +35,24 @@ class EvidenceCapture:
     normalization_algorithm_version: str = "1.0.0"
 
 
+def is_page_observation(evidence: dict) -> bool:
+    """Whether persisted Evidence includes the aligned viewport/list observation."""
+    if not isinstance(evidence, dict) or evidence.get("kind") != "runtime_visual":
+        return False
+    payload = evidence.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    content = payload.get("content")
+    return (
+        isinstance(content, dict)
+        and content.get("observationScope") == "viewport"
+        and isinstance(content.get("logicalLists"), list)
+    )
+
+
 class EvidenceAdapter(Protocol):
     def capture(self, page_state: dict, target: dict, case: dict | None, include_raw_visual: bool) -> EvidenceCapture: ...
+    def observe_page(self, page_state: dict, target: dict, case: dict | None) -> EvidenceCapture: ...
 
 
 class UnavailableEvidenceAdapter:
@@ -44,9 +60,14 @@ class UnavailableEvidenceAdapter:
     def capture(self, page_state, target, case, include_raw_visual):
         if include_raw_visual:
             return EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={"status": "unavailable"},
-                                   raw_visual=RawVisualCapture(status="rejected", reason="截图适配器未配置"))
+                                   raw_visual=RawVisualCapture(status="rejected", reason="Screenshot adapter is not configured"))
         return EvidenceCapture(kind="runtime_dom", payload_type="json",
                                payload={"objectId": target["objectId"], "pageStateId": page_state["pageStateId"], "identity": target.get("identity", {}), "location": target.get("location", {})})
+
+    def observe_page(self, page_state, target, case):
+        return EvidenceCapture(kind="runtime_visual", payload_type="image_metadata",
+                               payload={"status": "unavailable"},
+                               raw_visual=RawVisualCapture(status="rejected", reason="Page observation adapter is not configured"))
 
 
 class DeterministicEvidenceAdapter:
@@ -63,11 +84,25 @@ class DeterministicEvidenceAdapter:
         if include_raw_visual:
             bbox = target.get("location", {}).get("boundingBox") or {"x": 0, "y": 0, "width": 1, "height": 1}
             location = target.get("location", {})
-            raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nassayer-deterministic-v1", width=location.get("viewportWidth", max(1, int(bbox["width"]))), height=location.get("viewportHeight", max(1, int(bbox["height"]))), bounding_box=bbox, annotation="Host 定位的对象区域")
+            raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nassayer-deterministic-v1", width=location.get("viewportWidth", max(1, int(bbox["width"]))), height=location.get("viewportHeight", max(1, int(bbox["height"]))), bounding_box=bbox, annotation="Host located object region")
         return EvidenceCapture(kind="runtime_visual" if include_raw_visual else "runtime_dom",
                                payload_type="image_metadata" if include_raw_visual else "json",
                                payload={"objectId": target["objectId"], "pageStateId": page_state["pageStateId"], "stateKind": page_state.get("stateKind"), "identityFingerprint": target.get("identity", {}).get("fingerprint")},
                                raw_visual=raw)
+
+    def observe_page(self, page_state, target, case):
+        bbox = target.get("location", {}).get("boundingBox") or {"x": 0, "y": 0, "width": 1, "height": 1}
+        location = target.get("location", {})
+        width = location.get("viewportWidth", max(1, int(bbox["x"] + bbox["width"])))
+        height = location.get("viewportHeight", max(1, int(bbox["y"] + bbox["height"])))
+        raw = RawVisualCapture(image_bytes=b"\x89PNG\r\n\x1a\nassayer-deterministic-v1", width=width, height=height,
+                               bounding_box=bbox, source_bounding_box=bbox,
+                               annotation="Host viewport and verified object region")
+        return EvidenceCapture(kind="runtime_visual", payload_type="image_metadata",
+                               payload={"objectId": target["objectId"], "pageStateId": page_state["pageStateId"],
+                                        "observationScope": "viewport", "logicalLists": [], "relations": []},
+                               raw_visual=raw,
+                               source_binding={"status": "verified", "bindingReason": "Host deterministic page observation matches the object reference"})
 
 
 class EvidenceSanitizer:
@@ -95,4 +130,4 @@ class EvidenceSanitizer:
             return value
         if value is None or isinstance(value, (bool, int, float)):
             return value
-        raise ValueError("证据 payload 包含不可安全规范化的类型")
+        raise ValueError("Evidence payload contains a type that cannot be normalized safely")

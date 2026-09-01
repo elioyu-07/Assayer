@@ -14,15 +14,15 @@ class FakePage:
     def __init__(self, url="https://test.example.com/orders", probe=None):
         self.url = url
         self.probe = probe or {
-            "visibleText": "订单列表 查询 重置",
+            "visibleText": "Orders Query Reset",
             "route": "/orders",
             "stateKind": "page",
-            "entrypoints": [{"kind": "safe_action", "label": "订单筛选", "intent": "查看筛选区"}],
+            "entrypoints": [{"kind": "safe_action", "label": "Order filters", "intent": "Inspect filter region"}],
             "candidates": [{
-                "kind": "filter_region", "label": "订单筛选", "role": "search",
+                "kind": "filter_region", "label": "Order filters", "role": "search",
                 "locator_material": "orders-filter", "host_locator_id": "locator-browser-0",
-                "identity_material": "filter_region|search|订单筛选|orders", "accessible_name": "订单筛选",
-                "visible_text": "查询 重置", "x": 20, "y": 80, "width": 640, "height": 120,
+                "identity_material": "filter_region|search|Order filters|orders", "accessible_name": "Order filters",
+                "visible_text": "Query Reset", "x": 20, "y": 80, "width": 640, "height": 120,
                 "viewport_width": 1280, "viewport_height": 800,
             }],
             "networkSummary": {"pendingReadRequests": 0, "observedWrites": 0},
@@ -31,10 +31,10 @@ class FakePage:
         self.evaluated = []
 
     def title(self):
-        return "订单列表"
+        return "Orders"
 
     def content(self):
-        return "<main>订单筛选</main>"
+        return "<main>Order filters</main>"
 
     def evaluate(self, expression):
         self.evaluated.append(expression)
@@ -67,7 +67,7 @@ class FakeBackend:
 
 
 def match():
-    return ObjectMatch("locator-001", "filter_region|search|订单筛选|orders", "search", "订单筛选", "查询 重置", 20, 80, 640, 120, 1280, 800)
+    return ObjectMatch("locator-001", "filter_region|search|Order filters|orders", "search", "Order filters", "Query Reset", 20, 80, 640, 120, 1280, 800)
 
 
 class BrowserReadonlyAdapterTest(unittest.TestCase):

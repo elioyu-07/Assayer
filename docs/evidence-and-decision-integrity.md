@@ -1,144 +1,144 @@
-# Assayer 证据、判定与账本完整性
+# Assayer Evidence, Decision, and Ledger Integrity
 
-| 元信息 | 内容 |
+| Metadata | Value |
 |---|---|
-| 文档版本 | 1.1.0-draft |
-| 日期 | 2026-08-31 |
-| 状态 | 设计收敛中 |
+| Document version | 1.1.0-draft |
+| Date | 2026-08-31 |
+| Status | Design converging |
 | Owner | Host Core / Audit Owner |
 
-## 1. 证据层次
+## 1. Evidence Layers
 
-证据分成四层，不能相互冒充：
+These layers cannot impersonate one another:
 
-1. **Raw Fact**：Host 从浏览器、网络或源码读取的原始事实，暂存于 Host；
-2. **Evidence**：经裁剪、脱敏、规范化摘要并绑定实体后的不可变记录；
-3. **Agent Evidence Pack**：提供给 Agent 的最小充分证据包，只包含已存在的 Evidence 引用和事实摘要；
-4. **Agent Finding**：Agent 对一个规则覆盖维度基于 Evidence 给出的不可变结构化解释，不是 Host Fact，也不是最终结论；
-5. **Derived View**：Assessment、Issue、报告和诊断等由账本事实派生的视图。
+1. **Raw Fact**: source material Host reads from browser, network, or source and holds temporarily;
+2. **Evidence**: immutable record after trimming, sanitization, normalized summarization, and entity binding;
+3. **Agent Evidence Pack**: minimum sufficient pack containing only existing Evidence references and fact summaries;
+4. **Agent Finding**: immutable structured Agent interpretation of one rule coverage dimension based on Evidence; it is neither a Host Fact nor a final conclusion;
+5. **Derived View**: Assessment, Issue, report, and diagnostic views derived from ledger facts.
 
-Agent 只能引用 Evidence ID，不能复制事实后重新声明为 Host 证据。Host 不能将 Agent 自然语言理由写入 Evidence payload。
+Agent references Evidence IDs and cannot copy a fact and redeclare it as Host evidence. Host cannot place Agent natural-language rationale in an Evidence payload.
 
-DimensionFinding 必须保留 Agent 来源并引用 Evidence/Case；它不能反向修改 Evidence，也不能因自然语言理由把 Host 的 blocked、ambiguous 或 restore_failed 事实改写为成功。
+DimensionFinding preserves Agent provenance and Evidence/Case references. It cannot modify Evidence or use natural-language rationale to rewrite `blocked`, `ambiguous`, or `restore_failed` Host facts as success.
 
-## 2. 证据绑定
+## 2. Evidence Binding
 
-每条 Evidence 必须绑定：
+Every Evidence record binds:
 
-- `scanId`；
-- `pageStateRef`；
-- `objectRef`；
-- 可选 `caseRef`；
-- `capturedAt` 和采集 revision；
-- `kind`、采集器版本和脱敏策略版本；
-- 规范化 payload；
-- `integrityDigest`。
+- `scanId`;
+- `pageStateRef`;
+- `objectRef`;
+- optional `caseRef`;
+- `capturedAt` and capture revision;
+- `kind`, collector version, and sanitization-policy version;
+- normalized payload;
+- `integrityDigest`.
 
-没有唯一对象或页面状态归属的材料只能保存为诊断，不能被正式判定引用。源码证据必须有页面 → route → 组件/handler/API 的归属链；无法闭合时 `sourceBinding.status=unverified`。
+Material without unique object and PageState ownership may be diagnostic only and cannot support a formal decision. Source evidence requires a page -> route -> component/handler/API ownership chain; when the chain does not close, use `sourceBinding.status=unverified`.
 
-## 3. 规范化与摘要
+## 3. Normalization and Digests
 
-所有摘要算法必须使用 UTF-8、确定性 JSON 序列化：对象键按 Unicode 码点排序，数组保持语义顺序，去除不影响语义的空白；二进制使用原始字节摘要。算法描述和版本进入账本。
+All digest algorithms use UTF-8 and deterministic JSON serialization: object keys sorted by Unicode code point, arrays retaining semantic order, and insignificant whitespace removed. Binary data hashes original bytes. The algorithm description and version enter the ledger.
 
-- Evidence 的 `integrityDigest` 摘要规范化后的 Evidence envelope，不包含写入时间、随机 ID 或文件路径等非事实字段；
-- PageState 的 `domDigest` 只摘要 Host 选定的规范化状态材料，不摘要完整 DOM；
-- Rule 内容摘要基于规则文件、注册条目和引用依赖的规范化字节；
-- Screenshot digest 摘要最终不可变图片字节；
-- 任一摘要无法计算时不得以占位值写入正式账本。
+- Evidence `integrityDigest` hashes the normalized Evidence envelope without write time, random IDs, file paths, and other non-factual fields;
+- PageState `domDigest` hashes Host-selected normalized state material, not the complete DOM;
+- Rule content digest hashes normalized bytes for the rule file, registry entry, and referenced dependencies;
+- Screenshot digest hashes final immutable image bytes;
+- If any digest cannot be computed, no placeholder may enter the formal ledger.
 
-## 4. 视觉证据和截图
+## 4. Visual Evidence and Screenshots
 
 ### 4.1 Raw Visual Capture
 
-Case 执行期间按规则要求同步采集，绑定当前 PageState、Object 和 Case。它可以是完整对象截图、局部截图或截图元数据；不自动成为正式问题截图。
+Captured during Case execution when required by a rule and bound to the current PageState, Object, and Case. It may be a complete-object image, crop, or screenshot metadata and does not automatically become a formal issue screenshot.
 
 ### 4.2 IssueScreenshot
 
-正式问题截图必须从同一问题现场的 Raw Visual 派生：
+A formal issue screenshot is derived from a Raw Visual at the same issue state:
 
-- 重新确认对象唯一可定位；
-- 记录问题病灶 bounding box；
-- 对敏感区域不可逆遮挡；
-- 保存图片字节、尺寸、类型、digest、来源 Raw Visual 引用和捕获 revision；
-- 一个 Issue 只能引用一张独立 IssueScreenshot；同一对象多个 Issue 不复用未框选通用图。
+- Reconfirm that the object is uniquely locatable;
+- Record the defect bounding box;
+- Irreversibly mask sensitive regions;
+- Store image bytes, dimensions, type, digest, source Raw Visual reference, and capture revision;
+- One Issue references one independent IssueScreenshot; multiple Issues on one object do not reuse an unmarked generic image.
 
-截图 `captured` 失败、对象 `ambiguous` 或脱敏失败时，不得生成 `issue_found`。
+When capture fails, the object is `ambiguous`, or sanitization fails, `issue_found` cannot be created.
 
-## 5. 判定事务
+## 5. Decision Transaction
 
-正式判定采用恢复屏障后的两阶段事务：
+Formal decisions use a two-phase transaction after the recovery barrier:
 
 ```text
-Agent/Host → restore_case
-Host  → 仅 restored 的 Case 才允许 prepare_decision
-Agent → prepare_decision
-Host  → 校验规则、最终 Finding、证据、语义字段，创建 PendingDecision 和 IssueScreenshot
-Host  → 仅 restored 才允许 commit_decision
-Host  → 原子写入 RuleAssessment，并按需派生 Issue
+Agent/Host -> restore_case
+Host       -> only restored Cases may call prepare_decision
+Agent      -> prepare_decision
+Host       -> validate rule, final Findings, evidence, and semantic fields; create PendingDecision and IssueScreenshot
+Host       -> only restored state may call commit_decision
+Host       -> atomically write RuleAssessment and derive Issue when needed
 ```
 
-`prepare_decision` 不能改变正式账本中的 Assessment 或 Issue 数组。`commit_decision` 必须在一个事务中完成：
+`prepare_decision` cannot change formal Assessment or Issue arrays. `commit_decision` performs one transaction:
 
-1. 再次校验 Scan 终态、对象身份、规则注册表摘要和 runRevision；
-2. 校验所有 Finding、Evidence、Case、Screenshot 引用闭合；
-3. 校验结果与 `applicable`、resolved/unresolved coverage、字段门禁一致；
-4. 写入不可变 RuleAssessment；
-5. `issue_found` 时写入一条与 Assessment 一对一的 Issue；
-6. 增加 runRevision 并记录提交 Operation。
+1. Revalidate Scan terminal state, object identity, registry digest, and runRevision;
+2. Validate closure of all Finding, Evidence, Case, and Screenshot references;
+3. Validate consistency among result, `applicable`, resolved/unresolved coverage, and field gates;
+4. Write immutable RuleAssessment;
+5. For `issue_found`, write one Issue linked one-to-one to its Assessment;
+6. Increment runRevision and record the commit Operation.
 
-任一校验失败，事务整体回滚，PendingDecision 保留为 `rejected` 或 `invalidated` 诊断。
+Any failed check rolls back the whole transaction. PendingDecision remains as `rejected` or `invalidated` diagnostics.
 
-## 6. 结果硬门槛
+## 6. Hard Result Gates
 
-| 结果 | 门槛 |
+| Result | Gate |
 |---|---|
-| `issue_found` | 规则 enabled、对象 matched、覆盖满足、证据有效、Case restored、IssueScreenshot captured、语义字段完整。 |
-| `scanned_no_issue` | 规则 enabled、对象 matched、所有最低覆盖维度的最终 Finding 为 satisfied、引用 Case restored、没有 unresolved 或冲突证据。 |
-| `not_applicable` | 有针对当前对象的适用性证据和理由；能力不足不能冒充不适用。 |
-| `needs_review` | 明确记录证据缺口、冲突、阻断或身份问题；不得声称完成覆盖。 |
-| `noise` | 候选与对象真实相关，但依据规则定义确认不是问题；记录噪声理由。 |
+| `issue_found` | Rule enabled, object matched, coverage satisfied, evidence valid, Cases restored, IssueScreenshot captured, semantic fields complete. |
+| `scanned_no_issue` | Rule enabled, object matched, final Finding for every minimum dimension satisfied, referenced Cases restored, no unresolved or conflicting evidence. |
+| `not_applicable` | Applicability evidence and rationale exist for this object; a capability gap cannot impersonate non-applicability. |
+| `needs_review` | Evidence gap, conflict, blocker, or identity issue is explicit; completed coverage is not claimed. |
+| `noise` | Candidate genuinely relates to the object but rule semantics confirm it is not an issue; noise rationale is recorded. |
 
-## 7. 结论失效传播
+## 7. Conclusion Invalidation Propagation
 
-正式 Assessment 和 Issue 一经提交不可修改，只能新增失效事件或在派生视图中隐藏。以下情况使结论失效：
+Committed Assessments and Issues are immutable. Invalidation adds an event or hides them in derived views; it never deletes history. Conclusions become invalid when:
 
-- Scan 进入 `failed`；
-- 发现可能已发送的未知写请求；
-- 账本完整性校验失败；
-- 规则或身份算法摘要与冻结版本不一致；
-- Evidence、Screenshot 或 Object 被证明错绑；
-- 页面状态污染扩大到无法隔离的其他对象。
+- Scan enters `failed`;
+- A possibly sent unknown write request is discovered;
+- Ledger integrity validation fails;
+- Rule or identity-algorithm digests differ from frozen versions;
+- Evidence, Screenshot, or Object is proven misbound;
+- Page contamination expands beyond object isolation.
 
-失效通过 `conclusionValidity` 和 `invalidatedBy` 记录；不得删除历史事实。`partial` 只允许保留已越过恢复屏障且未被失效事件覆盖的结论。
+Invalidation is recorded in `conclusionValidity` and `invalidatedBy`. `partial` retains only conclusions that passed recovery and are not covered by invalidation events.
 
-## 8. Agent Evidence Pack 裁剪
+## 8. Agent Evidence Pack Trimming
 
-Host 默认只提供：
+Host supplies by default only:
 
-- 当前对象和页面状态摘要；
-- 规则所需的 Evidence 类型和 ID；
-- 与当前 Case 直接相关的前后状态；
-- 源码最小片段和归属链；
-- 脱敏后的请求摘要；
-- 当前覆盖进度和缺口。
+- Current object and PageState summary;
+- Evidence kinds and IDs required by the rule;
+- Before/after state directly related to the current Case;
+- Minimum source snippets and ownership chain;
+- Sanitized request summary;
+- Current coverage progress and gaps.
 
-不得把完整页面 DOM、完整源码仓库、历史所有截图或凭据相关状态直接放入上下文。证据包必须标记生成版本和 `runRevision`；过期证据不能用于动作或提交。
+Complete page DOM, complete source repository, all historical screenshots, and credential-related state never enter model context. Every evidence pack records generation version and `runRevision`; stale evidence cannot support an action or commit.
 
-## 9. 账本完整性校验
+## 9. Ledger Integrity Validation
 
-Host 在每个提交点和 `complete_audit` 前校验：
+At each commit and before `complete_audit`, Host validates:
 
-1. 所有实体 ID 在 Scan 内唯一；
-2. 所有引用存在、同一扫描、类型正确；
-3. Frozen rules 与 Registry 内容和摘要一致；
-4. PageState/Object/Case/Evidence/DimensionFinding/Screenshot/Assessment/Issue 关系闭合；
-5. Issue 与 Assessment 一对一且结果为 `issue_found`；
-6. Case 恢复状态和 PendingDecision 屏障满足结果门槛；
-7. 敏感数据扫描和摘要校验通过；
-8. 历史事件可以重放出当前状态和 runRevision。
+1. Every entity ID is unique within the Scan;
+2. Every reference exists, belongs to the same Scan, and has the correct type;
+3. Frozen rules match Registry content and digest;
+4. PageState/Object/Case/Evidence/DimensionFinding/Screenshot/Assessment/Issue relationships close;
+5. Issue links one-to-one to an `issue_found` Assessment;
+6. Case recovery and PendingDecision barrier satisfy the result gates;
+7. Sensitive-data scan and digest validation pass;
+8. Historical events replay to the current state and runRevision.
 
-当前 Host Core 已实现结构化 Evidence、Raw Visual 和 `prepare_decision` PendingDecision 的绑定、脱敏、摘要与不可变写入。截图适配器未确认脱敏、对象未定位、定位歧义或文件内容冲突时只记录失败事实，不能进入正式问题截图门禁；`kind=issue` 的截图由判定准备事务从同一 Raw Visual 复制为独立文件和实体。正式 Assessment/Issue 的原子写入仍由 `commit_decision` 负责。
+Host Core currently implements structured Evidence and Raw Visual binding, sanitization, digests, immutable writes, and `prepare_decision` PendingDecision binding. If screenshot sanitization is unconfirmed, the object is unlocated or ambiguous, or file bytes conflict, Host records a failure fact that cannot satisfy the formal screenshot gate. The decision-preparation transaction copies a same-Raw-Visual `kind=issue` screenshot into an independent file and entity. `commit_decision` remains responsible for the atomic Assessment/Issue write.
 
-实现状态补充（2026-08-30）：B07a 真实结构化 Evidence、B07b 真实对象级截图、B08 JSON/MCP 传输和 B09 发布级故障注入已完成。Raw Visual 的图片绑定、裁剪、digest、不可变落盘和派生链路已验证；由于 B07c 自动像素脱敏尚未实现，截图记录 `sanitizationStatus=not_performed`，不能写成 `sanitized`，也不能进入正式 `issue_found`。B08/B09 不能放宽或绕过该限制。
+Implementation status, 2026-08-30: B07a real structured Evidence, B07b real object-level screenshots, B08 JSON/MCP transport, and B09 release-level fault injection are complete. Raw Visual image binding, cropping, digest, immutable persistence, and derivation were verified. B07c automatic pixel sanitization is not implemented, so screenshots use `sanitizationStatus=not_performed`, cannot claim `sanitized`, and cannot enter formal `issue_found`. B08/B09 cannot relax this restriction.
 
-实现状态补充（2026-08-31）：C02 已实现 DimensionFinding Schema、Store、工具和 Finding 驱动 Coverage。`plannedCoverageDimensions` 只表达调查计划，不能再作为正式覆盖证明；旧 coverage 结构已从 Host、测试 Harness 和示例账本移除。
+Implementation status, 2026-08-31: C02 implements DimensionFinding schema, Store, tools, and Finding-driven Coverage. `plannedCoverageDimensions` expresses an investigation plan only and no longer proves formal coverage. The legacy coverage structure was removed from Host, test Harness, and example ledgers.

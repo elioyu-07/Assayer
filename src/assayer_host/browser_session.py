@@ -17,7 +17,7 @@ from .errors import HostError
 class BrowserSessionFailure(HostError):
     """A browser/backend failure that invalidates all facts from the Session."""
 
-    def __init__(self, message: str = "浏览器 Session 已失败，不能继续使用"):
+    def __init__(self, message: str = "Browser Session has failed and cannot be reused"):
         super().__init__("BROWSER_SESSION_FAILED", message, next_step="stop_scan")
 
 

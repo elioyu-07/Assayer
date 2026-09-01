@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://assayer.dev/schemas/page-candidate.schema.json",
   "title": "PageCandidate",
-  "description": "inspect_page 发现、尚未升级为 AuditObject 的运行态候选。",
+  "description": "Runtime candidate discovered by inspect_page and not yet promoted to an AuditObject.",
   "type": "object",
   "additionalProperties": false,
   "required": ["candidateId", "scanId", "pageStateRef", "kind", "label", "role", "locatorDigest", "potentialRules", "observedAtRevision"],

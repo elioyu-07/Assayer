@@ -49,8 +49,8 @@ class ActionSafetyPolicyTest(unittest.TestCase):
     def test_selector_and_script_parameters_are_blocked(self):
         for parameters in ({"selector": "#save"}, {"script": "click()"}):
             with self.subTest(parameters=parameters):
-                self.assertEqual(self.policy.action_decision("focus", "观察", parameters).outcome, "blocked")
-        self.assertEqual(self.policy.action_decision("focus", "观察", {"nested": {"selector": "#save"}}).outcome, "blocked")
+                self.assertEqual(self.policy.action_decision("focus", "observe", parameters).outcome, "blocked")
+        self.assertEqual(self.policy.action_decision("focus", "observe", {"nested": {"selector": "#save"}}).outcome, "blocked")
 
     def test_declared_origin_cannot_hide_cross_origin_url(self):
         decision = self.classify(url="https://other.example.com/api/orders", origin=self.origin)

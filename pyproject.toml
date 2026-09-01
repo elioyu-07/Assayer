@@ -7,14 +7,23 @@ name = "assayer"
 version = "0.1.0"
 description = "Protocol and operation core for Assayer Host"
 requires-python = ">=3.11"
-dependencies = ["jsonschema>=4.18"]
+dependencies = ["jsonschema==4.26.0"]
 
 [project.optional-dependencies]
-browser = ["playwright>=1.46,<2"]
-mcp = ["mcp>=1.0,<2"]
+browser = ["playwright==1.62.0"]
+mcp = ["mcp==1.27.0"]
+test = [
+  "playwright==1.62.0",
+  "mcp==1.27.0",
+]
 
 [project.scripts]
 assayer-harness = "assayer_host.harness:main"
 assayer-json = "assayer_host.transport:main"
 assayer-mcp = "assayer_host.transport:mcp_main"
 assayer = "assayer_host.cli:main"
+
+[tool.setuptools.data-files]
+"share/assayer/schemas" = ["schemas/*.json"]
+"share/assayer/schemas/protocol" = ["schemas/protocol/*.json"]
+"share/assayer/rules" = ["rules/*.md", "rules/registry.json"]

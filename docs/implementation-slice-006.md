@@ -1,19 +1,5 @@
-# 垂直切片 006：证据采集与 Raw Visual
+# Vertical Slice 006: Evidence Collection and Raw Visual
 
-## 交付内容
+`EvidenceAdapter` accepts only current-Scan, current-PageState, uniquely verified objects. Evidence binds Scan, PageState, Object, optional Case, and capture revision. Host sanitizes, normalizes, and digests payloads; adapters cannot claim `sanitized=true`. Sensitive keys, Bearer tokens, and query secrets are masked before SQLite. Explicit Raw Visual capture records image digest, dimensions, bounding box, annotation, and relative path. Unconfirmed sanitization, missing location, or ambiguity records failed Screenshot facts only. Files use stable IDs, exclusive creation, and `0600`; Evidence/Screenshot are immutable and idempotent.
 
-- 新增 `EvidenceAdapter`，只接受当前 Scan、当前 PageState 中唯一验证对象的采集请求；
-- Evidence 必须绑定 Scan、PageState、AuditObject 和可选 Case，并记录 Host 采集 revision；
-- Host 对 payload 执行结构化脱敏、确定性规范化和完整性摘要，适配器不能自行宣称 `sanitized=true`；
-- 敏感 key、Bearer token 和常见 query-style secret 在写入 SQLite 前被遮蔽，无法规范化的类型 fail-closed；
-- Raw Visual 必须显式请求，记录图片摘要、尺寸、对象 bounding box、注释和相对路径；
-- 图片脱敏未确认、对象未定位或定位歧义时，只写入失败 Screenshot 事实，不生成可用截图路径；
-- 图片文件以稳定 ID、独占创建和 `0600` 权限写入；同名不同内容冲突拒绝覆盖；
-- Evidence 和 Screenshot 在 SQLite 中不可更新，幂等重试和 Host 重启后返回同一事实；
-- 成功采集会递增一次 `runRevision`，有关联 Case 时进入 `evidence_captured`。
-
-实现入口：[evidence.py](../src/assayer_host/evidence.py)、[core.py](../src/assayer_host/core.py)、[store.py](../src/assayer_host/store.py)。
-
-## 切片边界
-
-本切片生成结构化 Evidence 和 `kind=raw_visual` 的 Screenshot。正式 `kind=issue` 的独立问题截图必须在后续 `prepare_decision(issue_found)` 中从同一 Raw Visual 派生；Raw Visual 不能直接冒充 IssueScreenshot。
+This slice creates structured Evidence and `kind=raw_visual` Screenshots. Formal `kind=issue` screenshots are derived later by `prepare_decision(issue_found)`.

@@ -23,11 +23,11 @@
     "startedAt": "2026-08-30T10:00:00Z",
     "endedAt": "2026-08-30T11:00:00Z",
     "loginStatus": "succeeded",
-    "ruleRegistryDigest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "ruleRegistryDigest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "frozenRules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       }
     ],
     "capabilities": [
@@ -49,7 +49,7 @@
         {
           "rule": {
             "ruleId": "FUA-10",
-            "version": "1.0.0"
+            "version": "1.1.0"
           },
           "assessmentCount": 1,
           "resultCounts": {
@@ -59,37 +59,36 @@
         }
       ],
       "unprocessedEntrypointRefs": [],
-      "completionReason": "已完成筛选区覆盖并确认缺少重置能力。"
+      "completionReason": "Filter-region coverage completed and missing reset capability was confirmed."
     },
     "terminalReason": {
       "code": "COVERAGE_COMPLETE",
-      "message": "覆盖证明通过。"
+      "message": "Coverage proof passed."
     },
     "conclusionsValid": true
   },
   "ruleRegistry": {
     "registryId": "registry-001",
     "registryVersion": "1.0.0",
-    "digest": "95878231d68f6a1eb73f5723f144c8fc734a29dc87f8af3d32e3e12bd3cea0f6",
+    "digest": "4a19bcff64c56edbfdd281fc5d286a10315d45146624795b71904ce32c196221",
     "createdAt": "2026-08-30T08:00:00Z",
     "rules": [
       {
         "ruleId": "FUA-10",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "status": "enabled",
-        "name": "列表筛选必须同时提供查询和重置",
+        "name": "List filters must provide both query and reset",
         "owner": "product-owner",
-        "document": "rules/FUA-10.md",
+        "document": "rules/FUA-10-v1.1.md",
         "objectKinds": [
           "filter_region"
         ],
         "requiredCapabilities": [
           "runtime",
-          "dom",
-          "interaction"
+          "dom"
         ],
         "capabilityMissingOutcome": "needs_review",
-        "coverageContract": "rules/FUA-10.md#最低覆盖契约",
+        "coverageContract": "rules/FUA-10-v1.1.md#minimum-coverage-contract",
         "coverageDimensions": [
           "filter_present",
           "query_action",
@@ -134,17 +133,17 @@
           "P2",
           "P3"
         ],
-        "regressionSuite": "rules/FUA-10.md#样本与回归",
-        "contentDigest": "b714fd645e4e94bc6973965c8d4de6cee7a475ecbf829b4dcfa68e3343934114",
+        "regressionSuite": "rules/FUA-10-v1.1.md#samples-and-regression",
+        "contentDigest": "aa6071142da7d5b7a668765d0dfd9de5751dea28275486dc2847f276978e9232",
         "examples": {
           "positive": [
-            "筛选条件、查询和重置均存在"
+            "Filter conditions, query, and reset are all present"
           ],
           "negative": [
-            "筛选条件和查询存在，但没有重置"
+            "Filter conditions and query are present, but reset is absent"
           ],
           "regression": [
-            "对象身份歧义时必须 needs_review"
+            "Ambiguous object identity must produce needs_review"
           ]
         }
       }
@@ -157,7 +156,7 @@
       "url": "https://test.example.com/orders",
       "origin": "https://test.example.com",
       "route": "/orders",
-      "title": "订单列表",
+      "title": "Order list",
       "stateKind": "page",
       "observedAtRevision": 2,
       "observedAt": "2026-08-30T10:01:00Z",
@@ -202,7 +201,7 @@
       "potentialRules": [
         {
           "ruleId": "FUA-10",
-          "version": "1.0.0"
+          "version": "1.1.0"
         }
       ],
       "assessmentRefs": [
@@ -221,7 +220,7 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "applicable": true,
       "result": "issue_found",
@@ -255,10 +254,10 @@
       ],
       "screenshotRef": "screenshot-issue-001",
       "severity": "P2",
-      "title": "筛选区缺少重置能力",
-      "impact": "用户无法快速清除筛选条件。",
-      "recommendation": "增加重置入口并恢复列表默认状态。",
-      "reasonText": "存在筛选条件和查询，但没有重置能力。",
+      "title": "Filter region lacks reset capability",
+      "impact": "Users cannot clear filter conditions quickly.",
+      "recommendation": "Add a reset entrypoint that restores the list default state.",
+      "reasonText": "Filter conditions and query are present, but reset is absent.",
       "conclusionValidity": "valid",
       "decidedAt": "2026-08-30T11:00:00Z",
       "committedAtRevision": 8,
@@ -277,10 +276,10 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "kind": "observation",
-      "purpose": "确认查询和重置入口。",
+      "purpose": "Confirm query and reset entrypoints.",
       "status": "completed",
       "beginRevision": 3,
       "plannedAt": "2026-08-30T10:03:00Z",
@@ -372,7 +371,7 @@
         "width": 640,
         "height": 120
       },
-      "annotation": "原始视觉证据"
+      "annotation": "Raw visual evidence"
     },
     {
       "screenshotId": "screenshot-issue-001",
@@ -404,7 +403,7 @@
         "width": 640,
         "height": 120
       },
-      "annotation": "筛选区缺少重置入口"
+      "annotation": "Filter region lacks a reset entrypoint"
     }
   ],
   "issues": [
@@ -415,7 +414,7 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "result": "issue_found",
       "evidenceRefs": [
@@ -423,10 +422,10 @@
       ],
       "screenshotRef": "screenshot-issue-001",
       "severity": "P2",
-      "title": "筛选区缺少重置能力",
-      "message": "当前筛选区只有查询，没有重置。",
-      "impact": "用户无法快速清除筛选条件。",
-      "recommendation": "增加重置入口。",
+      "title": "Filter region lacks reset capability",
+      "message": "The current filter region provides query but no reset.",
+      "impact": "Users cannot clear filter conditions quickly.",
+      "recommendation": "Add a reset entrypoint.",
       "conclusionValidity": "valid",
       "createdAt": "2026-08-30T11:00:00Z",
       "createdAtRevision": 8
@@ -441,11 +440,11 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "dimension": "filter_present",
       "status": "satisfied",
-      "reasonText": "证据支持该覆盖维度。",
+      "reasonText": "Evidence supports this coverage dimension.",
       "evidenceRefs": [
         "evidence-issue-001"
       ],
@@ -462,11 +461,11 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "dimension": "query_action",
       "status": "satisfied",
-      "reasonText": "证据支持该覆盖维度。",
+      "reasonText": "Evidence supports this coverage dimension.",
       "evidenceRefs": [
         "evidence-issue-001"
       ],
@@ -483,11 +482,11 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "dimension": "reset_action",
       "status": "violated",
-      "reasonText": "证据确认筛选区缺少重置动作。",
+      "reasonText": "Evidence confirms the filter region lacks a reset action.",
       "evidenceRefs": [
         "evidence-issue-001"
       ],
@@ -504,11 +503,11 @@
       "objectRef": "obj-issue-001",
       "rule": {
         "ruleId": "FUA-10",
-        "version": "1.0.0"
+        "version": "1.1.0"
       },
       "dimension": "binding_to_list",
       "status": "satisfied",
-      "reasonText": "证据支持该覆盖维度。",
+      "reasonText": "Evidence supports this coverage dimension.",
       "evidenceRefs": [
         "evidence-issue-001"
       ],

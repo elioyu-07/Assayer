@@ -1,4 +1,5 @@
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from assayer_host import CredentialVault, DeterministicLoginAdapter, Determinist
 EXPECTED_ARTIFACTS = {
     "audit-ledger.json", "issues.json", "page-element-judgement.json",
     "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log",
+    "runtime-events.jsonl", "observability-manifest.json",
 }
 
 
@@ -27,6 +29,24 @@ class DeterministicHarnessTest(unittest.TestCase):
             ledger = json.loads((Path(tmp) / "audit-ledger.json").read_text())
             self.assertEqual(ledger["scan"]["status"], "completed")
             self.assertEqual(len(ledger["operations"]), 11)
+            self.assertTrue(all(item["endedAt"] >= item["acceptedAt"] and item["durationMs"] >= 0 for item in ledger["operations"]))
+            events = [json.loads(line) for line in (Path(tmp) / "runtime-events.jsonl").read_text().splitlines()]
+            self.assertEqual([item["sequence"] for item in events], list(range(1, len(events) + 1)))
+            manifest = json.loads((Path(tmp) / "observability-manifest.json").read_text())
+            self.assertEqual(manifest["diagnosticCompleteness"], "limited")
+            checks = {item["name"]: item["status"] for item in manifest["coreCompleteness"]["checks"]}
+            self.assertEqual(checks["assessment_timeline_closed"], "passed")
+            assessment_event = next(item for item in events if item["name"] == "assessment.committed")
+            self.assertEqual(assessment_event["correlation"]["assessmentRef"], ledger["assessments"][0]["assessmentId"])
+            self.assertEqual(set(assessment_event["correlation"]["findingRefs"]), set(ledger["assessments"][0]["findingRefs"]))
+            event_lines = (Path(tmp) / "runtime-events.jsonl").read_bytes()
+            self.assertEqual(manifest["eventStream"]["digest"], hashlib.sha256(event_lines).hexdigest())
+            operation_ids = {item["operationId"] for item in ledger["operations"]}
+            self.assertEqual({item["correlation"]["operationId"] for item in events if item["name"] == "operation.started"}, operation_ids)
+            self.assertEqual({item["correlation"]["operationId"] for item in events if item["name"] == "operation.finished"}, operation_ids)
+            forbidden = (Path(tmp) / "runtime-events.jsonl").read_text() + (Path(tmp) / "observability-manifest.json").read_text()
+            for token in ("password", "cookie", "authorization", "hiddenReasoning", "chainOfThought", "requestBody", "responseBody", "screenshotBase64", "prompt"):
+                self.assertNotIn(token, forbidden)
             self.assertEqual(ledger["assessments"][0]["result"], "scanned_no_issue")
             self.assertEqual(json.loads((Path(tmp) / "issues.json").read_text())["issues"], [])
             self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).rglob("*")))
@@ -47,8 +67,8 @@ class DeterministicHarnessTest(unittest.TestCase):
             self.assertEqual(len(ledger["issues"]), 1)
             self.assertEqual(report["issues"][0]["issueId"], ledger["issues"][0]["issueId"])
             self.assertEqual(len(list((Path(tmp) / "screenshots").glob("*.png"))), 2)
-            self.assertNotIn("重置", ledger["pageStates"][0]["safeEntrypoints"][0]["label"])
-            self.assertNotIn("重置", ledger["objects"][0]["identity"]["visibleText"])
+            self.assertNotIn("Reset", ledger["pageStates"][0]["safeEntrypoints"][0]["label"])
+            self.assertNotIn("Reset", ledger["objects"][0]["identity"]["visibleText"])
 
     def test_module_cli_emits_machine_readable_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,7 +111,7 @@ class DeterministicHarnessTest(unittest.TestCase):
             })
             self.assertEqual(response["status"], "rejected")
             self.assertEqual(response["error"]["code"], "INTERNAL_FAILURE")
-            self.assertEqual(response["error"]["message"], "只读页面适配器未配置")
+            self.assertEqual(response["error"]["message"], "Read-only page adapter is not configured")
         finally:
             core.close()
 
@@ -121,7 +141,7 @@ class DeterministicHarnessTest(unittest.TestCase):
                 "input": {"candidateId": page["candidateRefs"][0]},
             })
             self.assertEqual(response["status"], "rejected")
-            self.assertEqual(response["error"]["message"], "对象身份适配器未配置")
+            self.assertEqual(response["error"]["message"], "Object identity adapter is not configured")
         finally:
             core.close()
 
