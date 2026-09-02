@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/performance-bill.schema.json",
+  "title": "PerformanceBill",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "scanId", "runId", "status", "measurement", "activity", "operationGroups", "largestOperations", "limitations"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "status": { "enum": ["completed", "partial", "failed"] },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "endedAt", "totalDurationMs", "hostOperationDurationMs", "browserOperationDurationMs", "transportDurationMs", "modelDurationMs", "outsideHostDurationMs", "modelTelemetryStatus"],
+      "properties": {
+        "startedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "endedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "totalDurationMs": { "type": "integer", "minimum": 0 },
+        "hostOperationDurationMs": { "type": "integer", "minimum": 0 },
+        "browserOperationDurationMs": { "type": "integer", "minimum": 0 },
+        "transportDurationMs": { "type": "integer", "minimum": 0 },
+        "modelDurationMs": { "type": ["integer", "null"], "minimum": 0 },
+        "outsideHostDurationMs": { "type": "integer", "minimum": 0 },
+        "modelTelemetryStatus": { "enum": ["captured", "not_exposed"] }
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["toolCalls", "agentTurnsObserved", "publicToolCallsObserved", "publicToolCallsByName", "toolCallsByName", "requestBytes", "responseBytes", "transportRequestsMeasured", "requestSizesMeasured", "responseSizesMeasured", "pagesVisited", "physicalEntrypoints", "logicalEntrypoints", "duplicateEntrypoints", "duplicateEntrypointRatio", "objectsDiscovered", "objectsVerified", "decisionsCommitted", "screenshotsCaptured", "uniqueScreenshotDigests", "screenshotBytes", "rejectedOperations", "modelRetries"],
+      "properties": {
+        "toolCalls": { "$ref": "#/$defs/count" },
+        "agentTurnsObserved": { "$ref": "#/$defs/count" },
+        "publicToolCallsObserved": { "$ref": "#/$defs/count" },
+        "publicToolCallsByName": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "additionalProperties": { "$ref": "#/$defs/count" }
+        },
+        "toolCallsByName": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "additionalProperties": { "$ref": "#/$defs/count" }
+        },
+        "requestBytes": { "$ref": "#/$defs/count" },
+        "responseBytes": { "$ref": "#/$defs/count" },
+        "transportRequestsMeasured": { "$ref": "#/$defs/count" },
+        "requestSizesMeasured": { "$ref": "#/$defs/count" },
+        "responseSizesMeasured": { "$ref": "#/$defs/count" },
+        "pagesVisited": { "$ref": "#/$defs/count" },
+        "physicalEntrypoints": { "$ref": "#/$defs/count" },
+        "logicalEntrypoints": { "$ref": "#/$defs/count" },
+        "duplicateEntrypoints": { "$ref": "#/$defs/count" },
+        "duplicateEntrypointRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "objectsDiscovered": { "$ref": "#/$defs/count" },
+        "objectsVerified": { "$ref": "#/$defs/count" },
+        "decisionsCommitted": { "$ref": "#/$defs/count" },
+        "screenshotsCaptured": { "$ref": "#/$defs/count" },
+        "uniqueScreenshotDigests": { "$ref": "#/$defs/count" },
+        "screenshotBytes": { "$ref": "#/$defs/count" },
+        "rejectedOperations": { "$ref": "#/$defs/count" },
+        "modelRetries": { "$ref": "#/$defs/count" }
+      }
+    },
+    "operationGroups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operationGroup" }
+    },
+    "largestOperations": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "operationGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "callCount", "durationMs"],
+      "properties": {
+        "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "callCount": { "$ref": "#/$defs/count" },
+        "durationMs": { "$ref": "#/$defs/count" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationId", "tool", "operationKind", "status", "durationMs"],
+      "properties": {
+        "operationId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "tool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "operationKind": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "status": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "durationMs": { "$ref": "#/$defs/count" }
+      }
+    }
+  }
+}

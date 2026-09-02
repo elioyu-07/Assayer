@@ -1,0 +1,30 @@
+{
+  "pluginId": "assayer.frontend-audit",
+  "version": "1.0.0",
+  "platformApiVersion": "1.0.0",
+  "domains": ["frontend-audit"],
+  "subjectKinds": ["frontend_object"],
+  "checks": [
+    {
+      "checkId": "FUA-10",
+      "version": "1.1.0",
+      "subjectKinds": ["frontend_object"],
+      "dimensions": ["filter_present", "query_action", "reset_action", "binding_to_list"],
+      "decisionStates": ["issue_found", "scanned_no_issue", "needs_review", "not_applicable"],
+      "requiredEvidenceKinds": ["runtime_dom", "runtime_visual"],
+      "requiredCapabilities": ["structured_read", "visual_read"],
+      "capabilityMissingOutcome": "needs_review",
+      "invalidationSignals": ["runtime_state_digest"]
+    }
+  ],
+  "executionProfile": {
+    "discoverBatching": "allowed",
+    "inspectBatching": "forbidden",
+    "decisionBatching": "forbidden",
+    "parallelism": "forbidden",
+    "cacheReuse": "forbidden",
+    "checkpoint": "required",
+    "maxBatchSize": 1,
+    "ordering": "strict"
+  }
+}

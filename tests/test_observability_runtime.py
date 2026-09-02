@@ -1,14 +1,67 @@
+import hashlib
+import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
 from assayer_host.store import SQLiteStore
-from assayer_host.observability import render_observability
+from assayer_host.observability import render_observability, render_performance_bill
 from assayer_host.reporting import DerivedReportBuilder
 
 
 class RuntimeObservabilityStoreTest(unittest.TestCase):
+    def test_performance_bill_measures_duplicate_entrypoints_and_unique_screenshot_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            screenshot_dir = Path(tmp) / "screenshots"
+            screenshot_dir.mkdir()
+            image = b"fake-image-bytes"
+            (screenshot_dir / "raw.png").write_bytes(image)
+            (screenshot_dir / "issue.png").write_bytes(image)
+            digest = hashlib.sha256(image).hexdigest()
+            ledger = {
+                "scan": {
+                    "scanId": "scan-bill-001", "runId": "run-bill-001", "status": "completed",
+                    "startedAt": "2026-09-02T00:00:00Z", "endedAt": "2026-09-02T00:00:10Z",
+                },
+                "operations": [
+                    {"operationId": "operation-bill-001", "tool": "inspect_page", "operationKind": "read", "status": "succeeded", "durationMs": 100, "agentTurnId": "facade-test-turn-0001:discover_scope"},
+                    {"operationId": "operation-bill-002", "tool": "explore_entrypoint", "operationKind": "browser_action", "status": "succeeded", "durationMs": 200, "agentTurnId": "facade-test-turn-0001:discover_scope"},
+                ],
+                "pageStates": [{"pageStateId": "page-001"}],
+                "entrypoints": [
+                    {"entrypointId": "entrypoint-001", "identity": {"materialDigest": "a" * 64}},
+                    {"entrypointId": "entrypoint-002", "identity": {"materialDigest": "a" * 64}},
+                    {"entrypointId": "entrypoint-003", "identity": {"materialDigest": "b" * 64}},
+                ],
+                "objects": [{"objectId": "object-001", "rebindStatus": "matched"}],
+                "assessments": [{"assessmentId": "assessment-001"}],
+                "screenshots": [
+                    {"screenshotId": "screenshot-raw", "status": "captured", "digest": digest, "path": "screenshots/raw.png"},
+                    {"screenshotId": "screenshot-issue", "status": "captured", "digest": digest, "path": "screenshots/issue.png"},
+                ],
+            }
+            events = [
+                {"name": "transport.request.started", "phase": "start", "attributes": {"requestBytes": 50}},
+                {"name": "transport.request.finished", "phase": "finish", "durationMs": 210, "attributes": {"responseBytes": 75}},
+                {"name": "browser.operation.finished", "source": "browser", "phase": "finish", "durationMs": 200, "attributes": {}},
+            ]
+            json_bytes, markdown_bytes, bill = render_performance_bill(ledger, events, tmp)
+            self.assertEqual(bill["measurement"]["totalDurationMs"], 10000)
+            self.assertEqual(bill["measurement"]["hostOperationDurationMs"], 300)
+            self.assertEqual(bill["measurement"]["outsideHostDurationMs"], 9700)
+            self.assertEqual(bill["activity"]["agentTurnsObserved"], 1)
+            self.assertEqual(bill["activity"]["publicToolCallsObserved"], 1)
+            self.assertEqual(bill["activity"]["publicToolCallsByName"], {"discover_scope": 1})
+            self.assertEqual(bill["activity"]["toolCalls"], 2)
+            self.assertEqual(bill["activity"]["duplicateEntrypoints"], 1)
+            self.assertEqual(bill["activity"]["duplicateEntrypointRatio"], 0.3333)
+            self.assertEqual(bill["activity"]["screenshotsCaptured"], 2)
+            self.assertEqual(bill["activity"]["uniqueScreenshotDigests"], 1)
+            self.assertEqual(bill["activity"]["screenshotBytes"], len(image))
+            self.assertEqual(json.loads(json_bytes)["activity"]["responseBytes"], 75)
+            self.assertIn(b"Model latency: not exposed", markdown_bytes)
+
     def test_operation_times_are_real_and_terminal_time_is_idempotent(self):
         store = SQLiteStore()
         scan = {

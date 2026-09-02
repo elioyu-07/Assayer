@@ -12,6 +12,21 @@ The J01 delivery skeleton is in [`plugins/assayer`](plugins/assayer). Build a re
 python3 scripts/build_plugin_bundle.py --output ./dist
 ```
 
+Inspect or run plugins registered in the current installation:
+
+```bash
+assayer plugins list --json
+assayer plugins run \
+  --plugin assayer.config-quality \
+  --check CFG-001 \
+  --scope-json '{"files":[{"path":"settings.json"}]}'
+```
+
+The built-in Spec quality plugin inspects Markdown requirements through the
+domain-neutral interactive lifecycle. Its deterministic runtime emits bounded
+candidate evidence; an Agent must submit the semantic decision. The frontend
+audit tools remain compatibility aliases for the browser plugin.
+
 The builder packages the offline runtime, rules, schemas, and MCP server and verifies the bundle in a temporary environment. See [J01 install and delivery](docs/j01-install-delivery.md) for platform boundaries.
 
 Implemented product foundations include:
@@ -100,6 +115,8 @@ See [C07.2 real-link test gate](docs/implementation-slice-032.md) and [observabi
 16. [Browser and MCP integration plan](docs/browser-mcp-integration-plan.md)
 17. [LLM agent integration plan](docs/llm-agent-integration-plan.md)
 18. [Observability governance](docs/observability-governance.md)
+19. [Plugin development contract](docs/plugin-development.md)
+20. [Platform project plan](docs/project-plan.md)
 
 ## Repository layout
 

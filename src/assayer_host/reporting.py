@@ -17,7 +17,7 @@ class DerivedReportBuilder:
     def _text(value) -> str:
         return " ".join(str(value or "").replace("<", "‹").replace(">", "›").split())
 
-    def render(self, ledger: dict) -> dict[str, bytes]:
+    def render(self, ledger: dict, platform_artifacts: tuple[str, ...] = ()) -> dict[str, bytes]:
         scan = ledger["scan"]
         ledger_digest = hashlib.sha256(json.dumps(ledger, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         pages = {item["pageStateId"]: item for item in ledger["pageStates"]}
@@ -63,7 +63,11 @@ class DerivedReportBuilder:
         attributions = self._attributions(failed_operations)
         diagnostics = {"schemaVersion": self.VERSION, "sourceLedger": "audit-ledger.json", "sourceLedgerDigest": ledger_digest, "scanId": scan["scanId"], "runId": scan["runId"], "scanStatus": scan["status"], "conclusionsValid": effective_valid, "terminalReason": scan["terminalReason"], "coverageProof": scan["coverageProof"], "assessmentResultCounts": result_counts, "failedOperations": failed_operations, "assessmentTimelines": timelines, "attributions": attributions}
 
-        summary = ["# Assayer Audit Summary", "", f"- Scan: {scan['scanId']}", f"- Ledger digest: {ledger_digest}", f"- Status: {scan['status']}", f"- Conclusions valid: {'yes' if effective_valid else 'no'}", f"- Published issues: {len(issue_items)}", f"- Needs review: {result_counts['needs_review']}", "", "## Issues"]
+        summary = ["# Assayer Audit Summary", "", f"- Scan: {scan['scanId']}", f"- Ledger digest: {ledger_digest}", f"- Status: {scan['status']}", f"- Conclusions valid: {'yes' if effective_valid else 'no'}", f"- Published issues: {len(issue_items)}", f"- Needs review: {result_counts['needs_review']}"]
+        if platform_artifacts:
+            summary.extend(["", "## Platform Trace", ""])
+            summary.extend(f"- {name}" for name in platform_artifacts)
+        summary.extend(["", "## Issues"])
         if not issue_items:
             summary.extend(["", "No valid issues are publishable from this run."])
         for index, issue in enumerate(issue_items, 1):
@@ -72,7 +76,11 @@ class DerivedReportBuilder:
         for item in scan["coverageProof"]["ruleSummaries"]:
             summary.append(f"- {item['rule']['ruleId']}@{item['rule']['version']}: {item['assessmentCount']} assessments, {'complete' if item['coverageComplete'] else 'incomplete'} coverage")
         summary.append("")
-        diagnostics_md = ["# Assayer Run Diagnostics", "", f"- Terminal status: {scan['status']}", f"- Reason: {self._text(scan['terminalReason']['message'])}", f"- Unprocessed entrypoints: {len(scan['coverageProof'].get('unprocessedEntrypointRefs', []))}", f"- Failed/rejected operations: {len(failed_operations)}", f"- Assessment timeline entries: {len(timelines)}", "", "## Failure Attribution", ""]
+        diagnostics_md = ["# Assayer Run Diagnostics", "", f"- Terminal status: {scan['status']}", f"- Reason: {self._text(scan['terminalReason']['message'])}", f"- Unprocessed entrypoints: {len(scan['coverageProof'].get('unprocessedEntrypointRefs', []))}", f"- Failed/rejected operations: {len(failed_operations)}", f"- Assessment timeline entries: {len(timelines)}"]
+        if platform_artifacts:
+            diagnostics_md.extend(["", "## Platform Trace", ""])
+            diagnostics_md.extend(f"- {name}" for name in platform_artifacts)
+        diagnostics_md.extend(["", "## Failure Attribution", ""])
         diagnostics_md.extend([f"- {item['layer']} ({item['confidence']}): {self._text(item['reason'])}; recommendation: {self._text(item['recommendation'])}" for item in attributions])
         diagnostics_md.append("")
         log_lines = [f"{item['acceptedAt']} {item['status']} {item['tool']} {item['operationId']}" + (f" {item['reason']['code']}" if item.get("reason") else "") for item in sorted(ledger["operations"], key=lambda value: (value["acceptedAtRevision"], value["operationId"]))]

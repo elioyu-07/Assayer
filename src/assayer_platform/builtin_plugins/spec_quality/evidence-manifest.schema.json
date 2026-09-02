@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/elioyu-07/spec-quality-audit/main/references/evidence-manifest.schema.json",
+  "title": "Spec Quality Audit Evidence Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest_version", "policy", "target", "scope", "selected_sources", "profiles", "claim_verifications", "unavailable_evidence", "checker_drift"],
+  "properties": {
+    "manifest_version": {"const": "1.1.0"},
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policy_id", "policy_version", "authority_path", "authority_version"],
+      "properties": {
+        "policy_id": {"type": "string", "minLength": 1}, "policy_version": {"type": "string", "minLength": 1},
+        "authority_path": {"type": "string", "minLength": 1}, "authority_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "target": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "version_or_commit"],
+      "properties": {"path": {"type": "string", "minLength": 1}, "version_or_commit": {"type": ["string", "null"]}}
+    },
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "project_root", "code_verification", "external_materials"],
+      "properties": {
+        "kind": {"enum": ["single-file", "cross-spec"]},
+        "project_root": {"type": ["string", "null"]},
+        "code_verification": {"type": "boolean"},
+        "external_materials": {"type": "boolean"}
+      }
+    },
+    "selected_sources": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "source", "version", "owner", "applicable_dimensions", "adoption_basis"],
+        "properties": {
+          "kind": {"type": "string", "minLength": 1}, "source": {"type": "string", "minLength": 1},
+          "version": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1},
+          "applicable_dimensions": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "adoption_basis": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "profiles": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selected", "available"],
+      "properties": {
+        "selected": {"type": "string", "minLength": 1},
+        "overlays": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "available": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "claim_verifications": {
+      "type": "array",
+      "items": {"$ref": "claim-verification.schema.json#/$defs/result"}
+    },
+    "unavailable_evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "checker_drift": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

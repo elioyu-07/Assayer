@@ -15,7 +15,8 @@ class SQLiteStore:
     """Small transactional store for the Scan/Operation slice."""
 
     def __init__(self, path: str | Path = ":memory:"):
-        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._path = str(path)
+        self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._conn.executescript(
@@ -116,6 +117,11 @@ class SQLiteStore:
               run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_json TEXT NOT NULL,
               UNIQUE(scan_id, sequence)
             );
+            CREATE TABLE IF NOT EXISTS platform_ledgers (
+              run_id TEXT PRIMARY KEY,
+              ledger_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
             """
         )
         columns = {row[1] for row in self._conn.execute("PRAGMA table_info(operations)")}
@@ -157,6 +163,11 @@ class SQLiteStore:
         self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_assessment_per_object_rule ON assessments(scan_id,object_id,rule_id,rule_version)")
         self._conn.commit()
 
+    @property
+    def path(self) -> str:
+        """Return the configured database location for trusted store adapters."""
+        return self._path
+
     @contextmanager
     def transaction(self):
         with self._lock:
@@ -172,9 +183,27 @@ class SQLiteStore:
         row = self._conn.execute("SELECT * FROM scans WHERE scan_id = ?", (scan_id,)).fetchone()
         return dict(row) if row else None
 
+    def save_platform_ledger(self, run_id: str, ledger_json: str, updated_at: str) -> None:
+        """Persist the generic platform ledger in the Host database."""
+        self._conn.execute(
+            "INSERT INTO platform_ledgers(run_id,ledger_json,updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(run_id) DO UPDATE SET ledger_json=excluded.ledger_json, updated_at=excluded.updated_at",
+            (run_id, ledger_json, updated_at),
+        )
+
+    def load_platform_ledger(self, run_id: str) -> str | None:
+        row = self._conn.execute(
+            "SELECT ledger_json FROM platform_ledgers WHERE run_id=?", (run_id,)
+        ).fetchone()
+        return str(row[0]) if row else None
+
     def get_scan_by_run(self, scan_id: str, run_id: str) -> dict | None:
         row = self._conn.execute("SELECT * FROM scans WHERE scan_id = ? AND run_id = ?", (scan_id, run_id)).fetchone()
         return dict(row) if row else None
+
+    def get_output_dir_for_run(self, run_id: str) -> str | None:
+        row = self._conn.execute("SELECT output_dir FROM scans WHERE run_id=?", (run_id,)).fetchone()
+        return str(row[0]) if row and row[0] else None
 
     def insert_scan(self, scan: dict) -> None:
         started_monotonic_ns = scan.get("startedMonotonicNs") or time.monotonic_ns()

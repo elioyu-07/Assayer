@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/public-progress.schema.json",
+  "title": "PublicAuditProgress",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["phase", "status", "message", "nextStep", "counts", "terminal"],
+  "properties": {
+    "phase": {
+      "enum": [
+        "starting", "planning", "discovering", "inspecting", "investigating",
+        "acting", "collecting_evidence", "recovering", "deciding", "reconciling",
+        "finalizing", "completed", "failed", "running"
+      ]
+    },
+    "status": { "enum": ["running", "blocked", "completed", "partial", "failed"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "nextStep": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "terminal": { "type": "boolean" },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pagesVisited", "objectsDiscovered", "objectsVerified", "decisionsCommitted",
+        "entrypointsProcessed", "entrypointsRemaining"
+      ],
+      "properties": {
+        "pagesVisited": { "type": "integer", "minimum": 0 },
+        "objectsDiscovered": { "type": "integer", "minimum": 0 },
+        "objectsVerified": { "type": "integer", "minimum": 0 },
+        "decisionsCommitted": { "type": "integer", "minimum": 0 },
+        "entrypointsProcessed": { "type": "integer", "minimum": 0 },
+        "entrypointsRemaining": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "enum": ["completed", "partial", "failed"] } }, "required": ["status"] },
+      "then": { "properties": { "terminal": { "const": true } } },
+      "else": { "properties": { "terminal": { "const": false } } }
+    }
+  ]
+}

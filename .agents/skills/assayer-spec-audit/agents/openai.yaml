@@ -1,0 +1,14 @@
+interface:
+  display_name: "Assayer Spec Audit"
+  short_description: "Review Markdown Specs with canonical evidence gates"
+  default_prompt: "Use $assayer-spec-audit to audit this spec.md and summarize the reviewed result."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "assayer"
+      description: "Local Assayer stdio MCP server"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

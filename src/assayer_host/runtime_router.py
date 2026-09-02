@@ -31,6 +31,8 @@ class RoutedRuntime(Protocol):
     def record_runtime_event(self, event: dict) -> dict: ...
     def refresh_observability(self) -> None: ...
     def build_completion_input(self, scan_id: str, run_id: str, completion_reason: str | None = None) -> dict: ...
+    def build_discovery_plan(self, scan_id: str, run_id: str, *, max_pages: int = 32,
+                             max_logical_entrypoints: int = 128) -> dict: ...
 
 
 RuntimeFactory = Callable[[str, Path, str], RoutedRuntime]
@@ -177,6 +179,33 @@ class RuntimeRouter:
         with binding.lock:
             return builder(scan_id, run_id, completion_reason)
 
+    def build_discovery_plan(self, scan_id: str, run_id: str, *, max_pages: int = 32,
+                             max_logical_entrypoints: int = 128) -> dict:
+        """Return the next discovery action assembled from the active ledger."""
+        with self._lock:
+            binding = self._active.get(scan_id) or self._terminal.get(scan_id)
+        if binding is None or binding.run_id != run_id or binding.runtime is None:
+            raise HostError("UNKNOWN_REFERENCE", "Scan or Run does not exist or has ended")
+        builder = getattr(binding.runtime, "build_discovery_plan", None)
+        if not callable(builder):
+            raise HostError("INTERNAL_FAILURE", "The runtime does not support discovery planning")
+        with binding.lock:
+            return builder(
+                scan_id, run_id, max_pages=max_pages,
+                max_logical_entrypoints=max_logical_entrypoints,
+            )
+
+    def platform_ledger_store(self, scan_id: str, run_id: str):
+        """Return the shared store for trusted product-transport tracking."""
+        with self._lock:
+            binding = self._active.get(scan_id) or self._terminal.get(scan_id)
+        if binding is None or binding.run_id != run_id or binding.runtime is None:
+            raise HostError("UNKNOWN_REFERENCE", "Scan or Run does not exist or has ended")
+        store = getattr(binding.runtime, "platform_ledger_store", None)
+        if store is None:
+            raise HostError("INTERNAL_FAILURE", "The runtime does not expose a platform ledger store")
+        return store
+
     def handle(self, request: dict) -> dict:
         if not isinstance(request, dict):
             raise HostError("INVALID_REQUEST", "JSON request must be an object")
@@ -212,7 +241,12 @@ class RuntimeRouter:
             binding.lease_deadline = self._clock() + self._lease_timeout
             self._emit_runtime_event(binding, "lease.renewed", "succeeded", "Agent lease renewed")
             transport_started = self._clock()
-            self._emit_component_event(binding, request, "transport.request.started", "start", "started", "Transport request entered Runtime Router")
+            request_bytes = self._json_size(request)
+            self._emit_component_event(
+                binding, request, "transport.request.started", "start", "started",
+                "Transport request entered Runtime Router",
+                attributes={"requestBytes": request_bytes},
+            )
             try:
                 response = binding.runtime.handle(request)
             except HostError as error:
@@ -226,7 +260,13 @@ class RuntimeRouter:
             except Exception:
                 self._emit_component_event(binding, request, "transport.request.finished", "finish", "failed", "Transport request failed before a Host response", duration_ms=max(0, int((self._clock() - transport_started) * 1000)))
                 raise
-            self._emit_component_event(binding, request, "transport.request.finished", "finish", "succeeded" if response.get("status") == "ok" else ("rejected" if response.get("status") == "rejected" else "failed"), "Transport received the Host response", duration_ms=max(0, int((self._clock() - transport_started) * 1000)))
+            self._emit_component_event(
+                binding, request, "transport.request.finished", "finish",
+                "succeeded" if response.get("status") == "ok" else ("rejected" if response.get("status") == "rejected" else "failed"),
+                "Transport received the Host response",
+                duration_ms=max(0, int((self._clock() - transport_started) * 1000)),
+                attributes={"responseBytes": self._json_size(response)},
+            )
             self._refresh_binding(binding, response)
             if response.get("status") == "rejected":
                 error = response.get("error") if isinstance(response.get("error"), dict) else {}
@@ -569,13 +609,15 @@ class RuntimeRouter:
             return
 
     @staticmethod
-    def _emit_component_event(binding: _RuntimeBinding, request: dict, name: str, phase: str, outcome: str, summary: str, *, duration_ms: int | None = None) -> None:
+    def _emit_component_event(binding: _RuntimeBinding, request: dict, name: str, phase: str, outcome: str, summary: str, *, duration_ms: int | None = None, attributes: dict | None = None) -> None:
         runtime = binding.runtime
         recorder = getattr(runtime, "record_runtime_event", None) if runtime is not None else None
         if not callable(recorder):
             return
         correlation = {key: request[key] for key in ("agentTurnId", "requestId") if isinstance(request.get(key), str)}
-        event = {"scanId": binding.scan_id, "runId": binding.run_id, "source": "transport", "category": "network", "name": name, "phase": phase, "severity": "info" if outcome in {"started", "succeeded"} else "error", "outcome": outcome, "summary": summary, "correlation": correlation, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"}, "attributes": {"tool": str(request.get("tool", "unknown"))}}
+        event_attributes = {"tool": str(request.get("tool", "unknown"))}
+        event_attributes.update(attributes or {})
+        event = {"scanId": binding.scan_id, "runId": binding.run_id, "source": "transport", "category": "network", "name": name, "phase": phase, "severity": "info" if outcome in {"started", "succeeded"} else "error", "outcome": outcome, "summary": summary, "correlation": correlation, "privacy": {"classification": "internal", "sanitizationStatus": "not_required"}, "attributes": event_attributes}
         if duration_ms is not None:
             event["durationMs"] = duration_ms
         try:
@@ -613,6 +655,10 @@ class RuntimeRouter:
         material = {"tool": request.get("tool"), "input": request.get("input")}
         encoded = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _json_size(value: object) -> int:
+        return len(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
     @staticmethod
     def _stable_digest(value: object) -> str:

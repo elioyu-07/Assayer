@@ -104,6 +104,60 @@ class HostCoreTest(unittest.TestCase):
         self.cores.append(core)
         return core
 
+    @staticmethod
+    def platform_projection_fixture():
+        assessment = {
+            "assessmentId": "assessment-001", "objectRef": "object-001",
+            "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+            "result": "scanned_no_issue",
+        }
+        platform = {
+            "decision_authority": "platform",
+            "receipts": [{
+                "commit_id": "platform-commit:001", "work_item_id": "work-001",
+                "check_id": "FUA-10", "check_version": "1.1.0",
+                "result": "scanned_no_issue", "authority": "platform",
+                "metadata": {
+                    "hostAssessmentId": "assessment-001",
+                    "hostObjectId": "object-001",
+                },
+            }],
+            "decisions": [{
+                "work_item_id": "work-001", "check_id": "FUA-10",
+                "check_version": "1.1.0", "result": "scanned_no_issue",
+            }],
+            "investigations": [{
+                "work_item": {"work_item_id": "work-001"},
+                "metadata": {"objectId": "object-001"},
+            }],
+        }
+        return platform, [assessment]
+
+    def test_platform_receipt_reconciles_one_host_assessment_projection(self):
+        platform, assessments = self.platform_projection_fixture()
+        HostCore._validate_platform_assessment_projections(platform, assessments)
+
+    def test_platform_receipt_rejects_mismatched_projection_fields(self):
+        scenarios = (
+            ("result", lambda platform: platform["receipts"][0].update(result="issue_found")),
+            ("rule", lambda platform: platform["decisions"][0].update(check_version="2.0.0")),
+            ("work item", lambda platform: platform["receipts"][0].update(work_item_id="work-002")),
+            ("authority", lambda platform: platform["receipts"][0].update(authority="legacy_host")),
+        )
+        for label, mutate in scenarios:
+            with self.subTest(field=label):
+                platform, assessments = self.platform_projection_fixture()
+                mutate(platform)
+                with self.assertRaises(ValueError):
+                    HostCore._validate_platform_assessment_projections(platform, assessments)
+
+    def test_platform_projection_rejects_host_only_assessment(self):
+        platform, assessments = self.platform_projection_fixture()
+        platform["receipts"] = []
+        platform["decisions"] = []
+        with self.assertRaisesRegex(ValueError, "one-to-one"):
+            HostCore._validate_platform_assessment_projections(platform, assessments)
+
     def test_bootstrap_is_idempotent(self):
         core = self.make_core()
         first = bootstrap(core)
@@ -201,6 +255,64 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(stored["parentPageStateId"], started["currentPageStateId"])
         current = core._store.get_scan(started["scanId"])
         self.assertEqual(current["current_page_state_id"], explored["result"]["pageStateId"])
+
+    def test_build_discovery_plan_batches_candidates_and_logical_entrypoints(self):
+        core = self.make_core()
+        started = bootstrap(core)
+        page = core.handle(session(started["result"], key="scope-page", input={
+            "pageStateId": started["result"]["currentPageStateId"],
+            "include": ["route", "objects", "safeEntrypoints"],
+        }))
+        plan = core.build_discovery_plan(started["result"]["scanId"], started["result"]["runId"])
+        self.assertEqual(plan["currentPage"]["pageStateId"], page["result"]["pageStateId"])
+        self.assertEqual(plan["entrypointCounts"], {
+            "physical": 1, "logical": 1, "duplicates": 0,
+            "processed": 0, "skipped": 0, "unprocessed": 1,
+        })
+        self.assertEqual(plan["nextAction"]["type"], "investigate_objects")
+        self.assertEqual(len(plan["candidates"]), 1)
+
+    def test_build_discovery_plan_deduplicates_reobserved_tabs_without_mutation(self):
+        page_adapter = SwitchingPageAdapter()
+        core = self.make_core(
+            page_adapter=page_adapter,
+            entrypoint_adapter=SwitchingEntrypointAdapter(page_adapter),
+        )
+        started = bootstrap(core)["result"]
+        initial = core.handle(session(started, key="scope-tabs-initial", input={
+            "pageStateId": started["currentPageStateId"], "include": ["safeEntrypoints"],
+        }))["result"]
+        details = next(item for item in initial["entrypoints"] if item["label"] == "Details")
+        explored = core.handle(session(started, tool="explore_entrypoint", key="scope-tabs-detail", revision=1, input={
+            "pageStateId": started["currentPageStateId"], "entrypointId": details["entrypointId"],
+        }))["result"]
+        before = core._store.get_scan(started["scanId"])["run_revision"]
+        first = core.build_discovery_plan(started["scanId"], started["runId"])
+        second = core.build_discovery_plan(started["scanId"], started["runId"])
+        after = core._store.get_scan(started["scanId"])["run_revision"]
+        self.assertEqual(first, second)
+        self.assertEqual(before, after)
+        self.assertEqual(first["currentPage"]["pageStateId"], explored["pageStateId"])
+        self.assertEqual(first["entrypointCounts"], {
+            "physical": 4, "logical": 2, "duplicates": 2,
+            "processed": 2, "skipped": 0, "unprocessed": 0,
+        })
+        self.assertEqual(first["nextAction"]["type"], "ready_to_complete")
+
+    def test_build_discovery_plan_stops_at_host_owned_page_budget(self):
+        page_adapter = SwitchingPageAdapter()
+        core = self.make_core(
+            page_adapter=page_adapter,
+            entrypoint_adapter=SwitchingEntrypointAdapter(page_adapter),
+        )
+        started = bootstrap(core)["result"]
+        core.handle(session(started, key="scope-budget-page", input={
+            "pageStateId": started["currentPageStateId"], "include": ["safeEntrypoints"],
+        }))
+        plan = core.build_discovery_plan(started["scanId"], started["runId"], max_pages=1)
+        self.assertTrue(plan["budget"]["exhausted"])
+        self.assertEqual(plan["nextAction"]["type"], "budget_exhausted")
+        self.assertEqual(plan["nextAction"]["remainingLogicalEntrypoints"], 1)
 
     def test_completion_merges_reobserved_logical_tabs_without_hiding_new_destinations(self):
         page_adapter = SwitchingPageAdapter()
@@ -1006,6 +1118,16 @@ class HostCoreTest(unittest.TestCase):
         ))
         self.assertEqual(result["status"], "ok")
         self.assertIn("pendingDecisionId", result["result"])
+        committed = core.handle(session(
+            started, tool="commit_decision", key="commit-binding-review",
+            revision=6, input={"pendingDecisionId": result["result"]["pendingDecisionId"]},
+        ))
+        self.assertEqual(committed["status"], "ok")
+        completion = core.build_completion_input(started["scanId"], started["runId"])
+        summary = completion["ruleSummaries"][0]
+        self.assertEqual(summary["resultCounts"], {"needs_review": 1})
+        self.assertIn("Multiple logical lists", summary["reason"])
+        self.assertIn("filter_region", summary["reason"])
 
     def test_prepare_rejects_case_before_recovery_barrier(self):
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
@@ -1238,7 +1360,7 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(ledger["scan"]["status"], "completed")
             self.assertEqual(ledger["scan"]["coverageProof"]["processedObjectRefs"], [object_id])
             self.assertEqual(len(ledger["assessments"]), 1)
-            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log", "runtime-events.jsonl", "observability-manifest.json"}
+            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log", "runtime-events.jsonl", "observability-manifest.json", "performance-bill.json", "performance-bill.md"}
             self.assertEqual(set(result["result"]["artifactPaths"]), expected)
             self.assertTrue(all((Path(tmp) / name).exists() for name in expected))
             self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).iterdir()))
@@ -1248,6 +1370,11 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(diagnostics["assessmentTimelines"][0]["assessmentId"], ledger["assessments"][0]["assessmentId"])
             self.assertEqual(diagnostics["attributions"][0]["layer"], "unattributed")
             self.assertIn("recommendation", diagnostics["attributions"][0])
+            performance = json.loads((Path(tmp) / "performance-bill.json").read_text())
+            self.assertEqual(performance["scanId"], started["scanId"])
+            self.assertEqual(performance["activity"]["decisionsCommitted"], 1)
+            self.assertGreaterEqual(performance["measurement"]["totalDurationMs"], 0)
+            self.assertIn("# Performance Bill", (Path(tmp) / "performance-bill.md").read_text())
             self.assertEqual(DerivedReportBuilder().render(ledger), DerivedReportBuilder().render(ledger))
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])

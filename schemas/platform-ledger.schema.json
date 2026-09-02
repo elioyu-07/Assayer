@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/platform-ledger.schema.json",
+  "title": "AssayerPlatformLedger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run", "status", "operations", "events", "receipts", "artifacts", "work_items", "investigations", "decisions", "failures", "decision_authority"],
+  "properties": {
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "plugin_id", "plugin_version", "check_id", "check_version", "scope_digest", "started_at"],
+      "properties": {
+        "run_id": { "$ref": "common.schema.json#/$defs/entityId" },
+        "plugin_id": { "$ref": "common.schema.json#/$defs/entityId" },
+        "plugin_version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "check_id": { "$ref": "common.schema.json#/$defs/ruleId" },
+        "check_version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "scope_digest": { "$ref": "common.schema.json#/$defs/sha256" },
+        "started_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+      }
+    },
+    "status": { "enum": ["running", "completed", "partial", "failed"] },
+    "operations": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["operation_id", "kind", "work_item_id", "check_id", "status", "attempt", "started_at", "ended_at", "duration_ms"],
+        "properties": {
+          "operation_id": { "$ref": "common.schema.json#/$defs/entityId" },
+          "kind": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "work_item_id": { "$ref": "common.schema.json#/$defs/entityId" },
+          "check_id": { "$ref": "common.schema.json#/$defs/ruleId" },
+          "status": { "enum": ["succeeded", "failed", "running"] },
+          "attempt": { "type": "integer", "minimum": 1 },
+          "error_code": { "type": ["string", "null"] },
+          "receipt_id": { "type": ["string", "null"] },
+          "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+          "ended_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+          "duration_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "events": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["event_id", "sequence", "run_id", "name", "phase", "outcome", "occurred_at", "details"],
+        "properties": {
+          "event_id": { "$ref": "common.schema.json#/$defs/entityId" },
+          "sequence": { "type": "integer", "minimum": 1 },
+          "run_id": { "$ref": "common.schema.json#/$defs/entityId" },
+          "name": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "phase": { "enum": ["start", "finish", "instant"] },
+          "outcome": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "occurred_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+          "operation_id": { "type": ["string", "null"] },
+          "work_item_id": { "type": ["string", "null"] },
+          "check_id": { "type": ["string", "null"] },
+          "details": { "type": "object" }
+        }
+      }
+    },
+    "receipts": { "type": "array", "items": { "type": "object" } },
+    "artifacts": { "type": "array", "items": { "type": "object" } },
+    "work_items": { "type": "array", "items": { "type": "object" } },
+    "investigations": { "type": "array", "items": { "type": "object" } },
+    "decisions": { "type": "array", "items": { "type": "object" } },
+    "failures": { "type": "array", "items": { "type": "object" } },
+    "decision_authority": { "type": "string", "minLength": 1 }
+  }
+}

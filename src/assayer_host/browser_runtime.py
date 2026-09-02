@@ -14,6 +14,8 @@ from .browser_session import BrowserProfile, BrowserSession
 from .core import HostCore
 from .errors import HostError
 from .evidence import EvidenceSanitizer
+from .store import SQLiteStore
+from .platform_store import SQLitePlatformLedgerStore
 
 
 class AnonymousBrowserLoginAdapter:
@@ -60,16 +62,22 @@ class BrowserHostRuntime:
             raise ValueError("url must be an http(s) URL without credentials") from error
         self.entry_url = url
         self.output_dir = str(Path(output_dir).expanduser().resolve())
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.store_path = Path(self.output_dir) / "host-ledger.sqlite3"
         scan_id = scan_id or f"scan-{uuid.uuid4().hex}"
         self.session = BrowserSession(
             scan_id, profile or BrowserProfile(), backend=PlaywrightBrowserBackend()
         )
-        self.session.open()
+        store = None
         try:
+            self.session.open()
             self.bundle = create_recoverable_browser_adapter_bundle(
                 self.session, allowed_origin=origin
             )
+            store = SQLiteStore(self.store_path)
+            self.platform_ledger_store = SQLitePlatformLedgerStore(store)
             self.core = HostCore(
+                store=store,
                 login_adapter=AnonymousBrowserLoginAdapter(
                     self.bundle.page, self.bundle.network_guard
                 ),
@@ -82,6 +90,10 @@ class BrowserHostRuntime:
                 entrypoint_adapter=self.bundle.entrypoint,
             )
         except Exception:
+            if store is not None:
+                store.close()
+                for suffix in ("", "-wal", "-shm"):
+                    self.store_path.with_name(self.store_path.name + suffix).unlink(missing_ok=True)
             self.session.close()
             raise
         self._sanitizer = EvidenceSanitizer()
@@ -156,6 +168,13 @@ class BrowserHostRuntime:
 
     def build_completion_input(self, scan_id: str, run_id: str, completion_reason: str | None = None) -> dict:
         return self.core.build_completion_input(scan_id, run_id, completion_reason)
+
+    def build_discovery_plan(self, scan_id: str, run_id: str, *, max_pages: int = 32,
+                             max_logical_entrypoints: int = 128) -> dict:
+        return self.core.build_discovery_plan(
+            scan_id, run_id, max_pages=max_pages,
+            max_logical_entrypoints=max_logical_entrypoints,
+        )
 
     def fail_scan(self, code: str, message: str) -> dict:
         state = self.protocol_state()

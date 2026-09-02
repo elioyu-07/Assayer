@@ -287,3 +287,9 @@ Python is the primary language; browser probes may use limited JavaScript. Add a
 Before coding, close all blockers in [Verification and Traceability](verification-and-traceability.md), map Bootstrap/Case/PendingDecision/Operation lookup into protocol schemas, store identity/recovery/safety/evidence algorithm versions in ledger schemas, complete pre-slice FUA-10 paper acceptance, and have the owner mark governance `implementation-ready` after consistency review.
 
 The first vertical slice should prove that Agent safely investigates one page object through Host, generates a reverse Case, decides from genuine Evidence, and outputs a correctly aligned defect screenshot.
+
+## 14. Platformization Boundary
+
+The browser audit described above is the first vertical implementation, not the platform's universal domain model. The domain-neutral lifecycle, Evidence, Decision, capability, scheduling, performance, and conformance contract is defined in [Platform Contract](platform-contract.md). The current module ownership and extraction plan are recorded in [Platform Boundary Map](platform-boundary-map.md).
+
+Platform code must use generic WorkItems, Checks, InvestigationPackets, and runtime adapters. Browser concepts such as PageState, Tab, DOM, and Chromium remain inside the frontend runtime/plugin. A plugin may declare stricter evidence, ordering, batching, caching, or recovery requirements; the Host must honor those constraints and fall back to a slower path when necessary.

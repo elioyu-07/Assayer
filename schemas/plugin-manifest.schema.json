@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-manifest.schema.json",
+  "title": "AssayerPluginManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pluginId", "version", "platformApiVersion", "domains", "subjectKinds", "checks", "executionProfile"],
+  "properties": {
+    "pluginId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "platformApiVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "domains": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+    "subjectKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["checkId", "version", "subjectKinds", "dimensions", "decisionStates", "requiredEvidenceKinds", "requiredCapabilities", "capabilityMissingOutcome", "invalidationSignals"],
+        "properties": {
+          "checkId": { "type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,63}$" },
+          "version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+          "subjectKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+          "dimensions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+          "decisionStates": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/decisionResult" } },
+          "requiredEvidenceKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+          "requiredCapabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+          "capabilityMissingOutcome": { "enum": ["needs_review", "blocked"] },
+          "invalidationSignals": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
+        }
+      }
+    },
+    "executionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discoverBatching", "inspectBatching", "decisionBatching", "parallelism", "cacheReuse", "checkpoint"],
+      "properties": {
+        "discoverBatching": { "enum": ["allowed", "forbidden"] },
+        "inspectBatching": { "enum": ["allowed", "forbidden"] },
+        "decisionBatching": { "enum": ["allowed", "forbidden"] },
+        "parallelism": { "enum": ["allowed", "forbidden"] },
+        "cacheReuse": { "enum": ["allowed", "forbidden"] },
+        "checkpoint": { "enum": ["required", "optional"] },
+        "maxBatchSize": { "type": "integer", "minimum": 1 },
+        "ordering": { "enum": ["independent", "declared", "strict"] }
+      }
+    }
+  }
+}

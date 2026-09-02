@@ -1,4 +1,6 @@
 import io
+import json
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -22,7 +24,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("--mcp", " ".join(command))
         self.assertIn("$assayer-audit", command[-1])
         self.assertIn("https://test.example.com", command[-1])
-        self.assertIn("outputDir=auto", command[-1])
+        self.assertNotIn("outputDir=auto", command[-1])
+        self.assertNotIn("protocolVersion", command[-1])
 
     def test_audit_fails_explicitly_when_codex_is_unavailable(self):
         output = io.StringIO()
@@ -43,6 +46,80 @@ class CliTest(unittest.TestCase):
         self.assertEqual(result, 0)
         runtime.smoke.assert_called_once_with("https://test.example.com")
         runtime.close.assert_called_once()
+
+    def test_plugins_list_reports_registered_platform_plugins(self):
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            result = cli.main(["plugins", "list", "--json"])
+
+        self.assertEqual(result, 0)
+        catalog = __import__("json").loads(output.getvalue())["plugins"]
+        self.assertEqual(
+            [item["pluginId"] for item in catalog],
+            ["assayer.config-quality", "assayer.frontend-audit", "assayer.spec-quality"],
+        )
+        self.assertEqual(catalog[0]["checks"], [{"checkId": "CFG-001", "version": "1.0.0"}])
+        self.assertEqual(catalog[0]["platformApiVersion"], "1.0.0")
+        self.assertIn("structured_read", catalog[0]["capabilities"])
+        self.assertEqual(catalog[0]["executionModes"], ["batch"])
+        self.assertEqual(catalog[1]["executionModes"], ["interactive"])
+        self.assertEqual(catalog[2]["executionModes"], ["interactive"])
+        self.assertEqual(catalog[0]["scopeSchema"]["required"], ["files"])
+        self.assertFalse(catalog[0]["supportsCommit"])
+        self.assertTrue(catalog[1]["supportsCommit"])
+
+    def test_registered_non_browser_plugin_runs_through_generic_cli(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "settings.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            scope = json.dumps({
+                "files": [{
+                    "path": str(source),
+                    "requiredKeys": ["enabled"],
+                    "expectedTypes": {"enabled": "boolean"},
+                }]
+            })
+            output = io.StringIO()
+
+            with redirect_stdout(output), patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
+                result = cli.main([
+                    "plugins", "run", "--plugin", "assayer.config-quality",
+                    "--check", "CFG-001", "--scope-json", scope,
+                    "--output-root", str(root / "output"),
+                ])
+
+            payload = json.loads(output.getvalue())
+            run_root = Path(payload["outputDir"])
+            self.assertEqual(result, 0)
+            self.assertEqual(payload["status"], "completed")
+            self.assertEqual(payload["decisions"], ["scanned_no_issue"])
+            self.assertTrue((run_root / f"{payload['runId']}.platform-ledger.json").is_file())
+            self.assertTrue((run_root / f"{payload['runId']}.platform-summary.json").is_file())
+            browser_runtime.assert_not_called()
+
+    def test_generic_plugin_cli_rejects_unknown_plugin_without_browser(self):
+        output = io.StringIO()
+        with redirect_stdout(output), patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
+            result = cli.main([
+                "plugins", "run", "--plugin", "missing.plugin",
+                "--check", "CFG-001", "--scope-json", "{}",
+            ])
+        self.assertEqual(result, 2)
+        self.assertIn("UNKNOWN_PLUGIN", output.getvalue())
+        browser_runtime.assert_not_called()
+
+    def test_generic_plugin_cli_rejects_interactive_plugin_without_browser(self):
+        output = io.StringIO()
+        with redirect_stdout(output), patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
+            result = cli.main([
+                "plugins", "run", "--plugin", "assayer.frontend-audit",
+                "--check", "FUA-10", "--scope-json", "{}",
+            ])
+        self.assertEqual(result, 2)
+        self.assertIn("PLUGIN_EXECUTION_MODE_UNSUPPORTED", output.getvalue())
+        browser_runtime.assert_not_called()
 
 
 if __name__ == "__main__":

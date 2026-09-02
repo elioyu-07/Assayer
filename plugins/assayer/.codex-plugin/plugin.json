@@ -1,15 +1,15 @@
 {
   "name": "assayer",
-  "version": "0.1.0",
-  "description": "Evidence-backed frontend audits from a URL in Codex",
+  "version": "0.1.0+codex.20260902165000",
+  "description": "Evidence-backed audits for web interfaces and software specifications in Codex",
   "author": {
     "name": "Assayer maintainers"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Assayer",
-    "shortDescription": "Audit a web URL with bounded, evidence-backed checks.",
-    "longDescription": "Assayer guides Codex through a safe frontend audit: it observes a real page, checks enabled rules, records evidence, and explains completed, partial, or failed results. The user only needs to provide a URL.",
+    "shortDescription": "Audit web interfaces and Specs with evidence-backed checks.",
+    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits. It can inspect a real web interface or review a Markdown product and software Spec against the canonical Spec quality policy, then produce traceable findings and reports from a natural-language request.",
     "developerName": "Assayer maintainers",
     "category": "Productivity",
     "capabilities": [
@@ -17,6 +17,7 @@
     ],
     "defaultPrompt": [
       "Audit this web URL for frontend issues: <URL>",
+      "Audit this project's spec.md and produce an evidence-backed report.",
       "Continue the Assayer audit and explain the current progress.",
       "Explain the Assayer result and what I should do next."
     ]

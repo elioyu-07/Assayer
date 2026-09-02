@@ -13,6 +13,7 @@ EXPECTED_ARTIFACTS = {
     "audit-ledger.json", "issues.json", "page-element-judgement.json",
     "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log",
     "runtime-events.jsonl", "observability-manifest.json",
+    "performance-bill.json", "performance-bill.md",
 }
 
 

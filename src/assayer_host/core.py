@@ -23,9 +23,10 @@ from .action_safety import (ActionExecution, ActionSafetyPolicy,
 from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, RecoveryCheck, UnavailableRecoveryAdapter
 from .evidence import EvidenceAdapter, EvidenceSanitizer, UnavailableEvidenceAdapter, is_page_observation
 from .reporting import DerivedReportBuilder
-from .observability import render_observability
+from .observability import render_observability, render_performance_bill
 from .resources import default_rules_root, default_schema_root
 from .store import SQLiteStore
+from .platform_store import SQLitePlatformLedgerStore
 
 
 TOOL_KINDS = {
@@ -83,8 +84,11 @@ class HostCore:
         self._ledger_validator = entity_validator("audit-ledger.schema.json")
         self._runtime_event_validator = entity_validator("runtime-event.schema.json")
         self._observability_manifest_validator = entity_validator("observability-manifest.schema.json")
+        self._performance_bill_validator = entity_validator("performance-bill.schema.json")
+        self._platform_ledger_validator = entity_validator("platform-ledger.schema.json")
         self._derived_output_validators = {"issues.json": entity_validator("derived-issues.schema.json"), "page-element-judgement.json": entity_validator("page-element-judgement.schema.json"), "run-diagnostics.json": entity_validator("run-diagnostics.schema.json")}
         self._store = store or SQLiteStore()
+        self.platform_ledger_store = SQLitePlatformLedgerStore(self._store)
         self._credential_vault = credential_vault or CredentialVault()
         self._login_adapter = login_adapter or UnavailableLoginAdapter()
         self._login_coordinator = login_coordinator or LoginCoordinator()
@@ -187,7 +191,19 @@ class HostCore:
             self._store.list_entities("assessments", scan["scanId"]),
         )
         self._validate_entity(self._observability_manifest_validator, manifest, "ObservabilityManifest")
-        self._replace_observability_artifacts(scan["outputDir"], stream, manifest_bytes)
+        replacements = {"runtime-events.jsonl": stream, "observability-manifest.json": manifest_bytes}
+        ledger_path = Path(scan["outputDir"]) / "audit-ledger.json"
+        if ledger_path.is_file():
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            performance_json, performance_markdown, bill = render_performance_bill(
+                ledger, events, scan["outputDir"]
+            )
+            self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
+            replacements.update({
+                "performance-bill.json": performance_json,
+                "performance-bill.md": performance_markdown,
+            })
+        self._replace_observability_artifacts(scan["outputDir"], replacements)
 
     def _recover_interrupted_operations(self):
         interrupted = self._store.get_interrupted_operations()
@@ -779,12 +795,37 @@ class HostCore:
             found = by_rule.get(key, [])
             counts = {result: sum(1 for item in found if item.get("result") == result)
                       for result in ("issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise")}
-            summaries.append({
+            summary = {
                 "rule": {"ruleId": rule["ruleId"], "version": rule["version"]},
                 "assessmentCount": len(found),
                 "resultCounts": {key: value for key, value in counts.items() if value},
                 "coverageComplete": bool(found) and all(item.get("coverage", {}).get("complete") for item in found),
-            })
+            }
+            # Preserve a human-readable explanation for needs_review in the
+            # internally assembled completion payload.  The formal ledger is
+            # still the source of truth; this short reason simply lets the
+            # product facade explain the concrete missing fact at the point
+            # where it presents the terminal summary.
+            review_reasons = []
+            for assessment in found:
+                if assessment.get("result") != "needs_review":
+                    continue
+                blocker = assessment.get("blocker") if isinstance(assessment.get("blocker"), dict) else {}
+                detail = blocker.get("message") or assessment.get("reasonText")
+                if not isinstance(detail, str) or not detail.strip():
+                    detail = "A required discriminating fact is unresolved."
+                target = next((item for item in objects if item.get("objectId") == assessment.get("objectRef")), None)
+                location = ""
+                if target:
+                    page = next((item for item in pages if item.get("pageStateId") == target.get("pageStateRef")), None)
+                    if page:
+                        location = page.get("route") or page.get("title") or page.get("url") or "the inspected page"
+                    if target.get("kind"):
+                        location = f"{target['kind']} on {location}"
+                review_reasons.append(f"{location + ': ' if location else ''}{detail.strip()}")
+            if review_reasons:
+                summary["reason"] = "Needs review because " + "; ".join(review_reasons)
+            summaries.append(summary)
         reason = (completion_reason or "Host completed the audit from the current durable ledger; unfinished work remains partial.").strip()
         return {
             "visitedPageStateRefs": [item["pageStateId"] for item in pages],
@@ -794,6 +835,140 @@ class HostCore:
             "ruleSummaries": summaries,
             "unprocessedEntrypointRefs": unprocessed_entrypoints,
             "completionReason": reason,
+        }
+
+    def build_discovery_plan(
+        self,
+        scan_id: str,
+        run_id: str,
+        *,
+        max_pages: int = 32,
+        max_logical_entrypoints: int = 128,
+    ) -> dict:
+        """Build the next page-discovery action from the durable Host ledger.
+
+        The plan reuses the same logical Entrypoint identity used by formal
+        completion. It may suppress duplicate exploration, but it never
+        reuses an Assessment or treats an unverified object as decided.
+        """
+        if type(max_pages) is not int or not 1 <= max_pages <= 512:
+            raise HostError("INVALID_REQUEST", "max_pages must be between 1 and 512")
+        if type(max_logical_entrypoints) is not int or not 1 <= max_logical_entrypoints <= 4096:
+            raise HostError("INVALID_REQUEST", "max_logical_entrypoints must be between 1 and 4096")
+        row = self._store.get_scan_by_run(scan_id, run_id)
+        if row is None:
+            raise HostError("UNKNOWN_REFERENCE", "Scan or Run does not exist")
+        scan = self._scan_from_row(row)
+        current_page_id = scan.get("currentPageStateId")
+        current_page = self._store.get_page_state(current_page_id) if current_page_id else None
+        if current_page is None:
+            raise HostError("UNKNOWN_REFERENCE", "The current PageState is unavailable")
+
+        pages = self._store.list_entities("page_states", scan_id)
+        all_entrypoints = self._store.list_entities("entrypoints", scan_id)
+        partitions, _ = self._entrypoint_partitions(scan_id)
+        status_by_ref = {
+            ref: status
+            for status, refs in partitions.items()
+            for ref in refs
+        }
+        groups: dict[str, list[dict]] = {}
+        for item in all_entrypoints:
+            digest = (item.get("identity") or {}).get("materialDigest") or item["entrypointId"]
+            groups.setdefault(digest, []).append(item)
+
+        logical_entrypoints = []
+        current_navigable = []
+        for digest, members in sorted(groups.items()):
+            current_members = [item for item in members if item.get("pageStateRef") == current_page_id]
+            representative = current_members[0] if current_members else members[0]
+            status = status_by_ref.get(representative["entrypointId"], "unprocessed")
+            summary = {
+                "entrypointId": representative["entrypointId"],
+                "kind": representative.get("kind", "unknown"),
+                "label": representative.get("label", ""),
+                "status": status,
+                "observationCount": len(members),
+                "duplicateObservationCount": max(0, len(members) - 1),
+                "availableOnCurrentPage": bool(current_members),
+            }
+            logical_entrypoints.append(summary)
+            if (
+                current_members and status == "unprocessed"
+                and representative.get("kind") == "tab"
+                and isinstance(representative.get("hostLocatorId"), str)
+            ):
+                current_navigable.append(summary)
+
+        objects = self._store.list_entities("audit_objects", scan_id)
+        object_by_source = {}
+        for verification in self._store.list_entities("object_verifications", scan_id):
+            if verification.get("sourceKind") == "candidate" and verification.get("outcome") == "matched":
+                object_by_source[verification.get("sourceRef")] = verification.get("objectRef")
+        object_by_id = {item["objectId"]: item for item in objects}
+        candidates = []
+        for candidate in self._store.get_candidates(current_page_id):
+            object_ref = object_by_source.get(candidate["candidateId"])
+            target = object_by_id.get(object_ref) if object_ref else None
+            decided = bool(
+                target and target.get("status") == "decided"
+                and len(target.get("assessmentRefs", [])) >= len(target.get("potentialRules", []))
+            )
+            candidate_summary = {
+                "candidateId": candidate["candidateId"],
+                "kind": candidate.get("kind", "unknown"),
+                "label": candidate.get("label", ""),
+                "potentialRules": candidate.get("potentialRules", []),
+                "status": "decided" if decided else "pending",
+            }
+            if object_ref:
+                candidate_summary["objectId"] = object_ref
+            candidates.append(candidate_summary)
+
+        logical_pages_used = len({
+            (item.get("identity") or {}).get("materialDigest") or item["pageStateId"]
+            for item in pages
+        })
+        budget = {
+            "pages": {"used": logical_pages_used, "limit": max_pages},
+            "logicalEntrypoints": {"used": len(groups), "limit": max_logical_entrypoints},
+            "exhausted": logical_pages_used >= max_pages or len(groups) >= max_logical_entrypoints,
+        }
+        pending_candidates = [item for item in candidates if item["status"] == "pending"]
+        logical_status_counts = {
+            status: sum(1 for item in logical_entrypoints if item["status"] == status)
+            for status in ("processed", "skipped", "unprocessed")
+        }
+        unprocessed_count = logical_status_counts["unprocessed"]
+        if pending_candidates:
+            next_action = {"type": "investigate_objects", "candidateRefs": [item["candidateId"] for item in pending_candidates]}
+        elif budget["exhausted"]:
+            next_action = {"type": "budget_exhausted", "remainingLogicalEntrypoints": unprocessed_count}
+        elif current_navigable:
+            next_action = {"type": "explore_entrypoint", "entrypointId": current_navigable[0]["entrypointId"]}
+        elif unprocessed_count:
+            next_action = {"type": "resume_required", "remainingLogicalEntrypoints": unprocessed_count}
+        else:
+            next_action = {"type": "ready_to_complete"}
+        return {
+            "currentPage": {
+                "pageStateId": current_page_id,
+                "route": current_page.get("route", ""),
+                "title": current_page.get("title", ""),
+                "stateKind": current_page.get("stateKind", "page"),
+            },
+            "candidates": candidates,
+            "logicalEntrypoints": logical_entrypoints,
+            "entrypointCounts": {
+                "physical": len(all_entrypoints),
+                "logical": len(groups),
+                "duplicates": max(0, len(all_entrypoints) - len(groups)),
+                "processed": logical_status_counts["processed"],
+                "skipped": logical_status_counts["skipped"],
+                "unprocessed": unprocessed_count,
+            },
+            "budget": budget,
+            "nextAction": next_action,
         }
 
     def _entrypoint_partitions(self, scan_id: str) -> tuple[dict[str, list[str]], dict[str, dict]]:
@@ -1853,6 +2028,67 @@ class HostCore:
             return self._response(request, scan, "failed", error=HostError("LEDGER_EXPORT_FAILED", str(error)), operation=operation)
         return self._response(request, scan, "ok", result=operation_result, operation=operation)
 
+    @staticmethod
+    def _validate_platform_assessment_projections(
+        platform_ledger: dict, assessments: list[dict],
+    ) -> None:
+        """Require one exact browser projection for every Platform decision."""
+        receipts = platform_ledger.get("receipts", [])
+        decisions = platform_ledger.get("decisions", [])
+        if platform_ledger.get("decision_authority") != "platform":
+            raise ValueError("Platform ledger does not own decision authority")
+        if len(receipts) != len(decisions):
+            raise ValueError("Platform decisions do not have one commit receipt each")
+        receipt_ids = [item.get("commit_id") for item in receipts]
+        receipt_work_ids = [item.get("work_item_id") for item in receipts]
+        if (
+            None in receipt_ids or len(set(receipt_ids)) != len(receipt_ids)
+            or None in receipt_work_ids or len(set(receipt_work_ids)) != len(receipt_work_ids)
+        ):
+            raise ValueError("Platform commit receipts do not have unique identities")
+        assessments_by_id = {item["assessmentId"]: item for item in assessments}
+        if len(assessments_by_id) != len(assessments):
+            raise ValueError("Host Assessments do not have unique identities")
+        receipts_by_assessment = {}
+        for receipt in receipts:
+            metadata = receipt.get("metadata")
+            assessment_id = metadata.get("hostAssessmentId") if isinstance(metadata, dict) else None
+            if not isinstance(assessment_id, str) or assessment_id in receipts_by_assessment:
+                raise ValueError("Platform receipt does not identify exactly one Host Assessment projection")
+            receipts_by_assessment[assessment_id] = receipt
+        if set(receipts_by_assessment) != set(assessments_by_id):
+            raise ValueError("Host Assessments and platform commit receipts are not one-to-one")
+        decisions_by_work = {item.get("work_item_id"): item for item in decisions}
+        investigations_by_work = {
+            item.get("work_item", {}).get("work_item_id"): item
+            for item in platform_ledger.get("investigations", [])
+            if isinstance(item.get("work_item"), dict)
+        }
+        if None in decisions_by_work or len(decisions_by_work) != len(decisions):
+            raise ValueError("Platform decisions do not identify unique WorkItems")
+        if set(receipt_work_ids) != set(decisions_by_work):
+            raise ValueError("Platform decisions and receipts are not one-to-one by WorkItem")
+        for assessment_id, receipt in receipts_by_assessment.items():
+            assessment = assessments_by_id[assessment_id]
+            decision = decisions_by_work.get(receipt.get("work_item_id"))
+            investigation = investigations_by_work.get(receipt.get("work_item_id"))
+            rule = assessment.get("rule", {})
+            metadata = receipt.get("metadata", {})
+            if (
+                receipt.get("authority") != "platform"
+                or decision is None
+                or investigation is None
+                or receipt.get("result") != assessment.get("result")
+                or decision.get("result") != assessment.get("result")
+                or receipt.get("check_id") != rule.get("ruleId")
+                or receipt.get("check_version") != rule.get("version")
+                or decision.get("check_id") != rule.get("ruleId")
+                or decision.get("check_version") != rule.get("version")
+                or metadata.get("hostObjectId") != assessment.get("objectRef")
+                or investigation.get("metadata", {}).get("objectId") != assessment.get("objectRef")
+            ):
+                raise ValueError("Platform commit receipt does not match its Host Assessment")
+
     def _export_ledger(self, scan: dict, proof: dict, summaries: list[dict], terminal: dict, status: str) -> list[str]:
         ended_at = self._now(); entry_url = scan.get("entryUrl") or "https://unknown.invalid"; parsed = urlparse(entry_url)
         scan_entity = {"scanId": scan["scanId"], "runId": scan["runId"], "protocolVersion": "1.0", "skillVersion": "1.0.0", "runRevision": scan["runRevision"], "algorithms": {"pageIdentity": "1.0.0", "objectIdentity": "1.0.0", "recoveryPolicy": "1.0.0", "sanitizationPolicy": "1.0.0", "normalization": "1.0.0"}, "status": status, "auditMode": "runtime_only", "entryUrl": entry_url, "allowedOrigins": [f"{parsed.scheme}://{parsed.netloc}"], "startedAt": scan["createdAt"], "endedAt": ended_at, "loginStatus": scan["loginStatus"], "ruleRegistryDigest": scan["ruleRegistryDigest"], "frozenRules": [{"ruleId": r["ruleId"], "version": r["version"]} for r in self._rule_registry.get("rules", []) if r.get("status") == "enabled"], "capabilities": json.loads(scan["capabilitiesJson"]), "coverageProof": proof, "terminalReason": terminal, "conclusionsValid": status != "failed"}
@@ -1891,7 +2127,25 @@ class HostCore:
         ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "dimensionFindings":self._store.list_entities("dimension_findings", scan["scanId"]), "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
         self._validate_entity(self._ledger_validator, ledger, "AuditLedger")
         artifacts = {"audit-ledger.json": (json.dumps(ledger, ensure_ascii=False, indent=2) + "\n").encode("utf-8")}
-        derived = self._report_builder.render(ledger)
+        platform_artifact_names: tuple[str, ...] = ()
+        platform_ledger = self.platform_ledger_store.load(scan["runId"])
+        if platform_ledger is not None:
+            self._validate_entity(self._platform_ledger_validator, platform_ledger, "PlatformLedger")
+            if platform_ledger.get("run", {}).get("run_id") != scan["runId"]:
+                raise ValueError("Platform ledger Run does not match the Host audit ledger")
+            self._validate_platform_assessment_projections(
+                platform_ledger, ledger["assessments"],
+            )
+            platform_artifact_names = (
+                "platform-ledger.json", "platform-events.jsonl", "platform-run.log",
+            )
+            root = Path(scan["outputDir"])
+            for name in platform_artifact_names:
+                path = root / name
+                if not path.is_file():
+                    raise ValueError(f"Missing platform trace artifact: {name}")
+                artifacts[name] = path.read_bytes()
+        derived = self._report_builder.render(ledger, platform_artifact_names)
         for name, validator in self._derived_output_validators.items():
             if name not in derived: raise ValueError(f"Missing derived JSON artifact: {name}")
             self._validate_entity(validator, json.loads(derived[name]), name)
@@ -1905,7 +2159,16 @@ class HostCore:
             scan, runtime_events, self._store.list_operations(scan["scanId"]), ledger["assessments"]
         )
         self._validate_entity(self._observability_manifest_validator, manifest, "ObservabilityManifest")
-        artifacts.update({"runtime-events.jsonl": event_stream, "observability-manifest.json": manifest_bytes})
+        performance_json, performance_markdown, bill = render_performance_bill(
+            ledger, runtime_events, scan["outputDir"]
+        )
+        self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
+        artifacts.update({
+            "runtime-events.jsonl": event_stream,
+            "observability-manifest.json": manifest_bytes,
+            "performance-bill.json": performance_json,
+            "performance-bill.md": performance_markdown,
+        })
         self._publish_artifacts(scan["outputDir"], artifacts)
         return sorted(artifacts)
 
@@ -1936,9 +2199,11 @@ class HostCore:
             raise
 
     @staticmethod
-    def _replace_observability_artifacts(output_dir: str, stream: bytes, manifest: bytes) -> None:
+    def _replace_observability_artifacts(output_dir: str, artifacts: dict[str, bytes]) -> None:
         root = Path(output_dir); root.mkdir(parents=True, exist_ok=True)
-        for name, content in (("runtime-events.jsonl", stream), ("observability-manifest.json", manifest)):
+        for name, content in artifacts.items():
+            if Path(name).name != name:
+                raise ValueError("Observability artifact path is invalid")
             target = root / name
             descriptor, temporary_name = tempfile.mkstemp(prefix=f".{name}-", dir=root)
             temporary = Path(temporary_name)

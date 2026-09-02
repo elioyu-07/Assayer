@@ -201,6 +201,10 @@ class RuntimeRouterTest(unittest.TestCase):
             progress = router.handle(session_request(scan, key="lease-renew"))
             self.assertEqual(progress["status"], "ok")
             self.assertIn("transport.request.finished", [item["name"] for item in factory.runtimes[0].runtime_events])
+            started_event = next(item for item in factory.runtimes[0].runtime_events if item["name"] == "transport.request.started")
+            finished_event = next(item for item in factory.runtimes[0].runtime_events if item["name"] == "transport.request.finished")
+            self.assertGreater(started_event["attributes"]["requestBytes"], 0)
+            self.assertGreater(finished_event["attributes"]["responseBytes"], 0)
             now[0] = 18.5
             self.assertEqual(router.sweep_expired(), 0)
             self.assertEqual(factory.runtimes[0].status, "exploring")

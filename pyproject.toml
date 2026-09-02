@@ -27,3 +27,8 @@ assayer = "assayer_host.cli:main"
 "share/assayer/schemas" = ["schemas/*.json"]
 "share/assayer/schemas/protocol" = ["schemas/protocol/*.json"]
 "share/assayer/rules" = ["rules/*.md", "rules/registry.json"]
+
+[tool.setuptools.package-data]
+"assayer_platform.builtin_plugins.config_quality" = ["manifest.json"]
+"assayer_platform.builtin_plugins.frontend_audit" = ["manifest.json"]
+"assayer_platform.builtin_plugins.spec_quality" = ["manifest.json", "recognition.json", "policy.json", "checklist.json", "authority.md", "self-check-checklist.md", "spec-template.md", "nfr-catalog.md", "*.md", "*.schema.json"]

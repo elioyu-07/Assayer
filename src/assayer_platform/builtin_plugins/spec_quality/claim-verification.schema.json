@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/elioyu-07/spec-quality-audit/main/references/claim-verification.schema.json",
+  "title": "Spec Quality Audit Claim Verification Batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claim_schema_version", "claims"],
+  "properties": {
+    "claim_schema_version": {"const": "1.0.0"},
+    "claims": {"type": "array", "items": {"$ref": "#/$defs/request"}}
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "spec_excerpt", "spec_line", "source", "source_category", "expected_version_or_commit", "reviewer_status", "direct_evidence_excerpt", "review_note"],
+      "properties": {
+        "claim_id": {"type": "string", "minLength": 1},
+        "spec_excerpt": {"type": "string", "minLength": 1},
+        "spec_line": {"type": "integer", "minimum": 1},
+        "source": {"type": "string", "minLength": 1},
+        "source_category": {"enum": ["CODE", "REFERENCE", "CONFIG", "URL"]},
+        "expected_version_or_commit": {"type": ["string", "null"], "minLength": 1},
+        "reviewer_status": {"enum": ["SUPPORTED", "CONTRADICTED", "UNVERIFIED", "NOT_APPLICABLE"]},
+        "direct_evidence_excerpt": {"type": ["string", "null"], "minLength": 1},
+        "review_note": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_category": {"const": "URL"}}},
+          "then": {"properties": {"source": {"type": "string", "pattern": "^[hH][tT][tT][pP][sS]?://"}}},
+          "else": {"properties": {"source": {"type": "string", "not": {"pattern": "^[hH][tT][tT][pP][sS]?://"}}}}
+        },
+        {
+          "if": {"properties": {"reviewer_status": {"enum": ["SUPPORTED", "CONTRADICTED"]}}},
+          "then": {"properties": {"direct_evidence_excerpt": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "spec", "source", "source_kind", "source_category", "expected_version_or_commit", "observed_version_or_commit", "access_status", "version_status", "content_status", "reviewer_status", "verification_status", "direct_evidence_excerpt", "review_note"],
+      "properties": {
+        "claim_id": {"type": "string", "minLength": 1},
+        "spec": {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "line", "excerpt"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "line": {"type": "integer", "minimum": 1},
+            "excerpt": {"type": "string", "minLength": 1}
+          }
+        },
+        "source": {"type": "string", "minLength": 1},
+        "source_kind": {"enum": ["LOCAL_FILE", "URL"]},
+        "source_category": {"enum": ["CODE", "REFERENCE", "CONFIG", "URL"]},
+        "expected_version_or_commit": {"type": ["string", "null"], "minLength": 1},
+        "observed_version_or_commit": {"type": ["string", "null"], "minLength": 1},
+        "access_status": {"enum": ["ACCESSIBLE", "INACCESSIBLE", "NOT_ATTEMPTED"]},
+        "version_status": {"enum": ["CONFIRMED", "UNCONFIRMED", "NOT_APPLICABLE"]},
+        "content_status": {"enum": ["READABLE", "UNREADABLE", "NOT_ATTEMPTED"]},
+        "reviewer_status": {"enum": ["SUPPORTED", "CONTRADICTED", "UNVERIFIED", "NOT_APPLICABLE"]},
+        "verification_status": {"enum": ["SUPPORTED", "CONTRADICTED", "UNVERIFIED", "NOT_APPLICABLE"]},
+        "direct_evidence_excerpt": {"type": ["string", "null"], "minLength": 1},
+        "review_note": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_kind": {"const": "URL"}}},
+          "then": {"properties": {"source_category": {"const": "URL"}}},
+          "else": {"properties": {"source_category": {"enum": ["CODE", "REFERENCE", "CONFIG"]}}}
+        },
+        {
+          "if": {"properties": {"verification_status": {"enum": ["SUPPORTED", "CONTRADICTED"]}}},
+          "then": {
+            "properties": {
+              "source_kind": {"const": "LOCAL_FILE"},
+              "access_status": {"const": "ACCESSIBLE"},
+              "version_status": {"enum": ["CONFIRMED", "NOT_APPLICABLE"]},
+              "content_status": {"const": "READABLE"},
+              "direct_evidence_excerpt": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"verification_status": {"const": "NOT_APPLICABLE"}}},
+          "then": {"properties": {"reviewer_status": {"const": "NOT_APPLICABLE"}}}
+        },
+        {
+          "if": {"properties": {"verification_status": {"const": "SUPPORTED"}}},
+          "then": {"properties": {"reviewer_status": {"const": "SUPPORTED"}}}
+        },
+        {
+          "if": {"properties": {"verification_status": {"const": "CONTRADICTED"}}},
+          "then": {"properties": {"reviewer_status": {"const": "CONTRADICTED"}}}
+        }
+      ]
+    }
+  }
+}

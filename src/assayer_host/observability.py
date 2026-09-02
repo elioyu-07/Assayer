@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 SCHEMA_VERSION = "1.0.0"
@@ -95,6 +96,213 @@ def render_observability(scan: dict, events: list[dict], operations: list[dict],
     }
     manifest_bytes = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
     return event_bytes, manifest_bytes, manifest
+
+
+def render_performance_bill(ledger: dict, events: list[dict], output_dir: str | Path) -> tuple[bytes, bytes, dict]:
+    """Render an honest wall-clock and activity bill from durable run facts.
+
+    Timings are deliberately presented as overlapping views. Transport and
+    browser durations can be contained within Host operation durations and
+    therefore must not be added together.
+    """
+    scan = ledger["scan"]
+    operations = ledger.get("operations", [])
+    started_at, ended_at = scan["startedAt"], scan["endedAt"]
+    total_ms = _interval_ms(started_at, ended_at)
+    host_ms = sum(max(0, int(item.get("durationMs", 0))) for item in operations)
+    browser_finishes = [
+        item for item in events
+        if item.get("source") == "browser" and item.get("phase") == "finish"
+    ]
+    transport_finishes = [
+        item for item in events
+        if item.get("name") == "transport.request.finished" and item.get("phase") == "finish"
+    ]
+    model_finishes = [item for item in events if item.get("name") == "model.call.finished"]
+    browser_ms = sum(max(0, int(item.get("durationMs", 0))) for item in browser_finishes)
+    transport_ms = sum(max(0, int(item.get("durationMs", 0))) for item in transport_finishes)
+    model_ms = sum(max(0, int(item.get("durationMs", 0))) for item in model_finishes) if model_finishes else None
+
+    tool_calls_by_name: dict[str, int] = {}
+    operation_groups: dict[str, dict] = {}
+    for item in operations:
+        tool = str(item.get("tool", "unknown"))
+        tool_calls_by_name[tool] = tool_calls_by_name.get(tool, 0) + 1
+        group_name = str(item.get("operationKind", "unknown"))
+        group = operation_groups.setdefault(group_name, {"name": group_name, "callCount": 0, "durationMs": 0})
+        group["callCount"] += 1
+        group["durationMs"] += max(0, int(item.get("durationMs", 0)))
+
+    entrypoints = ledger.get("entrypoints", [])
+    logical_entrypoints = {
+        item.get("identity", {}).get("materialDigest") or item.get("entrypointId")
+        for item in entrypoints
+    }
+    physical_count = len(entrypoints)
+    logical_count = len(logical_entrypoints)
+    duplicate_count = max(0, physical_count - logical_count)
+
+    captured_screenshots = [
+        item for item in ledger.get("screenshots", [])
+        if item.get("status") == "captured" and item.get("digest")
+    ]
+    screenshot_digests = {item["digest"] for item in captured_screenshots}
+    screenshot_bytes, screenshot_files_measured = _unique_screenshot_bytes(
+        captured_screenshots, Path(output_dir)
+    )
+    request_sizes = [
+        item.get("attributes", {}).get("requestBytes") for item in events
+        if item.get("name") == "transport.request.started"
+        and type(item.get("attributes", {}).get("requestBytes")) is int
+    ]
+    response_sizes = [
+        item.get("attributes", {}).get("responseBytes") for item in transport_finishes
+        if type(item.get("attributes", {}).get("responseBytes")) is int
+    ]
+    agent_turns = {
+        item["agentTurnId"] for item in operations if isinstance(item.get("agentTurnId"), str)
+    }
+    public_tool_calls_by_name: dict[str, int] = {}
+    for turn_id in agent_turns:
+        match = re.search(r":([a-z][a-z0-9_]{1,63})$", turn_id)
+        if match:
+            name = match.group(1)
+            public_tool_calls_by_name[name] = public_tool_calls_by_name.get(name, 0) + 1
+    retries = sum(
+        max(0, int(item.get("modelTelemetry", {}).get("retryCount", 0)))
+        for item in operations
+    )
+    limitations = [
+        "Timing views overlap and must not be added together.",
+        "Transport payload measurements begin after Scan binding and exclude the bootstrap request and response.",
+    ]
+    if not model_finishes:
+        limitations.append(
+            "The CLI runtime did not expose model latency; outside-Host time includes model and Agent orchestration intervals."
+        )
+    if len(response_sizes) < len(transport_finishes):
+        limitations.append("Response byte size was not exposed for every transport request.")
+    if screenshot_files_measured < len(screenshot_digests):
+        limitations.append("Byte size could not be read for every unique captured screenshot.")
+
+    largest = sorted(
+        (
+            {
+                "operationId": item["operationId"], "tool": item["tool"],
+                "operationKind": item["operationKind"], "status": item["status"],
+                "durationMs": max(0, int(item.get("durationMs", 0))),
+            }
+            for item in operations
+        ),
+        key=lambda item: (-item["durationMs"], item["operationId"]),
+    )[:10]
+    bill = {
+        "schemaVersion": SCHEMA_VERSION,
+        "scanId": scan["scanId"],
+        "runId": scan["runId"],
+        "status": scan["status"],
+        "measurement": {
+            "startedAt": started_at,
+            "endedAt": ended_at,
+            "totalDurationMs": total_ms,
+            "hostOperationDurationMs": host_ms,
+            "browserOperationDurationMs": browser_ms,
+            "transportDurationMs": transport_ms,
+            "modelDurationMs": model_ms,
+            "outsideHostDurationMs": max(0, total_ms - host_ms),
+            "modelTelemetryStatus": "captured" if model_finishes else "not_exposed",
+        },
+        "activity": {
+            "toolCalls": len(operations),
+            "agentTurnsObserved": len(agent_turns),
+            "publicToolCallsObserved": sum(public_tool_calls_by_name.values()),
+            "publicToolCallsByName": dict(sorted(public_tool_calls_by_name.items())),
+            "toolCallsByName": dict(sorted(tool_calls_by_name.items())),
+            "requestBytes": sum(request_sizes),
+            "responseBytes": sum(response_sizes),
+            "transportRequestsMeasured": len(transport_finishes),
+            "requestSizesMeasured": len(request_sizes),
+            "responseSizesMeasured": len(response_sizes),
+            "pagesVisited": len(ledger.get("pageStates", [])),
+            "physicalEntrypoints": physical_count,
+            "logicalEntrypoints": logical_count,
+            "duplicateEntrypoints": duplicate_count,
+            "duplicateEntrypointRatio": round(duplicate_count / physical_count, 4) if physical_count else 0.0,
+            "objectsDiscovered": len(ledger.get("objects", [])),
+            "objectsVerified": sum(item.get("rebindStatus") == "matched" for item in ledger.get("objects", [])),
+            "decisionsCommitted": len(ledger.get("assessments", [])),
+            "screenshotsCaptured": len(captured_screenshots),
+            "uniqueScreenshotDigests": len(screenshot_digests),
+            "screenshotBytes": screenshot_bytes,
+            "rejectedOperations": sum(item.get("status") != "succeeded" for item in operations),
+            "modelRetries": retries,
+        },
+        "operationGroups": sorted(operation_groups.values(), key=lambda item: item["name"]),
+        "largestOperations": largest,
+        "limitations": limitations,
+    }
+    json_bytes = (json.dumps(bill, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    markdown_bytes = _render_performance_markdown(bill).encode("utf-8")
+    return json_bytes, markdown_bytes, bill
+
+
+def _interval_ms(started_at: str, ended_at: str) -> int:
+    def parse(value: str) -> datetime:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return max(0, int((parse(ended_at) - parse(started_at)).total_seconds() * 1000))
+
+
+def _unique_screenshot_bytes(screenshots: list[dict], root: Path) -> tuple[int, int]:
+    measured: dict[str, int] = {}
+    for item in screenshots:
+        digest, relative = item["digest"], item.get("path")
+        if digest in measured or not isinstance(relative, str):
+            continue
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts:
+            continue
+        target = root / path
+        try:
+            measured[digest] = target.stat().st_size
+        except OSError:
+            continue
+    return sum(measured.values()), len(measured)
+
+
+def _render_performance_markdown(bill: dict) -> str:
+    measurement, activity = bill["measurement"], bill["activity"]
+    model = (
+        f"{measurement['modelDurationMs']:,} ms"
+        if measurement["modelDurationMs"] is not None else "not exposed"
+    )
+    lines = [
+        "# Performance Bill", "",
+        f"- Scan: `{bill['scanId']}`", f"- Status: `{bill['status']}`",
+        f"- Total wall-clock time: {measurement['totalDurationMs']:,} ms",
+        f"- Host operation time: {measurement['hostOperationDurationMs']:,} ms",
+        f"- Outside-Host interval: {measurement['outsideHostDurationMs']:,} ms",
+        f"- Browser-operation view: {measurement['browserOperationDurationMs']:,} ms",
+        f"- Transport view: {measurement['transportDurationMs']:,} ms",
+        f"- Model latency: {model}", "", "## Activity", "",
+        f"- Product tool calls observed: {activity['publicToolCallsObserved']}",
+        f"- Host operations: {activity['toolCalls']}",
+        f"- Agent turns observed: {activity['agentTurnsObserved']}",
+        f"- Pages visited: {activity['pagesVisited']}",
+        f"- Objects / decisions: {activity['objectsDiscovered']} / {activity['decisionsCommitted']}",
+        f"- Entrypoints, physical / logical / duplicate: {activity['physicalEntrypoints']} / {activity['logicalEntrypoints']} / {activity['duplicateEntrypoints']}",
+        f"- Duplicate-entrypoint ratio: {activity['duplicateEntrypointRatio']:.2%}",
+        f"- Request / response bytes measured: {activity['requestBytes']:,} / {activity['responseBytes']:,}",
+        f"- Screenshots, entities / unique images / bytes: {activity['screenshotsCaptured']} / {activity['uniqueScreenshotDigests']} / {activity['screenshotBytes']:,}",
+        "", "## Largest Host Operations", "",
+        "| Tool | Kind | Status | Duration |", "| --- | --- | --- | ---: |",
+    ]
+    lines.extend(
+        f"| `{item['tool']}` | `{item['operationKind']}` | `{item['status']}` | {item['durationMs']:,} ms |"
+        for item in bill["largestOperations"]
+    )
+    lines.extend(["", "## Measurement Limits", ""])
+    lines.extend(f"- {item}" for item in bill["limitations"])
+    return "\n".join(lines) + "\n"
 
 
 def _check(name: str, passed: bool, reason: str) -> dict:

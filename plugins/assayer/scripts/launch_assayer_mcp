@@ -47,7 +47,7 @@ PLUGIN_VERSION=$(
 )
 BASE_VERSION=${PLUGIN_VERSION%%+*}
 
-if ! "$PYTHON_BIN" - "$BUNDLE_MANIFEST" "$WHEEL_DIR" "$BASE_VERSION" <<'PY'
+if ! "$PYTHON_BIN" - "$BUNDLE_MANIFEST" "$WHEEL_DIR" "$PLUGIN_VERSION" <<'PY'
 import hashlib
 import json
 import platform

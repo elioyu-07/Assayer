@@ -4,13 +4,16 @@ import json
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 from assayer_host import (CredentialVault, DeterministicEvidenceAdapter, DeterministicLoginAdapter,
                           DeterministicObjectIdentityAdapter,
                           DeterministicPageAdapter, DeterministicRecoveryAdapter, HostCore, HostError,
                           JsonLineTransport, LoginSecret, McpToolTransport,
+                          PlatformMcpToolTransport,
                           ProductMcpToolTransport, create_mcp_server,
                           create_product_mcp_server)
+from assayer_host.page import EntrypointExecution, EntrypointObservation, PageObservation
 
 
 VALID_RESPONSE = {
@@ -78,9 +81,12 @@ class VisualRecordingCore(RecordingCore):
 
 
 class ProductRecordingCore(RecordingCore):
-    def __init__(self):
+    def __init__(self, terminal_status="completed", conclusions_valid=True, completion_payload=None):
         super().__init__()
         self.revision = 0
+        self.terminal_status = terminal_status
+        self.conclusions_valid = conclusions_valid
+        self.completion_payload = completion_payload
 
     def handle(self, request):
         self.requests.append(request)
@@ -95,7 +101,7 @@ class ProductRecordingCore(RecordingCore):
         elif request["tool"] == "complete_audit":
             result = {
                 "operationId": "operation-complete", "runRevision": self.revision,
-                "scanStatus": "completed", "conclusionsValid": True,
+                "scanStatus": self.terminal_status, "conclusionsValid": self.conclusions_valid,
             }
         elif request["tool"] == "record_findings":
             result = {"operationId": "operation-record", "runRevision": self.revision,
@@ -119,6 +125,8 @@ class ProductRecordingCore(RecordingCore):
         pass
 
     def build_completion_input(self, scan_id, run_id, completion_reason=None):
+        if self.completion_payload is not None:
+            return self.completion_payload
         return {
             "visitedPageStateRefs": [], "processedObjectRefs": [],
             "processedEntrypointRefs": [], "skippedEntrypoints": [],
@@ -156,6 +164,111 @@ class ProductUnknownCore(ProductRecordingCore):
                 "evidenceRefs": [], "diagnosticRefs": [],
             }
         return super().handle(request)
+
+
+class ProductBlockedCore(ProductRecordingCore):
+    def handle(self, request):
+        if request["tool"] != "start_audit":
+            self.requests.append(request)
+            self.revision += 1
+            return {
+                "protocolVersion": "1.0", "requestId": request["requestId"],
+                "scanId": "scan-product", "runId": "run-product",
+                "runRevision": self.revision, "status": "rejected",
+                "error": {"code": "STALE_STATE", "message": "The current page object is stale"},
+                "evidenceRefs": [], "diagnosticRefs": [],
+            }
+        return super().handle(request)
+
+
+class ProductInvestigateCore(ProductRecordingCore):
+    """Small deterministic core for the bounded investigate_object facade path."""
+
+    def handle(self, request):
+        tool = request["tool"]
+        self.requests.append(request)
+        self.revision += 1
+        result = {"operationId": f"operation-{tool}", "runRevision": self.revision}
+        if tool == "start_audit":
+            result.update({
+                "scanId": "scan-product", "runId": "run-product",
+                "loginStatus": "succeeded", "ruleRegistryDigest": "a" * 64,
+                "capabilities": ["runtime", "dom"], "frozenRules": [],
+            })
+        elif tool == "inspect_object":
+            result.update({
+                "objectId": "object-product", "candidateId": "candidate-product",
+                "kind": "filter_region",
+                "potentialRules": [{"ruleId": "FUA-10", "version": "1.1.0"}],
+            })
+        elif tool == "begin_case":
+            result.update({"caseId": "case-product", "status": "active"})
+        elif tool == "observe_page":
+            if getattr(self, "fail_observe", False):
+                return {
+                    "protocolVersion": "1.0", "requestId": request["requestId"],
+                    "scanId": "scan-product", "runId": "run-product",
+                    "runRevision": self.revision, "status": "rejected",
+                    "error": {"code": "CAPABILITY_MISSING", "message": "Visual observation is unavailable"},
+                    "evidenceRefs": [], "diagnosticRefs": [],
+                }
+            result.update({
+                "evidenceId": "evidence-observation",
+                "screenshotRef": "screenshot-observation",
+                "observation": {"visual": {"status": "captured"}},
+            })
+        elif tool == "capture_evidence":
+            result.update({
+                "evidenceId": "evidence-structured",
+                "evidence": {"dom": {"status": "captured"}},
+            })
+        elif tool == "restore_case":
+            result.update({"finalStatus": "restored"})
+        elif tool == "record_findings":
+            result.update({"findingRefs": ["finding-product"]})
+        elif tool == "prepare_decision":
+            result.update({"pendingDecisionId": "pending-product"})
+        elif tool == "commit_decision":
+            result.update({"assessmentId": "assessment-product", "result": "scanned_no_issue"})
+        return {
+            "protocolVersion": "1.0", "requestId": request["requestId"],
+            "scanId": "scan-product", "runId": "run-product",
+            "runRevision": self.revision, "status": "ok", "result": result,
+            "evidenceRefs": [], "diagnosticRefs": [],
+        }
+
+
+class ProductSwitchingPageAdapter:
+    active_tab = "Overview"
+
+    def observe(self, page_state_id):
+        return PageObservation(
+            url="https://test.example.com/app", origin="https://test.example.com", route="/app",
+            title="App", state_kind="tab", dom_material=f"<main>{self.active_tab}</main>",
+            identity_material=f"/app|tab|{self.active_tab}", visible_text=self.active_tab,
+            active_tab=self.active_tab,
+            entrypoints=(
+                EntrypointObservation(
+                    "tab", "Overview", "switch_tab",
+                    status="processed" if self.active_tab == "Overview" else "unprocessed",
+                    host_locator_id="tab-browser-0",
+                ),
+                EntrypointObservation(
+                    "tab", "Details", "switch_tab",
+                    status="processed" if self.active_tab == "Details" else "unprocessed",
+                    host_locator_id="tab-browser-1",
+                ),
+            ),
+        )
+
+
+class ProductSwitchingEntrypointAdapter:
+    def __init__(self, page):
+        self.page = page
+
+    def explore(self, entrypoint, page_state, operation_id):
+        self.page.active_tab = entrypoint["label"]
+        return EntrypointExecution("succeeded", page_changed=True)
 
 
 class TransportTest(unittest.TestCase):
@@ -243,7 +356,7 @@ class TransportTest(unittest.TestCase):
     def test_product_mcp_exposes_only_business_inputs(self):
         adapter = ProductMcpToolTransport(ProductRecordingCore())
         tools = adapter.list_tools()
-        self.assertEqual(len(tools), 17)
+        self.assertEqual(len(tools), 25)
         forbidden = {
             "protocolVersion", "requestId", "agentTurnId", "idempotencyKey",
             "scanId", "runId", "expectedRunRevision", "ruleRegistryVersion",
@@ -262,6 +375,47 @@ class TransportTest(unittest.TestCase):
         complete = next(tool for tool in tools if tool["name"] == "complete_audit")
         self.assertEqual(set(complete["inputSchema"]["properties"]), {"completionReason", "decisionReason"})
         self.assertEqual(complete["inputSchema"].get("required", []), [])
+        self.assertIn("investigate_object", {tool["name"] for tool in tools})
+        self.assertIn("discover_scope", {tool["name"] for tool in tools})
+        self.assertIn("start_plugin_run", {tool["name"] for tool in tools})
+        self.assertIn("submit_decisions", {tool["name"] for tool in tools})
+        discover = next(tool for tool in tools if tool["name"] == "discover_scope")
+        self.assertEqual(set(discover["inputSchema"]["properties"]), {"decisionReason"})
+        investigate = next(tool for tool in tools if tool["name"] == "investigate_object")
+        self.assertEqual(investigate["inputSchema"]["required"], ["pageStateId"])
+        self.assertEqual(investigate["inputSchema"]["oneOf"], [{"required": ["objectId"]}, {"required": ["candidateId"]}])
+        self.assertNotIn("record_findings", {tool["name"] for tool in tools})
+        self.assertNotIn("commit_decision", {tool["name"] for tool in tools})
+        self.assertNotIn("get_rule_contract", {tool["name"] for tool in tools})
+
+    def test_generic_platform_mcp_runs_registered_configuration_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "settings.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            transport = PlatformMcpToolTransport(Path(directory) / "output")
+            tools = transport.list_tools()
+            self.assertEqual([item["name"] for item in tools], ["list_plugins", "run_plugin"])
+            catalog = transport.call_tool("list_plugins", {})["structuredContent"]["result"]["plugins"]
+            config = next(item for item in catalog if item["pluginId"] == "assayer.config-quality")
+            self.assertEqual(config["scopeSchema"]["required"], ["files"])
+            result = transport.call_tool("run_plugin", {
+                "pluginId": "assayer.config-quality", "checkId": "CFG-001",
+                "scope": {"files": [{
+                    "path": str(source), "requiredKeys": ["enabled"],
+                    "expectedTypes": {"enabled": "boolean"},
+                }]},
+            })
+            self.assertEqual(result["structuredContent"]["status"], "ok")
+            self.assertEqual(result["structuredContent"]["result"]["status"], "completed")
+            self.assertEqual(result["structuredContent"]["result"]["decisions"][0]["result"], "scanned_no_issue")
+
+    def test_generic_platform_mcp_rejects_interactive_plugin(self):
+        transport = PlatformMcpToolTransport(tempfile.mkdtemp())
+        with self.assertRaises(HostError) as error:
+            transport.call_tool("run_plugin", {
+                "pluginId": "assayer.frontend-audit", "checkId": "FUA-10", "scope": {},
+            })
+        self.assertEqual(error.exception.code, "PLUGIN_EXECUTION_MODE_UNSUPPORTED")
 
     def test_product_mcp_internally_frames_start_and_session_requests(self):
         core = ProductRecordingCore()
@@ -285,6 +439,131 @@ class TransportTest(unittest.TestCase):
         self.assertEqual(session["runId"], "run-product")
         self.assertEqual(session["expectedRunRevision"], 1)
         self.assertEqual(session["input"], {})
+        adapter.close()
+
+    def test_product_mcp_returns_user_readable_progress_without_internal_ids(self):
+        adapter = ProductMcpToolTransport(ProductRecordingCore())
+        started = adapter.call_tool("start_audit", {"url": "https://test.example.com"})["structuredContent"]
+        self.assertEqual(started["progress"]["phase"], "starting")
+        self.assertEqual(started["progress"]["status"], "running")
+        self.assertEqual(started["progress"]["nextStep"], "Inspect the current page.")
+        self.assertNotIn("scanId", json.dumps(started["progress"]))
+        inspected = adapter.call_tool("inspect_page", {
+            "pageStateId": "page-product", "include": ["objects"],
+        })["structuredContent"]
+        self.assertEqual(inspected["progress"]["phase"], "discovering")
+        decision = adapter.call_tool("prepare_decision", {
+            "objectId": "object-product", "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+            "result": "scanned_no_issue", "reasonText": "Evidence satisfies the required dimensions",
+            "evidenceRefs": ["evidence-product"], "caseRefs": ["case-product"],
+            "findings": [{"dimension": dimension, "status": "satisfied",
+                          "reasonText": "The frontend dimension is satisfied", "evidenceRefs": ["evidence-product"],
+                          "caseRefs": ["case-product"]}
+                         for dimension in ("filter_present", "query_action", "reset_action", "binding_to_list")],
+        })["structuredContent"]
+        self.assertEqual(decision["progress"]["phase"], "deciding")
+        self.assertEqual(decision["progress"]["counts"]["decisionsCommitted"], 1)
+        completed = adapter.call_tool("complete_audit", {})["structuredContent"]
+        self.assertEqual(completed["progress"]["phase"], "completed")
+        self.assertEqual(completed["progress"]["status"], "completed")
+        self.assertTrue(completed["progress"]["terminal"])
+        adapter.close()
+
+    def test_product_mcp_summarizes_completed_partial_and_failed_results(self):
+        completion = {
+            "visitedPageStateRefs": ["page-one", "page-two"],
+            "processedObjectRefs": ["object-one"],
+            "processedEntrypointRefs": ["entry-one"],
+            "skippedEntrypoints": [{
+                "entrypointId": "entry-two",
+                "reason": {"code": "OUT_OF_SCOPE", "message": "Outside the declared audit scope"},
+            }],
+            "unprocessedEntrypointRefs": ["entry-three"],
+            "ruleSummaries": [{
+                "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                "assessmentCount": 2,
+                "resultCounts": {"issue_found": 1, "needs_review": 1},
+                "coverageComplete": False,
+                "reason": "Needs review because filter_region on /orders: list ownership is unresolved.",
+            }],
+            "completionReason": "Finish the current durable scope",
+        }
+        expectations = {
+            "completed": (True, "Review the audit summary"),
+            "partial": (True, "Review uncovered scope"),
+            "failed": (False, "Review diagnostics"),
+        }
+        for status, (valid, next_step) in expectations.items():
+            with self.subTest(status=status):
+                adapter = ProductMcpToolTransport(ProductRecordingCore(
+                    terminal_status=status,
+                    conclusions_valid=valid,
+                    completion_payload=completion,
+                ))
+                try:
+                    adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+                    response = adapter.call_tool("complete_audit", {})["structuredContent"]
+                    summary = response["summary"]
+                    self.assertEqual(summary["status"], status)
+                    self.assertEqual(summary["conclusionsValid"], valid)
+                    self.assertEqual(summary["coverage"], {
+                        "pagesVisited": 2,
+                        "objectsProcessed": 1,
+                        "entrypointsProcessed": 1,
+                        "entrypointsSkipped": 1,
+                        "entrypointsRemaining": 1,
+                    })
+                    self.assertEqual(summary["outcomes"]["issues"], 1)
+                    self.assertEqual(summary["outcomes"]["needsReview"], 1)
+                    self.assertIn("list ownership is unresolved", summary["outcomes"]["needsReviewDetails"][0]["detail"])
+                    self.assertIn(next_step, summary["nextStep"])
+                    self.assertEqual(response["progress"]["status"], status)
+                    self.assertTrue(response["progress"]["terminal"])
+                finally:
+                    adapter.close()
+
+    def test_product_mcp_retry_starts_independent_scan_and_resets_public_progress(self):
+        core = ProductRecordingCore()
+        adapter = ProductMcpToolTransport(core)
+        try:
+            first = adapter.call_tool("start_audit", {"url": "https://test.example.com"})["structuredContent"]
+            decided = adapter.call_tool("prepare_decision", {
+                "objectId": "object-product", "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                "result": "scanned_no_issue", "reasonText": "The evidence closes the rule dimensions",
+                "evidenceRefs": ["evidence-product"], "caseRefs": ["case-product"],
+                "findings": [{
+                    "dimension": dimension, "status": "satisfied",
+                    "reasonText": "The frontend dimension is satisfied", "evidenceRefs": ["evidence-product"],
+                    "caseRefs": ["case-product"],
+                } for dimension in ("filter_present", "query_action", "reset_action", "binding_to_list")],
+            })["structuredContent"]
+            self.assertEqual(decided["progress"]["counts"]["decisionsCommitted"], 1)
+            adapter.call_tool("complete_audit", {})
+            second = adapter.call_tool("start_audit", {"url": "https://test.example.com"})["structuredContent"]
+            bootstrap_requests = [request for request in core.requests if request["tool"] == "start_audit"]
+            self.assertEqual(len(bootstrap_requests), 2)
+            self.assertNotEqual(bootstrap_requests[0]["idempotencyKey"], bootstrap_requests[1]["idempotencyKey"])
+            self.assertEqual(first["progress"]["counts"]["decisionsCommitted"], 0)
+            self.assertEqual(second["progress"]["counts"], {
+                "pagesVisited": 0,
+                "objectsDiscovered": 0,
+                "objectsVerified": 0,
+                "decisionsCommitted": 0,
+                "entrypointsProcessed": 0,
+                "entrypointsRemaining": 0,
+            })
+        finally:
+            adapter.close()
+
+    def test_product_mcp_progress_explains_recoverable_block(self):
+        adapter = ProductMcpToolTransport(ProductBlockedCore())
+        adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+        blocked = adapter.call_tool("inspect_object", {"candidateId": "candidate-product"})["structuredContent"]
+        self.assertEqual(blocked["progress"]["status"], "blocked")
+        self.assertFalse(blocked["progress"]["terminal"])
+        self.assertEqual(blocked["progress"]["message"], "The current page object is stale")
+        self.assertIn("Read durable audit progress", blocked["progress"]["nextStep"])
+        self.assertNotIn("runRevision", json.dumps(blocked["progress"]))
         adapter.close()
 
     def test_product_mcp_rejects_any_model_supplied_protocol_field(self):
@@ -326,15 +605,174 @@ class TransportTest(unittest.TestCase):
             "objectId": "object-product", "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
             "result": "scanned_no_issue", "reasonText": "Evidence satisfies all four dimensions",
             "evidenceRefs": ["evidence-product"], "caseRefs": ["case-product"],
-            "findings": [{"dimension": "filter_present", "status": "satisfied",
-                           "reasonText": "The control is visible", "evidenceRefs": ["evidence-product"],
-                           "caseRefs": ["case-product"]}],
+            "findings": [{"dimension": dimension, "status": "satisfied",
+                           "reasonText": "The frontend dimension is satisfied", "evidenceRefs": ["evidence-product"],
+                           "caseRefs": ["case-product"]}
+                          for dimension in ("filter_present", "query_action", "reset_action", "binding_to_list")],
         })
         self.assertEqual(result["structuredContent"]["result"]["assessmentId"], "assessment-product")
         self.assertEqual([item["tool"] for item in core.requests],
                          ["start_audit", "record_findings", "prepare_decision", "commit_decision"])
+        self.assertEqual(len({item["agentTurnId"] for item in core.requests[1:]}), 1)
+        self.assertTrue(core.requests[1]["agentTurnId"].endswith(":prepare_decision"))
+        self.assertNotEqual(core.requests[0]["agentTurnId"], core.requests[1]["agentTurnId"])
         self.assertNotIn("pendingDecisionId", result["structuredContent"]["result"])
         adapter.close()
+
+    def test_product_mcp_applies_frontend_plugin_gate_before_host_writes(self):
+        core = ProductRecordingCore()
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            with self.assertRaises(HostError) as caught:
+                adapter.call_tool("prepare_decision", {
+                    "objectId": "object-product",
+                    "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                    "result": "scanned_no_issue",
+                    "reasonText": "Only one dimension was supplied",
+                    "evidenceRefs": ["evidence-product"], "caseRefs": ["case-product"],
+                    "findings": [{
+                        "dimension": "filter_present", "status": "satisfied",
+                        "reasonText": "The filter is visible", "evidenceRefs": ["evidence-product"],
+                        "caseRefs": ["case-product"],
+                    }],
+                })
+            self.assertEqual(caught.exception.code, "FINDING_CLOSURE")
+            self.assertEqual([request["tool"] for request in core.requests], ["start_audit"])
+        finally:
+            adapter.close()
+
+    def test_product_mcp_investigate_object_runs_bounded_evidence_lifecycle(self):
+        core = ProductInvestigateCore()
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            response = adapter.call_tool("investigate_object", {
+                "candidateId": "candidate-product", "pageStateId": "page-product",
+                "purpose": "Verify the visible filter region",
+            })
+            self.assertEqual(response["structuredContent"]["status"], "ok")
+            result = response["structuredContent"]["result"]
+            self.assertEqual(result["objectId"], "object-product")
+            self.assertEqual(result["rule"], {"ruleId": "FUA-10", "version": "1.1.0"})
+            self.assertEqual(result["caseId"], "case-product")
+            self.assertEqual(result["evidenceRefs"], ["evidence-observation", "evidence-structured"])
+            self.assertEqual(result["rawVisualRef"], "screenshot-observation")
+            self.assertTrue(result["readyForDecision"])
+            self.assertEqual(
+                [item["tool"] for item in core.requests],
+                ["start_audit", "inspect_object", "begin_case", "observe_page", "capture_evidence", "restore_case"],
+            )
+            self.assertEqual(len({item["agentTurnId"] for item in core.requests[1:]}), 1)
+            self.assertTrue(core.requests[1]["agentTurnId"].endswith(":investigate_object"))
+        finally:
+            adapter.close()
+
+    def test_product_mcp_investigate_object_restores_case_after_observation_failure(self):
+        core = ProductInvestigateCore()
+        core.fail_observe = True
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            response = adapter.call_tool("investigate_object", {
+                "candidateId": "candidate-product", "pageStateId": "page-product",
+            })
+            self.assertEqual(response["structuredContent"]["status"], "rejected")
+            self.assertEqual(response["structuredContent"]["error"]["code"], "CAPABILITY_MISSING")
+            self.assertEqual(
+                [item["tool"] for item in core.requests],
+                ["start_audit", "inspect_object", "begin_case", "observe_page", "restore_case"],
+            )
+        finally:
+            adapter.close()
+
+    def test_product_mcp_reuses_identical_restored_investigation(self):
+        core = ProductInvestigateCore()
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            arguments = {
+                "candidateId": "candidate-product", "pageStateId": "page-product",
+                "purpose": "Verify the visible filter region",
+            }
+            first = adapter.call_tool("investigate_object", arguments)
+            request_count = len(core.requests)
+            second = adapter.call_tool("investigate_object", arguments)
+            self.assertEqual(len(core.requests), request_count)
+            self.assertEqual(second["structuredContent"]["result"]["caseId"],
+                             first["structuredContent"]["result"]["caseId"])
+            self.assertEqual(second["structuredContent"]["result"]["evidenceRefs"],
+                             first["structuredContent"]["result"]["evidenceRefs"])
+        finally:
+            adapter.close()
+
+    def test_product_mcp_uses_investigation_refs_for_atomic_decision(self):
+        core = ProductInvestigateCore()
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            investigated = adapter.call_tool("investigate_object", {
+                "candidateId": "candidate-product", "pageStateId": "page-product",
+            })["structuredContent"]["result"]
+            adapter.call_tool("prepare_decision", {
+                "objectId": investigated["objectId"], "rule": investigated["rule"],
+                "result": "scanned_no_issue", "reasonText": "All dimensions are satisfied",
+                "evidenceRefs": ["evidence-wrong"], "caseRefs": ["case-wrong"],
+                "findings": [{
+                    "dimension": dimension, "status": "satisfied",
+                    "reasonText": "The investigation supports this dimension",
+                    "evidenceRefs": ["evidence-wrong"], "caseRefs": ["case-wrong"],
+                } for dimension in ("filter_present", "query_action", "reset_action", "binding_to_list")],
+            })
+            record = next(item for item in core.requests if item["tool"] == "record_findings")
+            prepare = next(item for item in core.requests if item["tool"] == "prepare_decision")
+            self.assertEqual(record["input"]["findings"][0]["evidenceRefs"],
+                             investigated["evidenceRefs"])
+            self.assertEqual(record["input"]["findings"][0]["caseRefs"],
+                             [investigated["caseId"]])
+            self.assertEqual(prepare["input"]["evidenceRefs"], investigated["evidenceRefs"])
+            self.assertEqual(prepare["input"]["caseRefs"], [investigated["caseId"]])
+        finally:
+            adapter.close()
+
+    def test_product_mcp_discover_scope_returns_host_deduplicated_batch(self):
+        core = HostCore(
+            login_adapter=DeterministicLoginAdapter(),
+            page_adapter=DeterministicPageAdapter(),
+            object_identity_adapter=DeterministicObjectIdentityAdapter(),
+        )
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            response = adapter.call_tool("discover_scope", {})
+            self.assertEqual(response["structuredContent"]["status"], "ok")
+            result = response["structuredContent"]["result"]
+            self.assertEqual(result["nextAction"]["type"], "investigate_objects")
+            self.assertEqual(result["entrypointCounts"]["duplicates"], 0)
+            self.assertEqual(len(result["candidates"]), 1)
+            self.assertEqual(response["structuredContent"]["progress"]["phase"], "discovering")
+        finally:
+            adapter.close()
+
+    def test_product_mcp_discover_scope_advances_candidate_free_tabs_internally(self):
+        page_adapter = ProductSwitchingPageAdapter()
+        core = HostCore(
+            login_adapter=DeterministicLoginAdapter(),
+            page_adapter=page_adapter,
+            object_identity_adapter=DeterministicObjectIdentityAdapter(),
+            entrypoint_adapter=ProductSwitchingEntrypointAdapter(page_adapter),
+        )
+        adapter = ProductMcpToolTransport(core)
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            response = adapter.call_tool("discover_scope", {})["structuredContent"]
+            result = response["result"]
+            self.assertEqual(result["steps"], ["inspect_page", "explore_entrypoint"])
+            self.assertEqual(result["currentPage"]["title"], "App")
+            self.assertEqual(result["nextAction"]["type"], "ready_to_complete")
+            self.assertEqual(result["entrypointCounts"]["duplicates"], 2)
+        finally:
+            adapter.close()
 
     def test_product_mcp_builds_completion_from_runtime_ledger(self):
         core = ProductRecordingCore()
@@ -395,6 +833,25 @@ class TransportTest(unittest.TestCase):
                 completion = adapter.call_tool("complete_audit", {})["structuredContent"]
                 self.assertEqual(completion["result"]["scanStatus"], "completed")
                 self.assertTrue(completion["result"]["conclusionsValid"])
+                self.assertTrue({
+                    "platform-ledger.json", "platform-events.jsonl", "platform-run.log",
+                }.issubset(set(completion["result"]["artifactPaths"])))
+                self.assertTrue((Path(output) / "platform-ledger.json").is_file())
+                self.assertTrue((Path(output) / "platform-events.jsonl").is_file())
+                self.assertTrue((Path(output) / "platform-run.log").is_file())
+                run_id = core._store._conn.execute(
+                    "SELECT run_id FROM scans WHERE scan_id=?", (scan_id,)
+                ).fetchone()[0]
+                platform_ledger = core.platform_ledger_store.load(run_id)
+                self.assertEqual(platform_ledger["status"], "completed")
+                self.assertEqual(len(platform_ledger["work_items"]), 1)
+                self.assertEqual(len(platform_ledger["investigations"]), 1)
+                self.assertEqual(len(platform_ledger["decisions"]), 1)
+                self.assertEqual(len(platform_ledger["receipts"]), 1)
+                self.assertEqual(platform_ledger["decision_authority"], "platform")
+                receipt = platform_ledger["receipts"][0]
+                self.assertEqual(receipt["authority"], "platform")
+                self.assertEqual(receipt["metadata"]["hostAssessmentId"], decision["result"]["assessmentId"])
             finally:
                 adapter.close()
 
