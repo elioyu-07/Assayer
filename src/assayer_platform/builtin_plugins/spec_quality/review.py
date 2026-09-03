@@ -74,6 +74,96 @@ def _readiness(reviewed: Sequence[Mapping[str, Any]], context: Mapping[str, Any]
     return "READY", "Every mandatory dimension was reviewed with no confirmed P1/P2, material unverified fact, or blocker."
 
 
+def validate_review_decisions(
+    raw_decisions: Sequence[Any], packet: InvestigationPacket, *,
+    expected_candidate_ids: Sequence[str] | None = None,
+    prior_decisions: Sequence[Mapping[str, Any]] = (),
+) -> list[Mapping[str, Any]]:
+    """Validate Spec review findings and their Evidence links before persistence.
+
+    ``expected_candidate_ids`` limits validation to one checkpoint page.  When
+    omitted, the complete candidate collection must be covered.  Prior
+    decisions participate only in cross-checkpoint identity and merge checks;
+    they are never rewritten.
+    """
+    payload = _mapping(packet.evidence[0].payload if packet.evidence else None, "candidate evidence")
+    raw_candidates = _sequence(payload.get("candidateFindings"), "candidateFindings")
+    candidates = {_text(item.get("candidate_id"), "candidate_id"): _mapping(item, "candidate") for item in raw_candidates}
+    reviewed: list[Mapping[str, Any]] = []
+    handled: list[str] = []
+    prior_finding_ids = {
+        _text(item.get("finding_id"), "prior decision finding_id") for item in prior_decisions
+    }
+    finding_ids = set(prior_finding_ids)
+    for index, raw_item in enumerate(raw_decisions):
+        item = _mapping(raw_item, f"decisions[{index}]")
+        finding_id = _text(item.get("finding_id"), f"decisions[{index}].finding_id")
+        if finding_id in finding_ids:
+            raise PlatformContractError("SPEC_REVIEW_INVALID", f"Duplicate finding_id: {finding_id}")
+        finding_ids.add(finding_id)
+        status = item.get("status")
+        if status not in _STATUSES:
+            raise PlatformContractError("SPEC_REVIEW_INVALID", f"Unsupported review status: {status}")
+        candidate_ids = [
+            _text(value, f"decisions[{index}].candidate_ids")
+            for value in _sequence(item.get("candidate_ids"), f"decisions[{index}].candidate_ids")
+        ]
+        if not candidate_ids and status != "CONFIRMED":
+            raise PlatformContractError("SPEC_REVIEW_INVALID", "Only reviewer-origin CONFIRMED findings may omit candidate_ids")
+        handled.extend(candidate_ids)
+        if status == "CONFIRMED":
+            if item.get("severity") not in _SEVERITIES:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} requires P1, P2, or P3")
+            object_id = _text(item.get("object_id"), f"confirmed finding {finding_id}.object_id")
+            if _aggregate_object(object_id):
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} must identify one business object")
+            for field in ("gap", "impact", "recommendation", "closure_evidence"):
+                _text(item.get(field), f"confirmed finding {finding_id}.{field}")
+            evidence = [
+                _text(value, f"confirmed finding {finding_id}.evidence")
+                for value in _sequence(item.get("evidence"), f"confirmed finding {finding_id}.evidence")
+            ]
+            if not evidence:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} requires direct evidence")
+            blob = "\n".join(evidence)
+            linked = [candidates[candidate_id] for candidate_id in candidate_ids if candidate_id in candidates]
+            source_objects = {str(candidate.get("object_id") or "").strip() for candidate in linked if candidate.get("object_id")}
+            if len(source_objects) > 1:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} merges multiple candidate objects")
+            if linked and not any(line in blob for candidate in linked for line in _candidate_source_lines(candidate)):
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} evidence does not trace to its candidates")
+            if not linked:
+                target = Path(str(packet.metadata.get("path"))).read_text(encoding="utf-8-sig")
+                if any(value not in target for value in evidence):
+                    raise PlatformContractError("SPEC_REVIEW_INVALID", f"Reviewer-origin finding {finding_id} evidence is not in the target Spec")
+            if item.get("merged_into") is not None:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", "CONFIRMED findings cannot set merged_into")
+        else:
+            if item.get("severity") is not None:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"{status} findings cannot carry final severity")
+            _text(item.get("review_note"), f"{status} finding {finding_id}.review_note")
+            if status != "MERGED" and item.get("merged_into") is not None:
+                raise PlatformContractError("SPEC_REVIEW_INVALID", f"{status} findings cannot set merged_into")
+        reviewed.append(item)
+
+    expected = set(candidates) if expected_candidate_ids is None else set(expected_candidate_ids)
+    actual = set(handled)
+    if actual - set(candidates):
+        raise PlatformContractError("SPEC_REVIEW_INVALID", "Review references unknown candidate IDs")
+    if actual - expected:
+        raise PlatformContractError("SPEC_REVIEW_INVALID", "Checkpoint review references candidates outside its declared item IDs")
+    if expected - actual:
+        raise PlatformContractError("SPEC_REVIEW_INCOMPLETE", "Review decisions must handle every declared candidate exactly once")
+    if len(handled) != len(set(handled)):
+        raise PlatformContractError("SPEC_REVIEW_INVALID", "A scanner candidate is handled more than once")
+    all_decisions = [*prior_decisions, *reviewed]
+    confirmed_ids = {item["finding_id"] for item in all_decisions if item.get("status") == "CONFIRMED"}
+    for item in reviewed:
+        if item.get("status") == "MERGED" and item.get("merged_into") not in confirmed_ids:
+            raise PlatformContractError("SPEC_REVIEW_INVALID", "MERGED findings must target an already validated CONFIRMED finding")
+    return reviewed
+
+
 def evaluate_review(proposal: DecisionProposal, packet: InvestigationPacket) -> dict[str, Any]:
     details = _mapping(proposal.details, "details")
     review = _mapping(details.get("review"), "details.review")
@@ -102,65 +192,7 @@ def evaluate_review(proposal: DecisionProposal, packet: InvestigationPacket) -> 
     raw_candidates = _sequence(payload.get("candidateFindings"), "candidateFindings")
     candidates = {_text(item.get("candidate_id"), "candidate_id"): _mapping(item, "candidate") for item in raw_candidates}
     raw_decisions = _sequence(review.get("decisions"), "review decisions")
-    reviewed: list[Mapping[str, Any]] = []
-    handled: list[str] = []
-    finding_ids: set[str] = set()
-    for index, raw_item in enumerate(raw_decisions):
-        item = _mapping(raw_item, f"decisions[{index}]")
-        finding_id = _text(item.get("finding_id"), f"decisions[{index}].finding_id")
-        if finding_id in finding_ids:
-            raise PlatformContractError("SPEC_REVIEW_INVALID", f"Duplicate finding_id: {finding_id}")
-        finding_ids.add(finding_id)
-        status = item.get("status")
-        if status not in _STATUSES:
-            raise PlatformContractError("SPEC_REVIEW_INVALID", f"Unsupported review status: {status}")
-        candidate_ids = [_text(value, f"decisions[{index}].candidate_ids") for value in _sequence(item.get("candidate_ids"), f"decisions[{index}].candidate_ids")]
-        if not candidate_ids and status != "CONFIRMED":
-            raise PlatformContractError("SPEC_REVIEW_INVALID", "Only reviewer-origin CONFIRMED findings may omit candidate_ids")
-        handled.extend(candidate_ids)
-        if status == "CONFIRMED":
-            if item.get("severity") not in _SEVERITIES:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} requires P1, P2, or P3")
-            object_id = _text(item.get("object_id"), f"confirmed finding {finding_id}.object_id")
-            if _aggregate_object(object_id):
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} must identify one business object")
-            for field in ("gap", "impact", "recommendation", "closure_evidence"):
-                _text(item.get(field), f"confirmed finding {finding_id}.{field}")
-            evidence = [_text(value, f"confirmed finding {finding_id}.evidence") for value in _sequence(item.get("evidence"), f"confirmed finding {finding_id}.evidence")]
-            if not evidence:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} requires direct evidence")
-            blob = "\n".join(evidence)
-            linked = [candidates[candidate_id] for candidate_id in candidate_ids if candidate_id in candidates]
-            source_objects = {str(candidate.get("object_id") or "").strip() for candidate in linked if candidate.get("object_id")}
-            if len(source_objects) > 1:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} merges multiple candidate objects")
-            if linked and not any(line in blob for candidate in linked for line in _candidate_source_lines(candidate)):
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"Confirmed finding {finding_id} evidence does not trace to its candidates")
-            if not linked:
-                target = Path(str(packet.metadata.get("path"))).read_text(encoding="utf-8-sig")
-                if any(value not in target for value in evidence):
-                    raise PlatformContractError("SPEC_REVIEW_INVALID", f"Reviewer-origin finding {finding_id} evidence is not in the target Spec")
-            if item.get("merged_into") is not None:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", "CONFIRMED findings cannot set merged_into")
-        else:
-            if item.get("severity") is not None:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"{status} findings cannot carry final severity")
-            _text(item.get("review_note"), f"{status} finding {finding_id}.review_note")
-            if status != "MERGED" and item.get("merged_into") is not None:
-                raise PlatformContractError("SPEC_REVIEW_INVALID", f"{status} findings cannot set merged_into")
-        reviewed.append(item)
-
-    expected, actual = set(candidates), set(handled)
-    if actual - expected:
-        raise PlatformContractError("SPEC_REVIEW_INVALID", "Review references unknown candidate IDs")
-    if expected - actual:
-        raise PlatformContractError("SPEC_REVIEW_INCOMPLETE", "Every scanner candidate must be handled exactly once")
-    if len(handled) != len(set(handled)):
-        raise PlatformContractError("SPEC_REVIEW_INVALID", "A scanner candidate is handled more than once")
-    confirmed_ids = {item["finding_id"] for item in reviewed if item.get("status") == "CONFIRMED"}
-    for item in reviewed:
-        if item.get("status") == "MERGED" and item.get("merged_into") not in confirmed_ids:
-            raise PlatformContractError("SPEC_REVIEW_INVALID", "MERGED findings must target a CONFIRMED finding")
+    reviewed = validate_review_decisions(raw_decisions, packet)
 
     readiness, reason = _readiness(reviewed, context)
     expected_result = _READINESS_TO_RESULT[readiness]
@@ -215,4 +247,4 @@ class SpecQualityDecisionCommitter:
         )
 
 
-__all__ = ["SpecQualityDecisionCommitter", "evaluate_review"]
+__all__ = ["SpecQualityDecisionCommitter", "evaluate_review", "validate_review_decisions"]

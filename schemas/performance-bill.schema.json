@@ -4,7 +4,7 @@
   "title": "PerformanceBill",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "scanId", "runId", "status", "measurement", "activity", "operationGroups", "largestOperations", "limitations"],
+  "required": ["schemaVersion", "scanId", "runId", "status", "measurement", "activity", "operationGroups", "largestOperations", "largestAgentTurnGaps", "limitations"],
   "properties": {
     "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
     "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
@@ -13,7 +13,7 @@
     "measurement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["startedAt", "endedAt", "totalDurationMs", "hostOperationDurationMs", "browserOperationDurationMs", "transportDurationMs", "modelDurationMs", "outsideHostDurationMs", "modelTelemetryStatus"],
+      "required": ["startedAt", "endedAt", "totalDurationMs", "hostOperationDurationMs", "browserOperationDurationMs", "transportDurationMs", "modelDurationMs", "outsideHostDurationMs", "agentTurnGapDurationMs", "longestAgentTurnGapMs", "modelTelemetryStatus"],
       "properties": {
         "startedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
         "endedAt": { "$ref": "common.schema.json#/$defs/timestamp" },
@@ -23,16 +23,19 @@
         "transportDurationMs": { "type": "integer", "minimum": 0 },
         "modelDurationMs": { "type": ["integer", "null"], "minimum": 0 },
         "outsideHostDurationMs": { "type": "integer", "minimum": 0 },
+        "agentTurnGapDurationMs": { "type": "integer", "minimum": 0 },
+        "longestAgentTurnGapMs": { "type": "integer", "minimum": 0 },
         "modelTelemetryStatus": { "enum": ["captured", "not_exposed"] }
       }
     },
     "activity": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["toolCalls", "agentTurnsObserved", "publicToolCallsObserved", "publicToolCallsByName", "toolCallsByName", "requestBytes", "responseBytes", "transportRequestsMeasured", "requestSizesMeasured", "responseSizesMeasured", "pagesVisited", "physicalEntrypoints", "logicalEntrypoints", "duplicateEntrypoints", "duplicateEntrypointRatio", "objectsDiscovered", "objectsVerified", "decisionsCommitted", "screenshotsCaptured", "uniqueScreenshotDigests", "screenshotBytes", "rejectedOperations", "modelRetries"],
+      "required": ["toolCalls", "agentTurnsObserved", "agentTurnGapCount", "publicToolCallsObserved", "publicToolCallsByName", "toolCallsByName", "requestBytes", "responseBytes", "transportRequestsMeasured", "requestSizesMeasured", "responseSizesMeasured", "pagesVisited", "physicalEntrypoints", "logicalEntrypoints", "duplicateEntrypoints", "duplicateEntrypointRatio", "objectsDiscovered", "objectsVerified", "decisionsCommitted", "screenshotsCaptured", "uniqueScreenshotDigests", "screenshotBytes", "rejectedOperations", "modelRetries"],
       "properties": {
         "toolCalls": { "$ref": "#/$defs/count" },
         "agentTurnsObserved": { "$ref": "#/$defs/count" },
+        "agentTurnGapCount": { "$ref": "#/$defs/count" },
         "publicToolCallsObserved": { "$ref": "#/$defs/count" },
         "publicToolCallsByName": {
           "type": "object",
@@ -73,6 +76,11 @@
       "maxItems": 10,
       "items": { "$ref": "#/$defs/operation" }
     },
+    "largestAgentTurnGaps": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/agentTurnGap" }
+    },
     "limitations": {
       "type": "array",
       "minItems": 1,
@@ -101,6 +109,18 @@
         "tool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "operationKind": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "status": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "durationMs": { "$ref": "#/$defs/count" }
+      }
+    },
+    "agentTurnGap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromAgentTurn", "toAgentTurn", "fromTool", "toTool", "durationMs"],
+      "properties": {
+        "fromAgentTurn": { "$ref": "common.schema.json#/$defs/entityId" },
+        "toAgentTurn": { "$ref": "common.schema.json#/$defs/entityId" },
+        "fromTool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "toTool": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "durationMs": { "$ref": "#/$defs/count" }
       }
     }

@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 0.1.0-draft |
+| Document version | 1.0.0 |
 | Date | 2026-09-02 |
-| Status | Proposal |
+| Status | Reference map aligned with M2 frozen contracts |
 | Owner | Assayer Maintainers |
 
 ## Implementation Status

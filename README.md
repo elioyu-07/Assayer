@@ -135,20 +135,28 @@ Interactive plugins use the shared lifecycle:
 
 ```text
 start_plugin_run
-  -> discover_work_items
-  -> inspect_work_items
-  -> submit_decisions
-  -> finish_plugin_run
+  -> advance_plugin_run
+  -> advance_plugin_run (with each bounded semantic checkpoint)
+  -> advance_plugin_run (with the final semantic decision)
+  -> formal summary
+  -> get_plugin_result (only for requested detail pages)
 ```
 
-Recovery and progress are available through `recover_work_item` and
-`get_plugin_progress`. Frontend MCP names such as `start_audit`,
-`discover_scope`, and `investigate_object` remain compatibility aliases while
-the browser vertical is migrated.
+The Host owns deterministic discovery, inspection, paging, checkpoint
+persistence, decision assembly, and eligible closeout. Recovery and progress
+are available through `recover_work_item` and `get_plugin_progress`. Terminal
+arrays and oversized text are exposed as result sections; the Agent reads only
+needed pages while `result-summary.json` retains the complete output. Primitive
+lifecycle tools remain available only through the standalone diagnostic
+transport. Frontend MCP names such as `start_audit`, `discover_scope`, and
+`investigate_object` remain compatibility aliases while the browser vertical
+is migrated.
 
-The external plugin contract and current limitations are documented in
+The frozen platform laws are documented in the
+[Platform Constitution v1](docs/platform-constitution-v1.md). The current
+Python packaging path and its limitations are documented in
 [Plugin development](docs/plugin-development.md). Agent-assisted plugin creation
-is planned after the platform contracts and conformance gates are frozen.
+is planned after the M3 conformance and install gates are complete.
 
 ## Developer setup
 
@@ -261,7 +269,12 @@ scripts/                Test, bundle, resilience, and language-governance tools
 
 - [Platform project plan](docs/project-plan.md)
 - [User journey and Definition of Done](docs/user-journey-and-definition-of-done.md)
-- [Platform contract](docs/platform-contract.md)
+- [Platform Constitution v1](docs/platform-constitution-v1.md)
+- [Audit Plugin Contract v1](docs/plugin-contract-v1.md)
+- [Capability Provider Contract v1](docs/capability-provider-contract-v1.md)
+- [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md)
+- [Platform v1 contract traceability](docs/platform-contract-traceability-v1.md)
+- [Detailed platform contract reference](docs/platform-contract.md)
 - [Plugin development contract](docs/plugin-development.md)
 - [Architecture](docs/architecture.md)
 - [Design governance](docs/design-governance.md)

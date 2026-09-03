@@ -15,7 +15,8 @@ from typing import Any, Sequence
 
 from ...contract import (
     CheckContract, DimensionObservation, EvidenceRecord, InvestigationPacket,
-    PlatformContext, PluginManifest, WorkItem,
+    PlatformContext, PlatformContractError, PluginManifest, ReviewCheckpoint,
+    WorkItem,
 )
 from ...registry import load_plugin_manifest
 
@@ -154,6 +155,33 @@ class SpecQualityPlugin:
 
     manifest: PluginManifest = load_plugin_manifest(_MANIFEST)
 
+    def validate_review_checkpoint(
+        self, checkpoint: ReviewCheckpoint, collection_items: Sequence[Mapping[str, Any]],
+        prior_checkpoints: Sequence[ReviewCheckpoint], packet: InvestigationPacket,
+        check: CheckContract, context: PlatformContext,
+    ) -> None:
+        """Reject malformed or untraceable semantic findings before persistence."""
+        del collection_items, check, context
+        from .review import validate_review_decisions
+
+        raw_decisions = checkpoint.payload.get("decisions")
+        if not isinstance(raw_decisions, (tuple, list)) or not raw_decisions:
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID", "Each Spec review checkpoint requires decisions",
+            )
+        prior_decisions: list[Mapping[str, Any]] = []
+        for prior in prior_checkpoints:
+            if prior.checkpoint_id == checkpoint.checkpoint_id:
+                continue
+            values = prior.payload.get("decisions")
+            if isinstance(values, (tuple, list)):
+                prior_decisions.extend(item for item in values if isinstance(item, Mapping))
+        validate_review_decisions(
+            raw_decisions, packet,
+            expected_candidate_ids=checkpoint.item_ids,
+            prior_decisions=prior_decisions,
+        )
+
     def discover(self, scope: Any, context: PlatformContext) -> Sequence[WorkItem]:
         del context
         entries = scope.get("files", []) if isinstance(scope, dict) else scope
@@ -269,12 +297,12 @@ class SpecQualityPlugin:
                     add("state-diagram-missing", "STATE-001", "P2", "状态模型", bodies["状态模型"][0], "状态模型",
                         "The state model has no Mermaid stateDiagram-v2 definition.", _line_excerpt(text, bodies["状态模型"][0], 5),
                         "Allowed transitions and terminal behavior cannot be reviewed consistently.", "Add a complete stateDiagram-v2 with guards and outcomes.")
-                if state_body and not any("状态" in header and len(rows) > 0 for _, headers, rows in tables):
+                if state_body and not any(any("状态" in header for header in headers) and rows for _, headers, rows in tables):
                     add("state-definition-missing", "STATE-002", "P1", "状态模型", bodies["状态模型"][0], "状态模型",
                         "The state model has no structured state definition table.", _line_excerpt(text, bodies["状态模型"][0], 5),
                         "Implementers cannot determine state meaning, entry conditions, or legal operations.", "Add a state definition table with meaning, entry conditions, and operations.")
                 dep_body = bodies.get("依赖与假设", (None, ""))[1]
-                if dep_body and not any(any(token in header for token in ("系统/模块", "依赖内容", "降级策略", "dependency")) for _, headers, _ in tables):
+                if dep_body and not any(any(token in header for token in ("系统/模块", "依赖内容", "降级策略", "dependency") for header in headers) for _, headers, _ in tables):
                     add("dependency-table-missing", "DEP-001", "P2", "依赖与假设", bodies["依赖与假设"][0], "依赖与假设",
                         "The dependency chapter has no structured dependency table.", _line_excerpt(text, bodies["依赖与假设"][0], 5),
                         "External failure behavior and assumptions remain implicit.", "List each dependency, prerequisite, and unavailable-service fallback.")
@@ -283,7 +311,7 @@ class SpecQualityPlugin:
                         "The success criteria chapter has no stable SC identifier.", _line_excerpt(text, bodies["成功标准"][0], 5),
                         "Release outcomes cannot be measured or traced to evidence.", "Add measurable SC-NN criteria and their measurement method.")
                 decision_body = bodies.get("关键决策记录", (None, ""))[1]
-                if decision_body and not any("决策ID" in header or "decision" in header.lower() for _, headers, _ in tables):
+                if decision_body and not any(any("决策ID" in header or "decision" in header.lower() for header in headers) for _, headers, _ in tables):
                     add("decision-table-missing", "DECISION-001", "P2", "关键决策记录", bodies["关键决策记录"][0], "关键决策记录",
                         "The decision chapter has no structured decision record table.", _line_excerpt(text, bodies["关键决策记录"][0], 5),
                         "Important choices and their ownership cannot be reconstructed.", "Record decision ID, question, conclusion, rationale/trade-offs, and date.")
@@ -291,7 +319,7 @@ class SpecQualityPlugin:
             # no glossary/term column. It intentionally stays P3 because the
             # authority requires semantic review before admission.
             acronym_tokens = {token for token in re.findall(r"\b[A-Z][A-Z0-9]{2,}\b", text) if token not in {"FR", "AC", "CASE", "NFR", "HTTP", "HTTPS", "JSON", "API"}}
-            if acronym_tokens and not any("术语" in header or "缩写" in header or "glossary" in header.lower() for _, headers, _ in tables):
+            if acronym_tokens and not any(any("术语" in header or "缩写" in header or "glossary" in header.lower() for header in headers) for _, headers, _ in tables):
                 first = min((text.count("\n", 0, text.find(token)) + 1 for token in acronym_tokens if token in text), default=1)
                 add("glossary-missing", "TERM-001", "P3", None, first, None,
                     "Potential domain abbreviations are used without a glossary table.", _line_excerpt(text, first),
@@ -373,8 +401,72 @@ class SpecQualityPlugin:
                 (evidence_id,),
                 "violated" if any(result["checkId"] == item_def["id"] and result["status"] == "FINDING" for result in check_results) else "unresolved" if any(result["checkId"] == item_def["id"] and result["status"] == "UNVERIFIED" for result in check_results) else "satisfied",
             ) for item_def in _CHECKLIST)
-            packets.append(InvestigationPacket(item, check.check_id, check.version, dimensions, (evidence,), "not_required", metadata={"path": str(path), "profile": profile, "candidateCount": len(candidates), "evidenceManifest": evidence_manifest}))
+            packets.append(InvestigationPacket(
+                item, check.check_id, check.version, dimensions, (evidence,), "not_required",
+                metadata={
+                    "path": str(path),
+                    "profile": profile,
+                    "candidateCount": len(candidates),
+                    "evidenceManifest": evidence_manifest,
+                    "evidenceCollections": [{
+                        "collectionId": "candidate-findings",
+                        "evidenceId": evidence_id,
+                        "jsonPointer": "/candidateFindings",
+                        "itemIdField": "candidate_id",
+                        "groupBy": ["rule_id"],
+                    }],
+                },
+            ))
         return tuple(packets)
+
+    def assemble_review_checkpoints(
+        self, checkpoints: Sequence[ReviewCheckpoint], finalization: Mapping[str, Any],
+        packet: InvestigationPacket, check: CheckContract, context: PlatformContext,
+    ) -> Mapping[str, Any]:
+        """Assemble paged Agent review records into the canonical Spec envelope."""
+        del packet, check, context
+        readiness_context = finalization.get("readiness_context")
+        if not isinstance(readiness_context, Mapping):
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID", "Checkpoint finalization requires readiness_context",
+            )
+        reviewer_origin = finalization.get("reviewer_origin_decisions", ())
+        if not isinstance(reviewer_origin, (tuple, list)) or any(
+            not isinstance(item, Mapping) for item in reviewer_origin
+        ):
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID", "reviewer_origin_decisions must be an array of objects",
+            )
+        decisions: list[Mapping[str, Any]] = []
+        for checkpoint in checkpoints:
+            raw_decisions = checkpoint.payload.get("decisions")
+            if not isinstance(raw_decisions, (tuple, list)) or not raw_decisions:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID", "Each Spec review checkpoint requires decisions",
+                )
+            handled: list[str] = []
+            for item in raw_decisions:
+                if not isinstance(item, Mapping):
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID", "Checkpoint decisions must be objects",
+                    )
+                candidate_ids = item.get("candidate_ids")
+                if not isinstance(candidate_ids, (tuple, list)):
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID", "Checkpoint decisions require candidate_ids",
+                    )
+                handled.extend(candidate_ids)
+                decisions.append(dict(item))
+            if len(handled) != len(set(handled)) or set(handled) != set(checkpoint.item_ids):
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID", "Checkpoint payload must cover its declared candidate IDs exactly once",
+                )
+        decisions.extend(dict(item) for item in reviewer_origin)
+        return {"review": {
+            "review_schema_version": "1.0.0",
+            "readiness_context": dict(readiness_context),
+            "decisions": decisions,
+        }}
 
     def summarize(self, work_items: Sequence[WorkItem], investigations: Sequence[InvestigationPacket],
                   decisions: Sequence[Any], status: str) -> Mapping[str, Any]:

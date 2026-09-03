@@ -2,12 +2,19 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 0.1.0-draft |
+| Document version | 1.0.0 |
 | Date | 2026-09-02 |
-| Status | Proposal |
+| Status | Superseded authority; see [Platform Constitution v1](platform-constitution-v1.md) and the v1 contracts |
 | Owner | Assayer Maintainers |
 
 ## Implementation Note
+
+This document is retained as the detailed design reference. The normative M2
+authority is split into the [Platform Constitution v1](platform-constitution-v1.md),
+[Audit Plugin Contract v1](plugin-contract-v1.md), [Capability Provider Contract
+v1](capability-provider-contract-v1.md), and [Canonical Audit Result Contract
+v1](canonical-result-contract-v1.md). Those documents resolve ownership and
+versioning; this reference must not introduce a conflicting rule.
 
 The in-process reference kernel, manifest loader, configuration-quality plugin, and frontend compatibility plugin are implemented under `src/assayer_platform`. The frontend plugin adapts the existing product facade for discovery and investigation, and its Check/Finding gates are applied on the product-facing decision path. The product MCP transport now starts an interactive platform Run by default and persists its lifecycle checkpoints in the Host-owned SQLite database. The browser-shaped ledger and public MCP tools remain compatibility surfaces while the generic ledger supplies the cross-domain lifecycle record.
 
@@ -229,11 +236,35 @@ The platform may optimize at four boundaries:
 | Boundary | Safe optimization | Plugin escape hatch |
 |---|---|---|
 | Discovery | Batch and deduplicate logical WorkItems | `discoverBatching=forbidden` |
-| Investigation | Collect several independent packets in one Host call | `inspectBatching=forbidden` or declared ordering |
+| Investigation | Collect several independent packets in one Host call; learn a smaller successful size after an allowed failed-batch split | `inspectBatching=forbidden`, `failureSplitting=forbidden`, or non-independent ordering |
 | Decision | Submit independent proposals together | `decisionBatching=forbidden` |
 | Evidence | Reuse immutable evidence after identity validation | `cacheReuse=forbidden` or custom invalidators |
 
 The Agent-facing protocol may combine calls, but the ledger still records every internal operation and every Evidence item. A combined call is a transport optimization, not a weaker audit transaction.
+
+Agent-facing inspection is summary-first by default: dimensions, metadata,
+and the Evidence index are returned while full Evidence payloads remain in the
+Host. Callers can expand an immutable Evidence in full, or page through a
+plugin-declared Evidence collection. Collection cursors are bound to the
+WorkItem, collection, selected group, and stable ordered item IDs. The platform
+may group only by declared fields and must return original item IDs; it cannot
+infer that grouped observations share one semantic root cause.
+
+Semantic review of a large collection may be checkpointed incrementally. The
+platform owns checkpoint identity, atomic persistence, exact item-ID coverage,
+idempotent replay, overlap rejection, and final completeness. Checkpoint
+payload meaning remains plugin-owned. At final submission the platform passes
+the ordered immutable checkpoints and small finalization data to the selected
+plugin's assembler, then applies the same DecisionProposal and commit gates as
+a directly submitted decision. A checkpoint is progress evidence, never a
+formal audit conclusion by itself.
+
+Checkpoint correction is append-only. A correction names the current
+checkpoint it supersedes and must preserve the exact WorkItem, Check,
+collection, and item-ID scope. Historical records remain in the canonical
+ledger, but only effective unsuperseded leaves contribute to coverage and
+decision assembly. This permits recovery from a bad accepted semantic record
+without erasing the audit trail or creating duplicate coverage.
 
 The platform must expose both:
 
@@ -241,6 +272,14 @@ The platform must expose both:
 - internal Host operations, browser/runtime time, transport time, and cache/split activity.
 
 No performance target may be defined only as “fewer calls” if it increases unresolved dimensions, invalid recovery, or unexplained coverage.
+
+Failed inspection batches are not retried by default. Recursive isolation is
+allowed only when the plugin explicitly declares `failureSplitting=allowed`,
+inspection batching is allowed, and ordering is independent. Every failed
+attempt, split, isolated WorkItem failure, and learned batch size is retained
+in platform diagnostics. A non-splittable batch failure is attributed to every
+affected WorkItem without pretending that any one item was proven to be the
+cause.
 
 ## 8. Capability Negotiation
 

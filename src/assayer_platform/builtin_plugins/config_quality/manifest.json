@@ -25,6 +25,7 @@
     "cacheReuse": "allowed",
     "checkpoint": "required",
     "maxBatchSize": 32,
-    "ordering": "independent"
+    "ordering": "independent",
+    "failureSplitting": "allowed"
   }
 }

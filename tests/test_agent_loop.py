@@ -209,6 +209,19 @@ class ExplodingAgent:
         raise RuntimeError("model unavailable with private provider details")
 
 
+class AdvancingClock:
+    """Deterministic monotonic clock for Agent budget tests."""
+
+    def __init__(self, step_ns=1_000_000):
+        self.value = 0
+        self.step_ns = step_ns
+
+    def __call__(self):
+        current = self.value
+        self.value += self.step_ns
+        return current
+
+
 class FakeInvoker:
     def __init__(self, responses):
         self.responses = iter(responses)
@@ -378,6 +391,55 @@ class AgentLoopTest(unittest.TestCase):
         self.assertEqual(result.stopping_reason, "model_failure_budget")
         self.assertIsNone(result.stopping_detail)
         self.assertEqual(result.turns, ())
+
+    def test_total_time_threshold_never_stops_a_long_running_task(self):
+        invoker = FakeInvoker([{
+            "protocolVersion": "1.0", "requestId": "request-one", "scanId": "scan-fake",
+            "runId": "run-fake", "runRevision": 1, "status": "ok", "result": {},
+            "evidenceRefs": [], "diagnosticRefs": [],
+        }])
+        clock = AdvancingClock()
+        result = AgentLoop(
+            StaticAgent([AgentDecision("get_audit_progress", {}, "Check progress.")]),
+            invoker,
+            budget=AgentLoopBudget(max_turns=1, max_elapsed_ms=1),
+            loop_id="time-budget",
+            clock_ns=clock,
+        ).run(START_INPUT)
+        self.assertEqual(result.stopping_reason, "turn_budget")
+
+    def test_context_budget_stops_before_model_receives_an_oversized_response(self):
+        oversized = "x" * 128
+        invoker = FakeInvoker([{
+            "protocolVersion": "1.0", "requestId": "request-one", "scanId": "scan-fake",
+            "runId": "run-fake", "runRevision": 1, "status": "ok",
+            "result": {"oversized": oversized}, "evidenceRefs": [], "diagnosticRefs": [],
+        }])
+        agent = StaticAgent([AgentDecision("get_audit_progress", {}, "Check progress.")])
+        result = AgentLoop(
+            agent, invoker,
+            budget=AgentLoopBudget(max_turns=2, max_context_bytes=64),
+            loop_id="context-budget",
+        ).run(START_INPUT)
+        self.assertEqual(result.stopping_reason, "context_budget")
+        self.assertEqual(len(invoker.requests), 1)
+
+    def test_model_time_threshold_never_stops_a_slow_decision(self):
+        invoker = FakeInvoker([{
+            "protocolVersion": "1.0", "requestId": "request-one", "scanId": "scan-fake",
+            "runId": "run-fake", "runRevision": 1, "status": "ok", "result": {},
+            "evidenceRefs": [], "diagnosticRefs": [],
+        }])
+        clock = AdvancingClock(step_ns=2_000_000)
+        result = AgentLoop(
+            StaticAgent([AgentDecision("get_audit_progress", {}, "Check progress.")]),
+            invoker,
+            budget=AgentLoopBudget(max_turns=1, max_model_duration_ms=1),
+            loop_id="model-time-budget",
+            clock_ns=clock,
+        ).run(START_INPUT)
+        self.assertEqual(result.stopping_reason, "turn_budget")
+        self.assertEqual(len(invoker.requests), 2)
 
     def test_result_unknown_requires_lookup_and_cannot_be_replayed(self):
         unknown = {

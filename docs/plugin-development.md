@@ -1,5 +1,10 @@
 # Assayer Plugin Development Contract
 
+The normative contract is [Audit Plugin Contract v1](plugin-contract-v1.md),
+governed by the [Platform Constitution v1](platform-constitution-v1.md). This
+document is the implementation guide for the current Python registration and
+interactive lifecycle.
+
 This document defines how an independently packaged plugin is discovered and
 run by the Assayer platform.  A plugin owns domain facts and semantic rules;
 the Platform Kernel owns lifecycle, safety, evidence closure, decision gates,
@@ -64,10 +69,39 @@ Plugins that need Agent-guided work declare `interactive` in their registration
 and use the same domain-neutral lifecycle as every other interactive plugin:
 
 ```text
-start_plugin_run -> discover_work_items -> inspect_work_items
-                  -> submit_decisions -> finish_plugin_run
-                  -> (recover_work_item / get_plugin_progress at any point)
+start_plugin_run -> advance_plugin_run
+                  -> (semantic input + advance_plugin_run)*
+                  -> formal summary
+                  -> get_plugin_result(sectionId, cursor)* when detail is needed
 ```
+
+The `advance_plugin_run` operation is the normal Host-driven product path. It
+performs deterministic discovery and inspection, then pauses at an explicit
+semantic boundary. After the Agent supplies a checkpoint or decision, the Host
+continues paging, coverage validation, decision assembly, and eligible closeout
+without requiring one tool call for each bookkeeping step. It also accepts an
+explicit `partial` or `failed` closeout when a blocked Run cannot continue. The
+normal product MCP catalog exposes only `start_plugin_run`,
+`advance_plugin_run`, `recover_work_item`, and `get_plugin_progress` for this
+lifecycle. The lower-level
+`discover_work_items`, `inspect_work_items`, `checkpoint_review`,
+`submit_decisions`, and `finish_plugin_run` operations remain available for
+compatibility and diagnostics through the standalone interactive transport;
+they are intentionally absent from the normal product catalog.
+
+Terminal delivery is summary-first for every plugin. The platform recursively
+replaces non-empty arrays and oversized text in the Agent response with stable
+section references. `get_plugin_result` returns only the requested next page
+and an opaque cursor; it never repeats earlier pages. The original unabridged
+terminal JSON is written to `result-summary.json`, while the ledger continues
+to retain canonical Evidence and decisions. Plugins do not implement cursors,
+chat-sized truncation, or result pagination themselves.
+
+Terminal publication stages `result-summary.pending.json` before the terminal
+ledger transition and atomically promotes it to `result-summary.json` after
+the ledger succeeds. The Host then publishes its latest-terminal pointer and
+only afterward removes active resume metadata. These files are Host-owned
+recovery state; plugins must not create, edit, or delete them.
 
 The public payload contains only plugin/check identity, business scope, WorkItem
 references, InvestigationPackets, and semantic DecisionProposals.  The platform
@@ -76,6 +110,22 @@ receipts.  A frontend plugin may continue to expose the historical
 `start_audit`, `discover_scope`, and `investigate_object` names as compatibility
 aliases, but new plugins must not copy browser-specific vocabulary into their
 contract.
+
+`inspect_work_items` is summary-first at the Agent-facing transport. A plugin
+can declare large arrays through `InvestigationPacket.metadata.evidenceCollections`;
+the platform then exposes stable group summaries and bounded collection pages.
+Plugins must supply stable unique item IDs and may declare only mechanical
+grouping fields. They must not implement their own transport cursor or treat a
+mechanical group as a semantic decision.
+
+An interactive plugin may implement
+`assemble_review_checkpoints(checkpoints, finalization, packet, check, context)`
+to support incremental semantic review. The platform treats each checkpoint
+payload as opaque plugin data, but validates its WorkItem, Check, declared
+collection, stable item IDs, replay identity, and non-overlapping coverage.
+Before assembly it requires the referenced checkpoints to cover the collection
+exactly once. The plugin hook returns ordinary Decision `details`; existing
+decision and committer gates remain authoritative.
 
 The transport-independent reference implementation is
 `InteractivePluginController`.  MCP and CLI adapters should delegate to it

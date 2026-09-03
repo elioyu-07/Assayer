@@ -826,7 +826,27 @@ class HostCore:
             if review_reasons:
                 summary["reason"] = "Needs review because " + "; ".join(review_reasons)
             summaries.append(summary)
-        reason = (completion_reason or "Host completed the audit from the current durable ledger; unfinished work remains partial.").strip()
+        coverage_complete = (
+            not unprocessed_entrypoints
+            and len(processed_objects) == len(objects)
+            and all(item["coverageComplete"] for item in summaries)
+        )
+        if scan.get("status") == "failed":
+            failed_operations = [
+                item for item in self._store.list_operations(scan_id)
+                if item.get("status") in {"rejected", "failed_known", "result_unknown"}
+            ]
+            latest = failed_operations[-1] if failed_operations else {}
+            code = latest.get("error_code") or "SCAN_FAILED"
+            message = self._evidence_sanitizer.sanitize(
+                latest.get("error_message") or "The Run ended before formal conclusions could be published."
+            )
+            default_reason = f"Audit failed: {code} — {message}"
+        elif coverage_complete:
+            default_reason = "Host assembled complete coverage from the durable ledger; no unfinished scope remains."
+        else:
+            default_reason = "Host assembled partial coverage from the durable ledger; unfinished scope remains explicit."
+        reason = (completion_reason or default_reason).strip()
         return {
             "visitedPageStateRefs": [item["pageStateId"] for item in pages],
             "processedObjectRefs": processed_objects,

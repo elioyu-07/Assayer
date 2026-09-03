@@ -22,6 +22,7 @@ from .contract import (
     PlatformLedger,
     PlatformRun,
     PlatformRunResult,
+    ReviewCheckpoint,
     PluginManifest,
     WorkFailure,
     WorkItem,
@@ -39,6 +40,7 @@ from .interactive import (
 )
 from .registry import load_plugin_manifest, validate_plugin_manifest
 from .plugin_registry import PluginRegistration, PluginRegistry
+from .result_delivery import StagedResultDocument
 from .runner import PlatformRunner
 
 __all__ = [
@@ -73,6 +75,7 @@ __all__ = [
     "PlatformLedgerStore",
     "PlatformRun",
     "PlatformRunResult",
+    "ReviewCheckpoint",
     "PluginManifest",
     "JsonPlatformLedgerStore",
     "JsonSummaryPublisher",
@@ -85,5 +88,6 @@ __all__ = [
     "validate_plugin_manifest",
     "PluginRegistration",
     "PluginRegistry",
+    "StagedResultDocument",
     "PlatformRunner",
 ]

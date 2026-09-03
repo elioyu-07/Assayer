@@ -104,10 +104,11 @@ class ObservabilitySchemaTest(unittest.TestCase):
                 "totalDurationMs": 10000, "hostOperationDurationMs": 400,
                 "browserOperationDurationMs": 200, "transportDurationMs": 450,
                 "modelDurationMs": None, "outsideHostDurationMs": 9600,
+                "agentTurnGapDurationMs": 2500, "longestAgentTurnGapMs": 1800,
                 "modelTelemetryStatus": "not_exposed",
             },
             "activity": {
-                "toolCalls": 2, "agentTurnsObserved": 2,
+                "toolCalls": 2, "agentTurnsObserved": 2, "agentTurnGapCount": 1,
                 "publicToolCallsObserved": 2,
                 "publicToolCallsByName": {"start_audit": 1, "complete_audit": 1},
                 "toolCallsByName": {"start_audit": 1, "complete_audit": 1},
@@ -125,6 +126,10 @@ class ObservabilitySchemaTest(unittest.TestCase):
             "largestOperations": [{
                 "operationId": "operation-001", "tool": "complete_audit",
                 "operationKind": "lifecycle", "status": "succeeded", "durationMs": 300,
+            }],
+            "largestAgentTurnGaps": [{
+                "fromAgentTurn": "turn-001", "toAgentTurn": "turn-002",
+                "fromTool": "start_audit", "toTool": "complete_audit", "durationMs": 2500,
             }],
             "limitations": ["Model telemetry is not exposed."],
         }

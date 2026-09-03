@@ -31,6 +31,7 @@ from assayer_platform import (
     DecisionProposal, DimensionObservation, EvidenceRecord, PlatformRunner,
     Finding, InteractivePlatformSession, InvestigationPacket, PlatformContext,
     PlatformContractError, PluginRegistry, WorkItem, InteractivePluginController,
+    StagedResultDocument,
 )
 from assayer_platform.builtin_plugins import installed_plugin_registry
 
@@ -41,6 +42,14 @@ _PUBLIC_COMPOSITE_TOOLS = ("discover_scope", "investigate_object")
 _PUBLIC_TOOLS = tuple(
     name for name in _TOOLS if name not in {"get_rule_contract", "record_findings", "commit_decision"}
 ) + _PUBLIC_COMPOSITE_TOOLS
+# The user-facing plugin lifecycle is deliberately narrow.  The standalone
+# InteractivePlatformMcpToolTransport retains every primitive for conformance,
+# compatibility, and diagnostics, while normal Codex sessions get the
+# Host-driven path that cannot strand a Run between bookkeeping operations.
+_PRODUCT_INTERACTIVE_TOOLS = (
+    "start_plugin_run", "advance_plugin_run", "get_plugin_result",
+    "recover_work_item", "get_plugin_progress",
+)
 _LOG = logging.getLogger(__name__)
 
 
@@ -443,6 +452,80 @@ class InteractivePlatformMcpToolTransport:
                 "scope": {},
             },
         },
+        "advance_plugin_run": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
+                "reviewCheckpoint": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["workItemId", "collectionId", "itemIds", "payload"],
+                    "properties": {
+                        "workItemId": {"type": "string", "minLength": 1},
+                        "collectionId": {"type": "string", "minLength": 1},
+                        "itemIds": {
+                            "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "payload": {"type": "object"},
+                        "supersedesCheckpointId": {"type": "string", "minLength": 1},
+                    },
+                },
+                "decision": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["workItemId", "result", "findings", "reason"],
+                    "properties": {
+                        "workItemId": {"type": "string", "minLength": 1},
+                        "result": {"enum": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"]},
+                        "reason": {"type": "string", "minLength": 1},
+                        "findings": {
+                            "type": "array", "minItems": 1,
+                            "items": {
+                                "type": "object", "additionalProperties": False,
+                                "required": ["dimension", "status", "reason"],
+                                "properties": {
+                                    "dimension": {"type": "string", "minLength": 1},
+                                    "status": {"enum": ["satisfied", "violated", "unresolved", "blocked", "conflicted"]},
+                                    "reason": {"type": "string", "minLength": 1},
+                                },
+                            },
+                        },
+                        "details": {"type": "object"},
+                        "reviewCheckpointIds": {
+                            "type": "array", "minItems": 1, "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "finalization": {"type": "object"},
+                    },
+                },
+                "closeout": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["status"],
+                    "properties": {
+                        "status": {"enum": ["partial", "failed"]},
+                        "failures": {
+                            "type": "array", "items": {
+                                "type": "object", "additionalProperties": False,
+                                "required": ["code", "message"],
+                                "properties": {
+                                    "workItemId": {"type": "string", "minLength": 1},
+                                    "code": {"type": "string", "minLength": 1},
+                                    "message": {"type": "string", "minLength": 1},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        "get_plugin_result": {
+            "type": "object", "additionalProperties": False,
+            "required": ["sectionId"],
+            "properties": {
+                "sectionId": {"type": "string", "minLength": 1},
+                "cursor": {"type": "string", "minLength": 1},
+                "pageSize": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+        },
         "discover_work_items": {
             "type": "object", "additionalProperties": False,
             "properties": {},
@@ -451,6 +534,42 @@ class InteractivePlatformMcpToolTransport:
             "type": "object", "additionalProperties": False,
             "properties": {
                 "workItemIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                "cursor": {"type": "string", "minLength": 1},
+                "pageSize": {"type": "integer", "minimum": 1},
+                "includeEvidence": {"type": "boolean"},
+            },
+        },
+        "expand_investigation": {
+            "type": "object", "additionalProperties": False,
+            "required": ["workItemId"],
+            "properties": {
+                "workItemId": {"type": "string", "minLength": 1},
+                "evidenceIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            },
+        },
+        "expand_evidence_collection": {
+            "type": "object", "additionalProperties": False,
+            "required": ["workItemId", "collectionId"],
+            "properties": {
+                "workItemId": {"type": "string", "minLength": 1},
+                "collectionId": {"type": "string", "minLength": 1},
+                "cursor": {"type": "string", "minLength": 1},
+                "pageSize": {"type": "integer", "minimum": 1},
+                "groupKey": {"type": "string", "minLength": 1},
+            },
+        },
+        "checkpoint_review": {
+            "type": "object", "additionalProperties": False,
+            "required": ["workItemId", "collectionId", "itemIds", "payload"],
+            "properties": {
+                "workItemId": {"type": "string", "minLength": 1},
+                "collectionId": {"type": "string", "minLength": 1},
+                "itemIds": {
+                    "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
+                    "items": {"type": "string", "minLength": 1},
+                },
+                "payload": {"type": "object"},
+                "supersedesCheckpointId": {"type": "string", "minLength": 1},
             },
         },
         "submit_decisions": {
@@ -478,6 +597,11 @@ class InteractivePlatformMcpToolTransport:
                                 },
                             },
                             "details": {"type": "object"},
+                            "reviewCheckpointIds": {
+                                "type": "array", "minItems": 1, "uniqueItems": True,
+                                "items": {"type": "string", "minLength": 1},
+                            },
+                            "finalization": {"type": "object"},
                         },
                     },
                 },
@@ -522,13 +646,19 @@ class InteractivePlatformMcpToolTransport:
             runtime_resolver=runtime_resolver,
             capabilities_resolver=capabilities_resolver,
         )
-        self._active_run_id: str | None = None
+        self._active_run_id: str | None = self._controller.active_run_id
+        self._terminal_run_id: str | None = self._controller.terminal_run_id
 
     def list_tools(self) -> list[dict]:
         descriptions = {
             "start_plugin_run": "Start a domain-neutral interactive plugin Run using only plugin, Check, and business scope.",
+            "advance_plugin_run": "Drive Host-owned discovery, inspection, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal.",
+            "get_plugin_result": "Read one bounded page from a terminal result; the complete result remains durably stored.",
             "discover_work_items": "Discover logical WorkItems for an active plugin Run.",
-            "inspect_work_items": "Inspect selected WorkItems and return decision-ready InvestigationPackets.",
+            "inspect_work_items": "Inspect selected WorkItems and return summary-first InvestigationPackets; set includeEvidence=true only when full payloads are required.",
+            "expand_investigation": "Expand selected immutable Evidence for an inspected WorkItem when the indexed payload is required in full.",
+            "expand_evidence_collection": "Page through a plugin-declared Evidence collection, with stable item IDs and optional mechanical groups.",
+            "checkpoint_review": "Durably checkpoint semantic-review progress for stable items in a declared Evidence collection.",
             "submit_decisions": "Submit semantic DecisionProposals; the platform validates and commits them.",
             "recover_work_item": "Record plugin/runtime recovery for one WorkItem.",
             "get_plugin_progress": "Return progress for an active plugin Run.",
@@ -547,6 +677,8 @@ class InteractivePlatformMcpToolTransport:
             raise HostError("INVALID_REQUEST", f"{name} arguments do not satisfy the platform schema")
         try:
             if name == "start_plugin_run":
+                if self._controller.resume_error is not None:
+                    raise self._controller.resume_error
                 if self._active_run_id is not None:
                     raise PlatformContractError("RUN_CONFLICT", "An interactive plugin Run is already active")
                 result = self._controller.start(
@@ -554,10 +686,49 @@ class InteractivePlatformMcpToolTransport:
                     check_version=arguments.get("checkVersion"), scope=arguments["scope"],
                 )
                 self._active_run_id = result["runId"]
+                self._terminal_run_id = None
+            elif name == "get_plugin_result":
+                result = self._controller.get_result(
+                    self._terminal_run(), arguments["sectionId"],
+                    cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
+                )
+            elif name == "advance_plugin_run":
+                if self._active_run_id is None and self._terminal_run_id is not None:
+                    if any(key in arguments for key in ("reviewCheckpoint", "decision", "closeout")):
+                        raise PlatformContractError(
+                            "RUN_TERMINAL", "The latest plugin Run is terminal and cannot accept more semantic input",
+                        )
+                    result = self._controller.terminal_status(self._terminal_run_id)
+                else:
+                    result = self._controller.advance(
+                        self._active_run(), review_checkpoint=arguments.get("reviewCheckpoint"),
+                        decision=arguments.get("decision"), closeout=arguments.get("closeout"),
+                        page_size=arguments.get("pageSize"),
+                    )
             elif name == "discover_work_items":
                 result = self._controller.discover(self._active_run())
             elif name == "inspect_work_items":
-                result = self._controller.inspect(self._active_run(), arguments.get("workItemIds"))
+                result = self._controller.inspect(
+                    self._active_run(), arguments.get("workItemIds"),
+                    cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
+                    include_evidence=arguments.get("includeEvidence", False),
+                )
+            elif name == "expand_investigation":
+                result = self._controller.expand_investigation(
+                    self._active_run(), arguments["workItemId"], arguments.get("evidenceIds"),
+                )
+            elif name == "expand_evidence_collection":
+                result = self._controller.expand_evidence_collection(
+                    self._active_run(), arguments["workItemId"], arguments["collectionId"],
+                    cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
+                    group_key=arguments.get("groupKey"),
+                )
+            elif name == "checkpoint_review":
+                result = self._controller.checkpoint_review(
+                    self._active_run(), arguments["workItemId"], arguments["collectionId"],
+                    arguments["itemIds"], arguments["payload"],
+                    arguments.get("supersedesCheckpointId"),
+                )
             elif name == "submit_decisions":
                 result = self._controller.submit_decisions(self._active_run(), arguments["decisions"])
             elif name == "recover_work_item":
@@ -566,6 +737,10 @@ class InteractivePlatformMcpToolTransport:
                 result = self._controller.progress(self._active_run())
             else:
                 result = self._controller.finish(self._active_run(), arguments["status"], arguments.get("failures", ()))
+                self._terminal_run_id = result["runId"]
+                self._active_run_id = None
+            if name == "advance_plugin_run" and result.get("status") in {"completed", "partial", "failed"}:
+                self._terminal_run_id = result["runId"]
                 self._active_run_id = None
         except PlatformContractError as exc:
             raise HostError(exc.code, exc.message) from exc
@@ -578,8 +753,19 @@ class InteractivePlatformMcpToolTransport:
 
     def _active_run(self) -> str:
         if self._active_run_id is None:
+            if self._controller.resume_error is not None:
+                raise self._controller.resume_error
+            if self._controller.terminal_error is not None:
+                raise self._controller.terminal_error
             raise PlatformContractError("RUN_NOT_STARTED", "No interactive plugin Run is active")
         return self._active_run_id
+
+    def _terminal_run(self) -> str:
+        if self._terminal_run_id is None:
+            if self._controller.terminal_error is not None:
+                raise self._controller.terminal_error
+            raise PlatformContractError("RESULT_NOT_AVAILABLE", "No terminal plugin result is available")
+        return self._terminal_run_id
 
 
 class FrontendProductMcpToolTransport(McpToolTransport):
@@ -670,6 +856,8 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         self._public_active_turn_id: str | None = None
         self._public_active: dict[str, object] | None = None
         self._public_pending_operation: str | None = None
+        self._frontend_result_document: StagedResultDocument | None = None
+        self._frontend_result_status: str | None = None
         self._reset_public_progress()
 
     def _reset_public_progress(self) -> None:
@@ -687,6 +875,13 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         self._public_progress_seen = {
             "pages": set(), "candidates": set(), "objects": set(), "assessments": set(),
         }
+
+    def _retire_public_run_state(self) -> None:
+        """Release per-Run semantic caches before the next Scan starts."""
+        self._platform_run = None
+        self._public_investigations.clear()
+        self._public_candidate_objects.clear()
+        self._public_pending_operation = None
 
     def _begin_platform_tracking(self, scope: dict, response: dict) -> None:
         result = response.get("result") if isinstance(response.get("result"), dict) else {}
@@ -953,7 +1148,12 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         return schemas
 
     def list_tools(self) -> list[dict]:
-        generic = self._platform_tools.list_tools() + self._interactive_tools.list_tools()
+        interactive = {
+            item["name"]: item for item in self._interactive_tools.list_tools()
+        }
+        generic = self._platform_tools.list_tools() + [
+            interactive[name] for name in _PRODUCT_INTERACTIVE_TOOLS
+        ]
         tools = []
         for name in _PUBLIC_TOOLS:
             schema = deepcopy(self._public_schemas[name])
@@ -977,8 +1177,19 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         """Correlate all nested Host work to one product-level Agent call."""
         if name in {self._platform_tools.TOOL, self._platform_tools.LIST_TOOL}:
             return self._platform_tools.call_tool(name, arguments)
-        if name in {item["name"] for item in self._interactive_tools.list_tools()}:
+        if name == "get_plugin_result" and self._frontend_result_document is not None:
+            return self._frontend_result_page(arguments)
+        if name in _PRODUCT_INTERACTIVE_TOOLS:
+            if name == "start_plugin_run":
+                self._frontend_result_document = None
+                self._frontend_result_status = None
             return self._interactive_tools.call_tool(name, arguments)
+        if name in {item["name"] for item in self._interactive_tools.list_tools()}:
+            raise HostError(
+                "DIAGNOSTIC_TOOL_ONLY",
+                f"Tool {name} is available only through the diagnostic interactive transport; "
+                "normal product Runs must use advance_plugin_run",
+            )
         outer = self._public_call_depth == 0
         if outer:
             self._public_turn += 1
@@ -1050,6 +1261,9 @@ class FrontendProductMcpToolTransport(McpToolTransport):
             url = input_data.get("url")
             if not isinstance(url, str) or not url:
                 raise HostError("INVALID_REQUEST", "start_audit requires an HTTP(S) URL")
+            self._retire_public_run_state()
+            self._frontend_result_document = None
+            self._frontend_result_status = None
             self._reset_public_progress()
             input_data = {
                 "url": url,
@@ -1143,15 +1357,53 @@ class FrontendProductMcpToolTransport(McpToolTransport):
             for key in ("scanId", "runId", "runRevision", "operationId"):
                 public_response["result"].pop(key, None)
         if name == "complete_audit":
-            public_response["summary"] = self._result_summary(completion_input, public_response)
+            complete_summary = self._result_summary(completion_input, public_response)
+            self._frontend_result_document = StagedResultDocument({"summary": complete_summary})
+            self._frontend_result_status = terminal_status
+            public_response["summary"] = self._frontend_result_document.overview["summary"]
+            public_response["resultDelivery"] = self._frontend_result_document.descriptor()
         public_response["progress"] = self._progress_block(name, public_response)
         public_content = [{"type": "text", "text": json.dumps(public_response, ensure_ascii=False, separators=(",", ":"))}]
         for block in result.get("content", [])[1:]:
             public_content.append(block)
+        if name == "complete_audit" and terminal_status in {"completed", "partial", "failed"}:
+            self._retire_public_run_state()
         return {
             "structuredContent": public_response,
             "content": public_content,
             "isError": result.get("isError", False),
+        }
+
+    def _frontend_result_page(self, arguments: object) -> dict:
+        """Page the latest compatibility-frontend result through the generic contract."""
+        schema = InteractivePlatformMcpToolTransport._SCHEMAS["get_plugin_result"]
+        if not isinstance(arguments, dict):
+            raise HostError("INVALID_REQUEST", "get_plugin_result arguments must be an object")
+        error = next(Draft202012Validator(schema).iter_errors(arguments), None)
+        if error is not None:
+            raise HostError("INVALID_REQUEST", "get_plugin_result arguments do not satisfy the platform schema")
+        document = self._frontend_result_document
+        if document is None:
+            raise HostError("RESULT_NOT_AVAILABLE", "No terminal plugin result is available")
+        try:
+            page = document.page(
+                arguments["sectionId"], cursor=arguments.get("cursor"),
+                page_size=arguments.get("pageSize"),
+            )
+        except PlatformContractError as exc:
+            raise HostError(exc.code, exc.message) from exc
+        payload = {
+            **page,
+            "deltaOnly": True,
+            "sourceDigest": document.digest,
+            "delivery": document.descriptor(),
+            "terminalStatus": self._frontend_result_status,
+        }
+        public = {"status": "ok", "result": payload}
+        return {
+            "structuredContent": public,
+            "content": [{"type": "text", "text": json.dumps(public, ensure_ascii=False, separators=(",", ":"))}],
+            "isError": False,
         }
 
     def _investigate_object(self, input_data: dict, reason: str) -> dict:
@@ -1420,7 +1672,16 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         return wrap(public)
 
     @staticmethod
-    def _result_summary(completion_input: dict | None, response: dict) -> dict:
+    def _public_summary_text(value: object) -> str:
+        text = " ".join(str(value or "").split())
+        return re.sub(
+            r"(?i)(password|passwd|token|secret|cookie|authorization)\s*[=:]\s*[^\s,;]+",
+            r"\1=[REDACTED]",
+            text,
+        )
+
+    @classmethod
+    def _result_summary(cls, completion_input: dict | None, response: dict) -> dict:
         """Summarize terminal coverage and outcomes without exposing IDs."""
         result = response.get("result") if isinstance(response.get("result"), dict) else {}
         status = result.get("scanStatus")
@@ -1428,10 +1689,14 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         if status not in {"completed", "partial", "failed"}:
             status = "failed" if response.get("status") == "failed" else "partial"
         if not isinstance(completion_input, dict):
+            reason = cls._public_summary_text(
+                error.get("message", "The audit did not produce a terminal coverage summary.")
+            )
             return {
                 "status": status,
                 "conclusionsValid": bool(result.get("conclusionsValid", False)),
-                "message": error.get("message", "The audit did not produce a terminal coverage summary."),
+                "message": "The audit cannot support formal conclusions.",
+                "reason": reason,
                 "coverage": {
                     "pagesVisited": 0,
                     "objectsProcessed": 0,
@@ -1444,6 +1709,11 @@ class FrontendProductMcpToolTransport(McpToolTransport):
                     "needsReview": 0,
                     "needsReviewDetails": [],
                     "rules": [],
+                },
+                "uncoveredScope": {
+                    "entrypointsRemaining": 0,
+                    "incompleteRules": [],
+                    "needsReview": [],
                 },
                 "nextStep": "Review diagnostics and retry with the same URL.",
             }
@@ -1467,11 +1737,36 @@ class FrontendProductMcpToolTransport(McpToolTransport):
             if counts.get("needs_review", 0) and isinstance(item.get("reason"), str):
                 needs_review_details.append({
                     "rule": f"{rule.get('ruleId', 'unknown')}@{rule.get('version', 'unknown')}",
-                    "detail": item["reason"],
+                    "detail": cls._public_summary_text(item["reason"]),
                 })
         unprocessed = completion_input.get("unprocessedEntrypointRefs")
         skipped = completion_input.get("skippedEntrypoints")
         processed = completion_input.get("processedEntrypointRefs")
+        incomplete_rules = [
+            item["rule"] for item in rule_summaries if not item["coverageComplete"]
+        ]
+        if status == "failed":
+            reason = cls._public_summary_text(
+                error.get("message") or completion_input.get("completionReason") or "The Run failed before formal conclusions could be published."
+            )
+            next_step = "Review diagnostics, fix the reported cause, and start a new audit with the same URL."
+        elif status == "partial":
+            reason = cls._public_summary_text(
+                completion_input.get("completionReason") or "The declared scope remains incomplete."
+            )
+            if needs_review_details:
+                next_step = "Resolve the listed needs-review blockers and uncovered scope, then start a new audit if complete coverage is required."
+            else:
+                next_step = "Review the uncovered scope, then start a new audit if complete coverage is required."
+        else:
+            reason = cls._public_summary_text(
+                completion_input.get("completionReason") or "The declared scope reached its coverage requirements."
+            )
+            next_step = (
+                "Address the published issues, then start a new audit to verify the remediation."
+                if issue_count else
+                "No remediation is required for the rules and scope checked."
+            )
         return {
             "status": status,
             "conclusionsValid": bool(result.get("conclusionsValid", status != "failed")),
@@ -1480,6 +1775,7 @@ class FrontendProductMcpToolTransport(McpToolTransport):
                 "partial": "The audit produced valid results for part of the declared scope.",
                 "failed": "The audit cannot support formal conclusions.",
             }[status],
+            "reason": reason,
             "coverage": {
                 "pagesVisited": len(completion_input.get("visitedPageStateRefs", [])),
                 "objectsProcessed": len(completion_input.get("processedObjectRefs", [])),
@@ -1493,11 +1789,12 @@ class FrontendProductMcpToolTransport(McpToolTransport):
                 "needsReviewDetails": needs_review_details,
                 "rules": rule_summaries,
             },
-            "nextStep": {
-                "completed": "Review the audit summary and findings.",
-                "partial": "Review uncovered scope and retry if you need complete coverage.",
-                "failed": "Review diagnostics, fix the reported cause, and retry with the same URL.",
-            }[status],
+            "uncoveredScope": {
+                "entrypointsRemaining": len(unprocessed or []),
+                "incompleteRules": incomplete_rules,
+                "needsReview": needs_review_details,
+            },
+            "nextStep": next_step,
         }
 
     def _atomic_prepare_decision(self, input_data: dict, reason: str) -> dict:

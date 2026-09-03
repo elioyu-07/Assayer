@@ -356,7 +356,7 @@ class TransportTest(unittest.TestCase):
     def test_product_mcp_exposes_only_business_inputs(self):
         adapter = ProductMcpToolTransport(ProductRecordingCore())
         tools = adapter.list_tools()
-        self.assertEqual(len(tools), 25)
+        self.assertEqual(len(tools), 23)
         forbidden = {
             "protocolVersion", "requestId", "agentTurnId", "idempotencyKey",
             "scanId", "runId", "expectedRunRevision", "ruleRegistryVersion",
@@ -378,7 +378,19 @@ class TransportTest(unittest.TestCase):
         self.assertIn("investigate_object", {tool["name"] for tool in tools})
         self.assertIn("discover_scope", {tool["name"] for tool in tools})
         self.assertIn("start_plugin_run", {tool["name"] for tool in tools})
-        self.assertIn("submit_decisions", {tool["name"] for tool in tools})
+        self.assertIn("advance_plugin_run", {tool["name"] for tool in tools})
+        self.assertIn("get_plugin_result", {tool["name"] for tool in tools})
+        self.assertIn("recover_work_item", {tool["name"] for tool in tools})
+        self.assertIn("get_plugin_progress", {tool["name"] for tool in tools})
+        for diagnostic_name in {
+            "discover_work_items", "inspect_work_items", "expand_investigation",
+            "expand_evidence_collection", "checkpoint_review", "submit_decisions",
+            "finish_plugin_run",
+        }:
+            self.assertNotIn(diagnostic_name, {tool["name"] for tool in tools})
+            with self.assertRaises(HostError) as hidden:
+                adapter.call_tool(diagnostic_name, {})
+            self.assertEqual(hidden.exception.code, "DIAGNOSTIC_TOOL_ONLY")
         discover = next(tool for tool in tools if tool["name"] == "discover_scope")
         self.assertEqual(set(discover["inputSchema"]["properties"]), {"decisionReason"})
         investigate = next(tool for tool in tools if tool["name"] == "investigate_object")
@@ -489,8 +501,8 @@ class TransportTest(unittest.TestCase):
             "completionReason": "Finish the current durable scope",
         }
         expectations = {
-            "completed": (True, "Review the audit summary"),
-            "partial": (True, "Review uncovered scope"),
+            "completed": (True, "Address the published issues"),
+            "partial": (True, "Resolve the listed needs-review blockers"),
             "failed": (False, "Review diagnostics"),
         }
         for status, (valid, next_step) in expectations.items():
@@ -515,12 +527,51 @@ class TransportTest(unittest.TestCase):
                     })
                     self.assertEqual(summary["outcomes"]["issues"], 1)
                     self.assertEqual(summary["outcomes"]["needsReview"], 1)
-                    self.assertIn("list ownership is unresolved", summary["outcomes"]["needsReviewDetails"][0]["detail"])
+                    review_page = adapter.call_tool("get_plugin_result", {
+                        "sectionId": summary["outcomes"]["needsReviewDetails"]["sectionId"],
+                    })["structuredContent"]["result"]
+                    self.assertIn("list ownership is unresolved", review_page["items"][0]["detail"])
+                    self.assertTrue(review_page["deltaOnly"])
+                    self.assertEqual(summary["reason"], "Finish the current durable scope")
+                    self.assertEqual(summary["uncoveredScope"]["entrypointsRemaining"], 1)
+                    rule_page = adapter.call_tool("get_plugin_result", {
+                        "sectionId": summary["uncoveredScope"]["incompleteRules"]["sectionId"],
+                    })["structuredContent"]["result"]
+                    self.assertEqual(rule_page["items"], ["FUA-10@1.1.0"])
                     self.assertIn(next_step, summary["nextStep"])
                     self.assertEqual(response["progress"]["status"], status)
                     self.assertTrue(response["progress"]["terminal"])
                 finally:
                     adapter.close()
+
+    def test_product_terminal_summary_redacts_sensitive_assignments(self):
+        completion = {
+            "visitedPageStateRefs": [], "processedObjectRefs": [],
+            "processedEntrypointRefs": [], "skippedEntrypoints": [],
+            "unprocessedEntrypointRefs": [],
+            "ruleSummaries": [{
+                "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
+                "assessmentCount": 1, "resultCounts": {"needs_review": 1},
+                "coverageComplete": False,
+                "reason": "Needs review after authorization=private-value",
+            }],
+            "completionReason": "Stopped after token=private-value",
+        }
+        adapter = ProductMcpToolTransport(ProductRecordingCore(
+            terminal_status="partial", completion_payload=completion,
+        ))
+        try:
+            adapter.call_tool("start_audit", {"url": "https://test.example.com"})
+            summary = adapter.call_tool("complete_audit", {})["structuredContent"]["summary"]
+            self.assertEqual(summary["reason"], "Stopped after token=[REDACTED]")
+            review_page = adapter.call_tool("get_plugin_result", {
+                "sectionId": summary["outcomes"]["needsReviewDetails"]["sectionId"],
+            })["structuredContent"]["result"]
+            self.assertIn("authorization=[REDACTED]", review_page["items"][0]["detail"])
+            self.assertNotIn("private-value", json.dumps(summary))
+            self.assertNotIn("private-value", json.dumps(review_page))
+        finally:
+            adapter.close()
 
     def test_product_mcp_retry_starts_independent_scan_and_resets_public_progress(self):
         core = ProductRecordingCore()
@@ -539,6 +590,10 @@ class TransportTest(unittest.TestCase):
             })["structuredContent"]
             self.assertEqual(decided["progress"]["counts"]["decisionsCommitted"], 1)
             adapter.call_tool("complete_audit", {})
+            self.assertIsNone(adapter._platform_run)
+            self.assertEqual(adapter._public_investigations, {})
+            self.assertEqual(adapter._public_candidate_objects, {})
+            self.assertIsNone(adapter._public_pending_operation)
             second = adapter.call_tool("start_audit", {"url": "https://test.example.com"})["structuredContent"]
             bootstrap_requests = [request for request in core.requests if request["tool"] == "start_audit"]
             self.assertEqual(len(bootstrap_requests), 2)

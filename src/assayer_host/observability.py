@@ -162,6 +162,7 @@ def render_performance_bill(ledger: dict, events: list[dict], output_dir: str | 
     agent_turns = {
         item["agentTurnId"] for item in operations if isinstance(item.get("agentTurnId"), str)
     }
+    agent_turn_gaps = _agent_turn_gaps(operations)
     public_tool_calls_by_name: dict[str, int] = {}
     for turn_id in agent_turns:
         match = re.search(r":([a-z][a-z0-9_]{1,63})$", turn_id)
@@ -175,6 +176,7 @@ def render_performance_bill(ledger: dict, events: list[dict], output_dir: str | 
     limitations = [
         "Timing views overlap and must not be added together.",
         "Transport payload measurements begin after Scan binding and exclude the bootstrap request and response.",
+        "Between-Agent-turn time can include model reasoning, Agent orchestration, transport scheduling, or user delay; it is not pure model latency.",
     ]
     if not model_finishes:
         limitations.append(
@@ -210,11 +212,14 @@ def render_performance_bill(ledger: dict, events: list[dict], output_dir: str | 
             "transportDurationMs": transport_ms,
             "modelDurationMs": model_ms,
             "outsideHostDurationMs": max(0, total_ms - host_ms),
+            "agentTurnGapDurationMs": sum(item["durationMs"] for item in agent_turn_gaps),
+            "longestAgentTurnGapMs": max((item["durationMs"] for item in agent_turn_gaps), default=0),
             "modelTelemetryStatus": "captured" if model_finishes else "not_exposed",
         },
         "activity": {
             "toolCalls": len(operations),
             "agentTurnsObserved": len(agent_turns),
+            "agentTurnGapCount": len(agent_turn_gaps),
             "publicToolCallsObserved": sum(public_tool_calls_by_name.values()),
             "publicToolCallsByName": dict(sorted(public_tool_calls_by_name.items())),
             "toolCallsByName": dict(sorted(tool_calls_by_name.items())),
@@ -239,6 +244,10 @@ def render_performance_bill(ledger: dict, events: list[dict], output_dir: str | 
         },
         "operationGroups": sorted(operation_groups.values(), key=lambda item: item["name"]),
         "largestOperations": largest,
+        "largestAgentTurnGaps": sorted(
+            agent_turn_gaps,
+            key=lambda item: (-item["durationMs"], item["fromAgentTurn"], item["toAgentTurn"]),
+        )[:10],
         "limitations": limitations,
     }
     json_bytes = (json.dumps(bill, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
@@ -250,6 +259,50 @@ def _interval_ms(started_at: str, ended_at: str) -> int:
     def parse(value: str) -> datetime:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     return max(0, int((parse(ended_at) - parse(started_at)).total_seconds() * 1000))
+
+
+def _agent_turn_gaps(operations: list[dict]) -> list[dict]:
+    """Measure idle wall-clock gaps between distinct public Agent turns."""
+    spans: dict[str, dict] = {}
+    for item in operations:
+        turn_id = item.get("agentTurnId")
+        started_at = item.get("acceptedAt")
+        ended_at = item.get("endedAt")
+        if not all(isinstance(value, str) and value for value in (turn_id, started_at, ended_at)):
+            continue
+        span = spans.setdefault(turn_id, {
+            "agentTurn": turn_id,
+            "startedAt": started_at,
+            "endedAt": ended_at,
+            "tool": _public_tool_from_turn(turn_id, item.get("tool")),
+        })
+        if _timestamp_key(started_at) < _timestamp_key(span["startedAt"]):
+            span["startedAt"] = started_at
+        if _timestamp_key(ended_at) > _timestamp_key(span["endedAt"]):
+            span["endedAt"] = ended_at
+    ordered = sorted(spans.values(), key=lambda item: (_timestamp_key(item["startedAt"]), item["agentTurn"]))
+    gaps = []
+    for previous, current in zip(ordered, ordered[1:]):
+        duration = _interval_ms(previous["endedAt"], current["startedAt"])
+        if duration <= 0:
+            continue
+        gaps.append({
+            "fromAgentTurn": previous["agentTurn"],
+            "toAgentTurn": current["agentTurn"],
+            "fromTool": previous["tool"],
+            "toTool": current["tool"],
+            "durationMs": duration,
+        })
+    return gaps
+
+
+def _public_tool_from_turn(turn_id: str, fallback: object) -> str:
+    match = re.search(r":([a-z][a-z0-9_]{1,63})$", turn_id)
+    return match.group(1) if match else str(fallback or "unknown")
+
+
+def _timestamp_key(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _unique_screenshot_bytes(screenshots: list[dict], root: Path) -> tuple[int, int]:
@@ -281,12 +334,15 @@ def _render_performance_markdown(bill: dict) -> str:
         f"- Total wall-clock time: {measurement['totalDurationMs']:,} ms",
         f"- Host operation time: {measurement['hostOperationDurationMs']:,} ms",
         f"- Outside-Host interval: {measurement['outsideHostDurationMs']:,} ms",
+        f"- Between-Agent-turn time: {measurement['agentTurnGapDurationMs']:,} ms",
+        f"- Longest between-Agent-turn interval: {measurement['longestAgentTurnGapMs']:,} ms",
         f"- Browser-operation view: {measurement['browserOperationDurationMs']:,} ms",
         f"- Transport view: {measurement['transportDurationMs']:,} ms",
         f"- Model latency: {model}", "", "## Activity", "",
         f"- Product tool calls observed: {activity['publicToolCallsObserved']}",
         f"- Host operations: {activity['toolCalls']}",
         f"- Agent turns observed: {activity['agentTurnsObserved']}",
+        f"- Between-Agent-turn intervals: {activity['agentTurnGapCount']}",
         f"- Pages visited: {activity['pagesVisited']}",
         f"- Objects / decisions: {activity['objectsDiscovered']} / {activity['decisionsCommitted']}",
         f"- Entrypoints, physical / logical / duplicate: {activity['physicalEntrypoints']} / {activity['logicalEntrypoints']} / {activity['duplicateEntrypoints']}",
@@ -300,6 +356,15 @@ def _render_performance_markdown(bill: dict) -> str:
         f"| `{item['tool']}` | `{item['operationKind']}` | `{item['status']}` | {item['durationMs']:,} ms |"
         for item in bill["largestOperations"]
     )
+    lines.extend(["", "## Largest Between-Agent-Turn Intervals", ""])
+    if bill["largestAgentTurnGaps"]:
+        lines.extend(["| From | To | Duration |", "| --- | --- | ---: |"])
+        lines.extend(
+            f"| `{item['fromTool']}` | `{item['toTool']}` | {item['durationMs']:,} ms |"
+            for item in bill["largestAgentTurnGaps"]
+        )
+    else:
+        lines.append("No positive interval between distinct Agent turns was observed.")
     lines.extend(["", "## Measurement Limits", ""])
     lines.extend(f"- {item}" for item in bill["limitations"])
     return "\n".join(lines) + "\n"

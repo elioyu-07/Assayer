@@ -290,6 +290,6 @@ The first vertical slice should prove that Agent safely investigates one page ob
 
 ## 14. Platformization Boundary
 
-The browser audit described above is the first vertical implementation, not the platform's universal domain model. The domain-neutral lifecycle, Evidence, Decision, capability, scheduling, performance, and conformance contract is defined in [Platform Contract](platform-contract.md). The current module ownership and extraction plan are recorded in [Platform Boundary Map](platform-boundary-map.md).
+The browser audit described above is the first vertical implementation, not the platform's universal domain model. The domain-neutral laws are defined in [Platform Constitution v1](platform-constitution-v1.md), with detailed plugin, provider, and result surfaces indexed by the [Platform Contract](platform-contract.md). The current module ownership and extraction plan are recorded in [Platform Boundary Map](platform-boundary-map.md).
 
 Platform code must use generic WorkItems, Checks, InvestigationPackets, and runtime adapters. Browser concepts such as PageState, Tab, DOM, and Chromium remain inside the frontend runtime/plugin. A plugin may declare stricter evidence, ordering, batching, caching, or recovery requirements; the Host must honor those constraints and fall back to a slower path when necessary.

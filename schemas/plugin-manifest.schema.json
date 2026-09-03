@@ -43,7 +43,8 @@
         "cacheReuse": { "enum": ["allowed", "forbidden"] },
         "checkpoint": { "enum": ["required", "optional"] },
         "maxBatchSize": { "type": "integer", "minimum": 1 },
-        "ordering": { "enum": ["independent", "declared", "strict"] }
+        "ordering": { "enum": ["independent", "declared", "strict"] },
+        "failureSplitting": { "enum": ["allowed", "forbidden"] }
       }
     }
   }

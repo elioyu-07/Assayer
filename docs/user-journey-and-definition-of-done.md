@@ -2,7 +2,7 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
+| Document version | 1.1.0 |
 | Date | 2026-09-01 |
 | Status | J00-J03 confirmed; J04 in progress |
 | Owner | Product Owner / Agent Runtime / Host Core |
@@ -19,7 +19,7 @@ The Alpha user is a frontend, test, or product engineer who can access a test or
 
 Alpha first locks the anonymous URL audit: the user provides an HTTP(S) URL that requires no login in Codex CLI (primary client; Desktop is the compatibility client). Assayer uses real Chromium to observe pages, inspect objects, perform controlled interactions, collect evidence, apply rules, and deliver results.
 
-Password login, SSO/MFA, source attribution proof, automatic screenshot sanitization, and resume-from-checkpoint are outside this iteration. Automatic screenshot sanitization is governed separately as a later security enhancement and does not block the current journey build; real trial runs must use controlled synthetic or sanitized test data and must not claim production screenshot safety.
+Password login, SSO/MFA, source attribution proof, and automatic screenshot sanitization are outside this iteration. Interruption-safe checkpoint recovery is now the separately gated J06b requirement. Automatic screenshot sanitization is governed separately as a later security enhancement and does not block the current journey build; real trial runs must use controlled synthetic or sanitized test data and must not claim production screenshot safety.
 
 ### 1.3 User-visible promises
 
@@ -40,7 +40,7 @@ Password login, SSO/MFA, source attribution proof, automatic screenshot sanitiza
 | J03 Start an audit | Say “audit this URL: <URL>” | Agent creates a Scan; Host starts real Chromium and binds the URL | User does not enter `scanId`, `runId`, request envelopes, or output paths |
 | J04 Runtime experience | Wait or ask for progress | Agent/Host explore pages, select objects, execute safe Cases, collect evidence, and report status continuously | Startup, observation, inspection, recovery, and convergence are distinguishable; long model reasoning is not mistaken for lease expiry; disconnects/process exits fail clearly |
 | J05 Result experience | Review results | Produce `completed`, `partial`, or `failed` terminal state with plain-language summary, scope, issues, and next step | All three terminal states are understandable; `needs_review` names the concrete gap rather than showing only the label |
-| J06 Recovery and reuse | Retry as instructed or provide another URL | Retain diagnostic evidence; retry creates a new Scan and reuses installed configuration | Failure is attributable to environment, browser, Host, Agent, rule, transport, or target site; the second run starts directly |
+| J06 Recovery and reuse | Stop and continue a Run, retry as instructed, or provide another URL | J06a creates an independent second Scan without state leakage; J06b resumes an interrupted Run from the last durable boundary | A second run starts directly; `Esc -> continue` neither duplicates nor loses accepted work, and stale requests cannot overwrite newer progress |
 | J07 Real acceptance | Repeat the primary journey in a clean directory outside the repository | Desktop and CLI use the same deliverable and Host core continuously | With fresh configuration and only a URL, at least one success and one failure-recovery scenario complete |
 | J08 Release and feedback | Upgrade, uninstall, or file an issue | Version is identifiable; upgrade is rollback/retry safe; uninstall leaves no broken configuration; diagnostic artifacts can be attached | User knows version and cleanup result; issue reports include reproducible run IDs and diagnostic references without secrets |
 
@@ -78,6 +78,7 @@ Alpha end-to-end user-journey completion may be claimed only when all conditions
 10. Artifacts include ledger, result summary, diagnostics, runtime events, and integrity status, with no credentials, cookies, Authorization, raw page bodies, or hidden reasoning;
 11. Full tests execute Chromium/MCP for real with zero skips; passing tests are a gate, not a substitute for items 1-10;
 12. Upgrade, uninstall, and feedback paths have reproducible records, and internal absolute paths do not leak to users or release configuration.
+13. Interruption recovery passes J06b: after an Agent interruption or Host restart, the Host reports the authoritative durable boundary and exact next action; replayed or stale operations cannot duplicate or overwrite accepted audit records.
 
 ## 5. Real Acceptance Matrix
 
@@ -91,6 +92,7 @@ Alpha end-to-end user-journey completion may be claimed only when all conditions
 | UAT-06 | Second use | Desktop, CLI | Without reinstalling or changing configuration, create an independent Scan for another URL |
 | UAT-07 | Continuity | Desktop, CLI | Three consecutive independent Scans per client with no silent skip, downgrade, hang, or stale-state reuse |
 | UAT-08 | Upgrade and uninstall | Installation environment | New sessions load the upgraded version; uninstall leaves no stale broken MCP configuration |
+| UAT-09 | Interruption and resume | CLI | Interrupt before and after a checkpoint acknowledgement, then continue; the Host resumes from the unique durable boundary with no duplicate decision or Evidence loss |
 
 B07c (automatic sensitive-region identification and pixel sanitization) is deferred to a later security phase and is not a J01-J08 completion gate. Current trials must use controlled synthetic or already sanitized data; any `sanitizationStatus=not_performed` screenshot is explicitly marked in results and must not be copied into a production report or described as screenshot-safe. Harness issue samples do not replace real user-journey acceptance.
 

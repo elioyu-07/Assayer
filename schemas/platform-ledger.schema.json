@@ -64,6 +64,29 @@
     "investigations": { "type": "array", "items": { "type": "object" } },
     "decisions": { "type": "array", "items": { "type": "object" } },
     "failures": { "type": "array", "items": { "type": "object" } },
-    "decision_authority": { "type": "string", "minLength": 1 }
+    "decision_authority": { "type": "string", "minLength": 1 },
+    "review_checkpoints": { "type": "array", "items": { "type": "object" } },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "phase", "canFinish", "requiredNextStep", "remaining"],
+      "properties": {
+        "state": { "enum": ["running", "awaiting_agent_decision", "ready_to_finish", "blocked", "completed", "partial", "failed"] },
+        "phase": { "enum": ["discovery", "inspection", "semantic_review", "recovery", "closeout", "finished"] },
+        "canFinish": { "type": "boolean" },
+        "requiredNextStep": { "type": ["string", "null"] },
+        "remaining": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["workItemsToInspect", "workItemsToDecide", "reviewItems", "failures"],
+          "properties": {
+            "workItemsToInspect": { "type": "integer", "minimum": 0 },
+            "workItemsToDecide": { "type": "integer", "minimum": 0 },
+            "reviewItems": { "type": "integer", "minimum": 0 },
+            "failures": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
   }
 }

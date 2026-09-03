@@ -258,6 +258,7 @@ class PlatformKernel:
         metrics = {
             "discovered": 0, "inspected": 0, "cacheHits": 0, "operations": 0,
             "inspectionBatches": 0, "decisionBatches": 0, "batchSplits": 0,
+            "adaptiveBatchReductions": 0,
             "commitAttempts": 0, "decisionsCommitted": 0, "durableCommits": 0,
             "commitReplays": 0,
         }
@@ -302,7 +303,7 @@ class PlatformKernel:
         profile = manifest.execution_profile
         chunk_size = profile.inspect_batch_size
         capability_digest = _digest(sorted(context.capabilities))
-        def inspect_chunk(chunk: Sequence[WorkItem]) -> None:
+        def inspect_chunk(chunk: Sequence[WorkItem]) -> int:
             pending: list[WorkItem] = []
             for item in chunk:
                 key = self._cache_key(manifest, check, item, capability_digest)
@@ -312,7 +313,7 @@ class PlatformKernel:
                 else:
                     pending.append(item)
             if not pending:
-                return
+                return 0
             operation_id = begin_operation("inspect", pending[0].work_item_id if len(pending) == 1 else None)
             try:
                 metrics["operations"] += 1
@@ -326,27 +327,56 @@ class PlatformKernel:
                     if profile.cache_reuse == "allowed" and key is not None:
                         self._cache[key] = packet
                     packets.append(packet)
+                return len(pending)
             except PlatformContractError as exc:
                 finish_operation(operation_id, "inspect", "failed", pending[0].work_item_id if len(pending) == 1 else None, exc.code)
-                if len(pending) > 1:
+                if len(pending) > 1 and profile.can_split_failed_inspection:
                     metrics["batchSplits"] += 1
                     midpoint = len(pending) // 2
-                    inspect_chunk(pending[:midpoint])
-                    inspect_chunk(pending[midpoint:])
+                    return max(
+                        inspect_chunk(pending[:midpoint]),
+                        inspect_chunk(pending[midpoint:]),
+                    )
                 else:
-                    failures.append(WorkFailure(pending[0].work_item_id, check_id, exc.code, exc.message))
+                    message = exc.message if len(pending) == 1 else (
+                        "The inspection batch failed and the plugin does not permit safe failure splitting. "
+                        f"{exc.message}"
+                    )
+                    failures.extend(WorkFailure(item.work_item_id, check_id, exc.code, message) for item in pending)
+                    return 0
             except Exception as exc:
                 finish_operation(operation_id, "inspect", "failed", pending[0].work_item_id if len(pending) == 1 else None, "INSPECTION_FAILED")
-                if len(pending) > 1:
+                if len(pending) > 1 and profile.can_split_failed_inspection:
                     metrics["batchSplits"] += 1
                     midpoint = len(pending) // 2
-                    inspect_chunk(pending[:midpoint])
-                    inspect_chunk(pending[midpoint:])
+                    return max(
+                        inspect_chunk(pending[:midpoint]),
+                        inspect_chunk(pending[midpoint:]),
+                    )
                 else:
-                    failures.append(WorkFailure(pending[0].work_item_id, check_id, "INSPECTION_FAILED", str(exc)))
+                    message = str(exc) if len(pending) == 1 else (
+                        "The inspection batch failed and the plugin does not permit safe failure splitting. "
+                        f"{exc}"
+                    )
+                    failures.extend(
+                        WorkFailure(item.work_item_id, check_id, "INSPECTION_FAILED", message)
+                        for item in pending
+                    )
+                    return 0
 
-        for offset in range(0, len(applicable_items), chunk_size):
-            inspect_chunk(applicable_items[offset:offset + chunk_size])
+        adaptive_chunk_size = chunk_size
+        offset = 0
+        while offset < len(applicable_items):
+            chunk = applicable_items[offset:offset + adaptive_chunk_size]
+            splits_before = metrics["batchSplits"]
+            learned_size = inspect_chunk(chunk)
+            if metrics["batchSplits"] > splits_before:
+                next_size = min(adaptive_chunk_size, max(learned_size, 1))
+                if next_size < adaptive_chunk_size:
+                    metrics["adaptiveBatchReductions"] += 1
+                    adaptive_chunk_size = next_size
+            offset += len(chunk)
+        metrics["inspectBatchSize"] = adaptive_chunk_size
 
         packet_by_id = {packet.work_item.work_item_id: packet for packet in packets}
         decision_size = profile.max_batch_size if profile.decision_batching == "allowed" else 1

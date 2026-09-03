@@ -326,6 +326,10 @@ class HostCoreTest(unittest.TestCase):
         before = core.build_completion_input(started["scanId"], started["runId"])
         self.assertEqual(len(before["processedEntrypointRefs"]), 1)
         self.assertEqual(len(before["unprocessedEntrypointRefs"]), 1)
+        self.assertEqual(
+            before["completionReason"],
+            "Host assembled partial coverage from the durable ledger; unfinished scope remains explicit.",
+        )
 
         core.handle(session(started, tool="explore_entrypoint", key="logical-tabs-detail", revision=1, input={
             "pageStateId": started["currentPageStateId"], "entrypointId": detail["entrypointId"],
@@ -360,6 +364,11 @@ class HostCoreTest(unittest.TestCase):
             with core._store.transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
+            default_payload = core.build_completion_input(started["scanId"], started["runId"])
+            self.assertEqual(
+                default_payload["completionReason"],
+                "Host assembled complete coverage from the durable ledger; no unfinished scope remains.",
+            )
             payload = core.build_completion_input(started["scanId"], started["runId"], "Automatic convergence")
             self.assertEqual(payload["processedObjectRefs"], [object_id])
             self.assertEqual(len(payload["processedEntrypointRefs"]), 1)
@@ -415,6 +424,9 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "BROWSER_SESSION_FAILED")
         self.assertEqual(result["runRevision"], 2)
         self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        completion = core.build_completion_input(started["scanId"], started["runId"])
+        self.assertIn("Audit failed: BROWSER_SESSION_FAILED", completion["completionReason"])
+        self.assertIn("browser", completion["completionReason"].lower())
 
     def test_registry_version_mismatch_fails_before_scan(self):
         core = self.make_core()
@@ -1451,6 +1463,9 @@ class HostCoreTest(unittest.TestCase):
         issues = json.loads(rendered["issues.json"])
         self.assertEqual(issues["issues"], [])
         self.assertEqual(issues["invalidatedIssueRefs"], [ledger["issues"][0]["issueId"]])
+        summary = rendered["audit-summary.md"].decode("utf-8")
+        self.assertIn("These counts are diagnostic only", summary)
+        self.assertIn("Conclusion validity: invalidated", summary)
 
     def test_report_bundle_conflict_rolls_back_new_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

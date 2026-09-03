@@ -18,14 +18,17 @@ Resolve semantic conflicts in this order:
 
 1. Product contract: product goals, scope, user promise, and non-negotiable business boundaries; delegates Alpha delivery scope and completion gates to the journey document;
 2. Alpha user journey and end-to-end Definition of Done: current productization stage, observable acceptance, and release gates;
-3. This document: system invariants, trust boundaries, and design governance;
-4. Top-level architecture: component responsibilities, dependency direction, and transaction boundaries;
-5. LLM investigation orchestration: multi-turn Agent loop, coverage Findings, stopping, and model-failure semantics;
-6. Domain model and safety, identity, evidence, and other specialist designs: domain semantics and algorithm contracts;
-7. Host-Agent protocol: messages, tool lifecycle, errors, and idempotency;
-8. Rule contract and enabled rule files: applicability, coverage, and decisions for individual rules;
-9. JSON Schema: persistent fields and local constraints;
-10. Examples, tests, report templates, and implementation: prove or execute upstream design but never redefine product semantics.
+3. Platform Constitution v1: domain-neutral ownership, trust, lifecycle,
+   compatibility, and release laws;
+4. This document: frontend-product invariants, trust boundaries, and design governance;
+5. The frozen plugin, capability-provider, and canonical-result contracts;
+6. Top-level architecture: component responsibilities, dependency direction, and transaction boundaries;
+7. LLM investigation orchestration: multi-turn Agent loop, coverage Findings, stopping, and model-failure semantics;
+8. Domain model and safety, identity, evidence, and other specialist designs: domain semantics and algorithm contracts;
+9. Host-Agent protocol: messages, tool lifecycle, errors, and idempotency;
+10. Rule contract and enabled rule files: applicability, coverage, and decisions for individual rules;
+11. JSON Schema: persistent fields and local constraints;
+12. Examples, tests, report templates, and implementation: prove or execute upstream design but never redefine product semantics.
 
 When downstream material discovers an upstream contradiction, stop the affected design or implementation, register an open question, and have the semantic owner update the authoritative source. Implementation details cannot silently choose an interpretation.
 
@@ -104,6 +107,7 @@ When downstream material discovers an upstream contradiction, stop the affected 
 - Backward-compatible fields or rule capabilities increment minor version;
 - Clarifications without behavior change increment patch version;
 - Every change records date, owner, rationale, affected documents/schemas, and acceptance scenarios;
+- Repository-authored prose, product messages, logs, and reports use English. Explicit non-English literals are permitted only as bounded input-recognition or compatibility data; they must not become user-facing copy or protocol semantics;
 - Open questions cannot impersonate confirmed decisions; unresolved safety or conclusion-integrity blockers prevent `implementation-ready`.
 
 ## 7. Governance Gate for Coding

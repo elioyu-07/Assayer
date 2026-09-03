@@ -345,6 +345,7 @@ class PlatformKernelTest(unittest.TestCase):
                 self.context("structured_read"), {"files": []},
                 "CFG-001", "1.0.0", platform_store,
             )
+            run.record_discovery(())
             host_store.close()
 
             result = run.finish("completed")
@@ -554,6 +555,71 @@ class PlatformKernelTest(unittest.TestCase):
             self.assertEqual(len(result.decisions), 2)
             self.assertEqual(len(result.failures), 1)
             self.assertGreaterEqual(result.metrics["batchSplits"], 1)
+
+    def test_failed_batch_is_not_retried_when_failure_splitting_is_forbidden(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for index in range(3):
+                path = Path(directory) / f"settings-{index}.json"
+                path.write_text('{}', encoding="utf-8")
+                paths.append(str(path))
+
+            class NonRetryablePlugin(ConfigQualityPlugin):
+                manifest = replace(ConfigQualityPlugin.manifest, execution_profile=replace(
+                    ConfigQualityPlugin.manifest.execution_profile,
+                    max_batch_size=3, failure_splitting="forbidden",
+                ))
+
+                def __init__(self):
+                    self.batch_sizes = []
+
+                def inspect(self, work_items, check, context):
+                    self.batch_sizes.append(len(work_items))
+                    raise RuntimeError("The batch failed after an unknown partial side effect")
+
+            plugin = NonRetryablePlugin()
+            result = PlatformKernel().run(
+                plugin, paths, "CFG-001", ConfigurationDecisionProvider(),
+                self.context("structured_read"),
+            )
+            self.assertEqual(result.status, "failed")
+            self.assertEqual(plugin.batch_sizes, [3])
+            self.assertEqual(result.metrics["batchSplits"], 0)
+            self.assertEqual(len(result.failures), 3)
+            self.assertTrue(all("does not permit safe failure splitting" in item.message for item in result.failures))
+
+    def test_batch_runner_reuses_a_learned_safe_inspection_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = []
+            for index in range(6):
+                path = Path(directory) / f"settings-{index}.json"
+                path.write_text('{}', encoding="utf-8")
+                paths.append(str(path))
+
+            class CapacityPlugin(ConfigQualityPlugin):
+                manifest = replace(ConfigQualityPlugin.manifest, execution_profile=replace(
+                    ConfigQualityPlugin.manifest.execution_profile, max_batch_size=4,
+                ))
+
+                def __init__(self):
+                    self.batch_sizes = []
+
+                def inspect(self, work_items, check, context):
+                    self.batch_sizes.append(len(work_items))
+                    if len(work_items) > 2:
+                        raise RuntimeError("The provider accepts at most two items")
+                    return super().inspect(work_items, check, context)
+
+            plugin = CapacityPlugin()
+            result = PlatformKernel().run(
+                plugin, paths, "CFG-001", ConfigurationDecisionProvider(),
+                self.context("structured_read"),
+            )
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(plugin.batch_sizes, [4, 2, 2, 2])
+            self.assertEqual(result.metrics["batchSplits"], 1)
+            self.assertEqual(result.metrics["adaptiveBatchReductions"], 1)
+            self.assertEqual(result.metrics["inspectBatchSize"], 2)
 
     def test_generic_contract_does_not_expose_frontend_types(self):
         import assayer_platform

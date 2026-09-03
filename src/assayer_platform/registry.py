@@ -98,6 +98,7 @@ def load_plugin_manifest(source: str | Path | Mapping[str, Any]) -> PluginManife
         decision_batching=profile["decisionBatching"], parallelism=profile["parallelism"],
         cache_reuse=profile["cacheReuse"], checkpoint=profile["checkpoint"],
         max_batch_size=profile.get("maxBatchSize", 1), ordering=profile.get("ordering", "independent"),
+        failure_splitting=profile.get("failureSplitting", "forbidden"),
     )
     return PluginManifest(
         plugin_id=value["pluginId"], version=value["version"],

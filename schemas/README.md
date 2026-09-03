@@ -27,10 +27,18 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `derived-issues.schema.json`, `page-element-judgement.schema.json`, and `run-diagnostics.schema.json`: publication contracts for read-only ledger-derived JSON.
 - `runtime-event.schema.json`: sanitized runtime-event contract across Host, Agent, browser, Router, and diagnostic reports.
 - `observability-manifest.schema.json`: event-stream integrity, extended-telemetry visibility, and diagnostic-completeness declaration.
-- `performance-bill.schema.json`: wall-clock, Host, browser, transport, model-visibility, payload-size, screenshot, and duplicate-entrypoint measurements for one Scan.
+- `performance-bill.schema.json`: wall-clock, Host, browser, transport, between-Agent-turn, model-visibility, payload-size, screenshot, and duplicate-entrypoint measurements for one Scan.
 - `public-progress.schema.json`: identifier-free, user-readable runtime phase, status, counts, and next-step contract returned by the product MCP facade.
+- `result-delivery.schema.json`: summary-first terminal delivery metadata,
+  stable section references, and result-bound delta pages.
 - `plugin-manifest.schema.json`: domain-neutral plugin checks, evidence requirements, capabilities, and performance/recovery constraints.
+- `capability-provider.schema.json`: provider identity, capability names,
+  authorization, scope, budgets, failure semantics, and algorithm versions.
 - `platform-ledger.schema.json`: generic run operations, event timeline, commit receipts, and published artifact correlations.
+- `canonical-result.schema.json`: portable terminal result, coverage, outcomes,
+  findings, review items, failures, performance, and trace references. This is
+  the M2 result contract; adapters must emit it before M3 publication gates are
+  complete.
 
 The product runtime also exports the validated platform ledger as
 `platform-ledger.json`, `platform-events.jsonl`, and `platform-run.log` in the

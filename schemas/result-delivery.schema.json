@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/result-delivery.schema.json",
+  "title": "AssayerStagedResultDelivery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mode", "sourceDigest", "detailSectionCount", "detailsAvailable", "pageBudgetBytes", "nextAction"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "mode": { "const": "summary_first" },
+    "sourceDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+    "detailSectionCount": { "type": "integer", "minimum": 0 },
+    "detailsAvailable": { "type": "boolean" },
+    "pageBudgetBytes": { "type": "integer", "minimum": 1 },
+    "nextAction": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "sectionReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["delivery", "sectionId", "itemCount"],
+      "properties": {
+        "delivery": { "enum": ["paged", "chunked_text"] },
+        "sectionId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "itemCount": { "type": "integer", "minimum": 1 },
+        "byteCount": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sectionId", "kind", "items", "page", "nextCursor", "deltaOnly", "sourceDigest", "delivery"],
+      "properties": {
+        "sectionId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "kind": { "enum": ["items", "text"] },
+        "items": { "type": "array" },
+        "page": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start", "count", "total", "approxBytes"],
+          "properties": {
+            "start": { "type": "integer", "minimum": 0 },
+            "count": { "type": "integer", "minimum": 0, "maximum": 50 },
+            "total": { "type": "integer", "minimum": 1 },
+            "approxBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "nextCursor": { "type": ["string", "null"] },
+        "deltaOnly": { "const": true },
+        "sourceDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+        "delivery": { "$ref": "#" }
+      }
+    }
+  }
+}

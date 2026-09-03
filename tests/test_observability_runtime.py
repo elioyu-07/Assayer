@@ -11,6 +11,104 @@ from assayer_host.reporting import DerivedReportBuilder
 
 
 class RuntimeObservabilityStoreTest(unittest.TestCase):
+    @staticmethod
+    def render_fixture(name: str) -> dict[str, bytes]:
+        ledger = json.loads((Path("examples") / name).read_text(encoding="utf-8"))
+        return DerivedReportBuilder().render(ledger)
+
+    def test_audit_log_is_a_human_readable_run_diary(self):
+        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        rendered = DerivedReportBuilder().render(ledger)
+        diary = rendered["audit.log"].decode("utf-8")
+        self.assertIn("Assayer Run Diary", diary)
+        self.assertIn("Status: completed (conclusions valid: yes)", diary)
+        self.assertIn("Timeline", diary)
+        self.assertIn("Started a bounded evidence-gathering Case.", diary)
+        self.assertIn("Coverage", diary)
+        self.assertIn("Entrypoints: 0 processed, 0 skipped, 0 remaining", diary)
+        self.assertIn("Terminal state: completed", diary)
+        self.assertNotIn("succeeded operation-", diary.lower())
+
+    def test_audit_log_explains_failed_operation(self):
+        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        operation = ledger["operations"][0]
+        operation["status"] = "rejected"
+        operation["reason"] = {
+            "code": "STALE_STATE",
+            "message": "The page changed before the operation could run; token=private-value",
+        }
+        operation["decisionReason"] = "Inspect after authorization=private-value"
+        diary = DerivedReportBuilder().render(ledger)["audit.log"].decode("utf-8")
+        self.assertIn("| FAILED", diary)
+        self.assertIn(
+            "Blocked or failed: STALE_STATE — The page changed before the operation could run; token=[REDACTED]",
+            diary,
+        )
+        self.assertIn("Goal: Inspect after authorization=[REDACTED]", diary)
+        self.assertNotIn("private-value", diary)
+
+    def test_completed_result_explains_that_no_action_is_required(self):
+        summary = self.render_fixture("minimal-ledger.json")["audit-summary.md"].decode("utf-8")
+        self.assertIn("# Assayer Audit Result", summary)
+        self.assertIn("Status: **completed**", summary)
+        self.assertIn("Formal conclusions: **valid**", summary)
+        self.assertIn("Next step: No remediation is required", summary)
+        self.assertIn("No unfinished or explicitly skipped scope remains.", summary)
+
+    def test_issue_result_leads_with_remediation(self):
+        summary = self.render_fixture("issue-ledger.json")["audit-summary.md"].decode("utf-8")
+        self.assertIn("Next step: Address the published issues", summary)
+        self.assertIn("Filter region lacks reset capability", summary)
+        self.assertIn("Recommendation: Add a reset entrypoint.", summary)
+
+    def test_partial_result_names_remaining_scope_and_reason(self):
+        rendered = self.render_fixture("partial-ledger.json")
+        summary = rendered["audit-summary.md"].decode("utf-8")
+        diagnostics = rendered["run-diagnostics.md"].decode("utf-8")
+        self.assertIn("Status: **partial**", summary)
+        self.assertIn("Entrypoints remaining: 1", summary)
+        self.assertIn("Remaining: Enter filter interaction — Interaction capability is unavailable.", summary)
+        self.assertIn("Incomplete rule: FUA-10@1.1.0", summary)
+        self.assertIn("No Host operation failed; the Run is partial", diagnostics)
+
+    def test_failed_result_invalidates_conclusions_and_attributes_terminal_reason(self):
+        rendered = self.render_fixture("failed-ledger.json")
+        summary = rendered["audit-summary.md"].decode("utf-8")
+        diagnostics = json.loads(rendered["run-diagnostics.json"])
+        self.assertIn("Status: **failed**", summary)
+        self.assertIn("Formal conclusions: **invalid**", summary)
+        self.assertIn("do not use conclusions from this Run", summary)
+        self.assertEqual(diagnostics["attributions"][0]["layer"], "browser_adapter")
+        self.assertIn("REQUEST_RESULT_UNKNOWN", diagnostics["attributions"][0]["reason"])
+
+    def test_needs_review_result_names_gap_and_checks_completed(self):
+        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        assessment = ledger["assessments"][0]
+        assessment.update({
+            "result": "needs_review",
+            "coverage": {
+                **assessment["coverage"], "resolvedDimensions": ["filter_present"],
+                "unresolvedDimensions": ["binding_to_list"], "complete": False,
+            },
+            "blocker": {
+                "code": "BINDING_UNRESOLVED",
+                "message": "Visual and DOM evidence cannot identify which list belongs to this filter.",
+            },
+        })
+        ledger["scan"]["status"] = "partial"
+        ledger["scan"]["terminalReason"] = {
+            "code": "COVERAGE_PARTIAL", "message": "One object requires review.",
+        }
+        rule_summary = ledger["scan"]["coverageProof"]["ruleSummaries"][0]
+        rule_summary.update({
+            "resultCounts": {"needs_review": 1}, "coverageComplete": False,
+        })
+        summary = DerivedReportBuilder().render(ledger)["audit-summary.md"].decode("utf-8")
+        self.assertIn("Needs review: 1", summary)
+        self.assertIn("Missing fact or blocker: Visual and DOM evidence cannot identify", summary)
+        self.assertIn("Unresolved dimensions: binding_to_list", summary)
+        self.assertIn("Checks completed: 1 evidence item(s) across 1 restored Case(s)", summary)
+
     def test_performance_bill_measures_duplicate_entrypoints_and_unique_screenshot_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
             screenshot_dir = Path(tmp) / "screenshots"
@@ -25,8 +123,9 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
                     "startedAt": "2026-09-02T00:00:00Z", "endedAt": "2026-09-02T00:00:10Z",
                 },
                 "operations": [
-                    {"operationId": "operation-bill-001", "tool": "inspect_page", "operationKind": "read", "status": "succeeded", "durationMs": 100, "agentTurnId": "facade-test-turn-0001:discover_scope"},
-                    {"operationId": "operation-bill-002", "tool": "explore_entrypoint", "operationKind": "browser_action", "status": "succeeded", "durationMs": 200, "agentTurnId": "facade-test-turn-0001:discover_scope"},
+                    {"operationId": "operation-bill-001", "tool": "inspect_page", "operationKind": "read", "status": "succeeded", "durationMs": 0, "agentTurnId": "facade-test-turn-0001:discover_scope", "acceptedAt": "2026-09-02T00:00:00Z", "endedAt": "2026-09-02T00:00:00Z"},
+                    {"operationId": "operation-bill-001b", "tool": "inspect_page", "operationKind": "read", "status": "succeeded", "durationMs": 25, "agentTurnId": "facade-test-turn-0001:discover_scope", "acceptedAt": "2026-09-02T00:00:00.075Z", "endedAt": "2026-09-02T00:00:00.100Z"},
+                    {"operationId": "operation-bill-002", "tool": "explore_entrypoint", "operationKind": "browser_action", "status": "succeeded", "durationMs": 200, "agentTurnId": "facade-test-turn-0002:investigate_object", "acceptedAt": "2026-09-02T00:00:00.350Z", "endedAt": "2026-09-02T00:00:00.550Z"},
                 ],
                 "pageStates": [{"pageStateId": "page-001"}],
                 "entrypoints": [
@@ -48,12 +147,17 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
             ]
             json_bytes, markdown_bytes, bill = render_performance_bill(ledger, events, tmp)
             self.assertEqual(bill["measurement"]["totalDurationMs"], 10000)
-            self.assertEqual(bill["measurement"]["hostOperationDurationMs"], 300)
-            self.assertEqual(bill["measurement"]["outsideHostDurationMs"], 9700)
-            self.assertEqual(bill["activity"]["agentTurnsObserved"], 1)
-            self.assertEqual(bill["activity"]["publicToolCallsObserved"], 1)
-            self.assertEqual(bill["activity"]["publicToolCallsByName"], {"discover_scope": 1})
-            self.assertEqual(bill["activity"]["toolCalls"], 2)
+            self.assertEqual(bill["measurement"]["hostOperationDurationMs"], 225)
+            self.assertEqual(bill["measurement"]["outsideHostDurationMs"], 9775)
+            self.assertEqual(bill["activity"]["agentTurnsObserved"], 2)
+            self.assertEqual(bill["activity"]["agentTurnGapCount"], 1)
+            self.assertEqual(bill["activity"]["publicToolCallsObserved"], 2)
+            self.assertEqual(bill["activity"]["publicToolCallsByName"], {"discover_scope": 1, "investigate_object": 1})
+            self.assertEqual(bill["measurement"]["agentTurnGapDurationMs"], 250)
+            self.assertEqual(bill["measurement"]["longestAgentTurnGapMs"], 250)
+            self.assertEqual(bill["largestAgentTurnGaps"][0]["fromTool"], "discover_scope")
+            self.assertEqual(bill["largestAgentTurnGaps"][0]["toTool"], "investigate_object")
+            self.assertEqual(bill["activity"]["toolCalls"], 3)
             self.assertEqual(bill["activity"]["duplicateEntrypoints"], 1)
             self.assertEqual(bill["activity"]["duplicateEntrypointRatio"], 0.3333)
             self.assertEqual(bill["activity"]["screenshotsCaptured"], 2)
@@ -61,6 +165,7 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
             self.assertEqual(bill["activity"]["screenshotBytes"], len(image))
             self.assertEqual(json.loads(json_bytes)["activity"]["responseBytes"], 75)
             self.assertIn(b"Model latency: not exposed", markdown_bytes)
+            self.assertIn(b"Between-Agent-turn time: 250 ms", markdown_bytes)
 
     def test_operation_times_are_real_and_terminal_time_is_idempotent(self):
         store = SQLiteStore()

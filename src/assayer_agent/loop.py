@@ -13,7 +13,8 @@ import json
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol, runtime_checkable
+from itertools import count
+from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 
 
 PROTOCOL_VERSION = "1.0"
@@ -68,18 +69,31 @@ class AgentContext:
 class AgentLoopBudget:
     """Hard limits that prevent unbounded or repeatedly failing runs."""
 
-    max_turns: int = 64
+    max_turns: int | None = None
     max_model_failures: int = 3
     max_consecutive_identical_decisions: int = 1
+    # These are telemetry thresholds, not task termination deadlines. A
+    # platform Run has no fixed wall-clock timeout; long-running audits remain
+    # eligible to continue while they make progress.
+    max_elapsed_ms: int | None = None
+    max_model_duration_ms: int | None = None
+    max_context_bytes: int = 1_000_000
 
     def __post_init__(self) -> None:
         for name, value in (
-            ("max_turns", self.max_turns),
             ("max_model_failures", self.max_model_failures),
             ("max_consecutive_identical_decisions", self.max_consecutive_identical_decisions),
+            ("max_context_bytes", self.max_context_bytes),
         ):
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if self.max_turns is not None and (
+            not isinstance(self.max_turns, int) or isinstance(self.max_turns, bool) or self.max_turns < 1
+        ):
+            raise ValueError("max_turns must be a positive integer or None")
+        for name, value in (("max_elapsed_ms", self.max_elapsed_ms), ("max_model_duration_ms", self.max_model_duration_ms)):
+            if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 1):
+                raise ValueError(f"{name} must be a positive integer or None")
 
 
 @dataclass(frozen=True)
@@ -130,6 +144,7 @@ class AgentLoop:
         budget: AgentLoopBudget | None = None,
         allowed_tools: tuple[str, ...] = DEFAULT_AGENT_TOOLS,
         loop_id: str | None = None,
+        clock_ns: Callable[[], int] | None = None,
     ) -> None:
         if not allowed_tools or "start_audit" in allowed_tools or len(set(allowed_tools)) != len(allowed_tools):
             raise ValueError("allowed_tools must be unique, nonempty, and exclude start_audit")
@@ -139,6 +154,7 @@ class AgentLoop:
         self._invoker = invoker
         self._budget = budget or AgentLoopBudget()
         self._allowed_tools = allowed_tools
+        self._clock_ns = clock_ns or time.monotonic_ns
         raw_loop_id = loop_id or uuid.uuid4().hex
         if not isinstance(raw_loop_id, str) or not raw_loop_id:
             raise ValueError("loop_id must be a nonempty string")
@@ -170,7 +186,13 @@ class AgentLoop:
         required_operation_lookup: str | None = None
         unknown_decisions: set[str] = set()
 
-        for turn_index in range(1, self._budget.max_turns + 1):
+        for turn_index in count(1):
+            if self._budget.max_turns is not None and turn_index > self._budget.max_turns:
+                return self._result("stopped", "turn_budget", response, traces)
+            context_size = len(json.dumps(response, ensure_ascii=False, sort_keys=True).encode("utf-8"))
+            if context_size > self._budget.max_context_bytes:
+                return self._result("stopped", "context_budget", response, traces,
+                                    detail="Host response exceeded the Agent context budget")
             tools = ("get_operation",) if required_operation_lookup else self._allowed_tools
             context = AgentContext(
                 turn_index=turn_index,
@@ -182,14 +204,14 @@ class AgentLoop:
                 required_operation_lookup=required_operation_lookup,
             )
             try:
-                model_started = time.monotonic_ns()
+                model_started = self._clock_ns()
                 decision = self._agent.decide(context)
             except Exception:
                 model_failures += 1
                 if model_failures >= self._budget.max_model_failures:
                     return self._result("stopped", "model_failure_budget", response, traces)
                 continue
-            model_duration_ms = max(0, int((time.monotonic_ns() - model_started) / 1_000_000))
+            model_duration_ms = max(0, int((self._clock_ns() - model_started) / 1_000_000))
 
             violation = self._decision_violation(decision, tools, required_operation_lookup)
             if violation:
@@ -220,7 +242,7 @@ class AgentLoop:
                 model_retry_count,
             )
             try:
-                tool_started = time.monotonic_ns()
+                tool_started = self._clock_ns()
                 next_response = self._invoke(request)
             except Exception:
                 return self._result("failed", "tool_invocation_failed", response, traces,
@@ -231,7 +253,7 @@ class AgentLoop:
                 reason=decision.reason.strip(),
                 request_id=request["requestId"],
                 response_status=str(next_response.get("status", "invalid")),
-                duration_ms=max(0, int((time.monotonic_ns() - tool_started) / 1_000_000)),
+                duration_ms=max(0, int((self._clock_ns() - tool_started) / 1_000_000)),
                 operation_id=self._operation_id(next_response),
             ))
             response = next_response
@@ -253,8 +275,6 @@ class AgentLoop:
                 return self._result("completed", "audit_completed", response, traces)
             if response.get("status") == "failed":
                 return self._result("failed", "host_terminal_failure", response, traces)
-
-        return self._result("stopped", "turn_budget", response, traces)
 
     def _bootstrap_request(self, start_input: dict[str, Any]) -> dict[str, Any]:
         digest = self._digest(start_input)

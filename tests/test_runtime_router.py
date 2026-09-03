@@ -173,8 +173,12 @@ class RuntimeRouterTest(unittest.TestCase):
             self.assertEqual(factory.runtimes[0].close_calls, 1)
             self.assertIn("lease.released", [item["name"] for item in factory.runtimes[0].runtime_events])
             self.assertEqual(factory.runtimes[0].refresh_calls, 1)
-            router.handle(start_request("bootstrap-two", url="https://other.example.com"))
+            second = router.handle(start_request("bootstrap-two", url="https://other.example.com"))["result"]
             self.assertEqual(router.active_scan_count, 1)
+            self.assertNotEqual(second["scanId"], scan["scanId"])
+            self.assertNotEqual(factory.runtimes[0].output_dir, factory.runtimes[1].output_dir)
+            self.assertTrue(factory.runtimes[0].output_dir.is_dir())
+            self.assertTrue(factory.runtimes[1].output_dir.is_dir())
 
     def test_expired_agent_lease_fails_scan_and_closes_runtime(self):
         now = [0.0]

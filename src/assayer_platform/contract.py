@@ -48,10 +48,19 @@ class ExecutionProfile:
     checkpoint: str
     max_batch_size: int = 1
     ordering: str = "independent"
+    failure_splitting: str = "forbidden"
 
     @property
     def inspect_batch_size(self) -> int:
         return self.max_batch_size if self.inspect_batching == "allowed" else 1
+
+    @property
+    def can_split_failed_inspection(self) -> bool:
+        return (
+            self.inspect_batching == "allowed"
+            and self.failure_splitting == "allowed"
+            and self.ordering == "independent"
+        )
 
 
 @dataclass(frozen=True)
@@ -252,6 +261,40 @@ class DecisionProposal:
 
 
 @dataclass(frozen=True)
+class ReviewCheckpoint:
+    checkpoint_id: str
+    work_item_id: str
+    check_id: str
+    check_version: str
+    collection_id: str
+    item_ids: tuple[str, ...]
+    payload: Mapping[str, Any]
+    supersedes_checkpoint_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value for value in (
+            self.checkpoint_id, self.work_item_id, self.check_id,
+            self.check_version, self.collection_id,
+        )):
+            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint identity fields are required")
+        if not self.item_ids or any(not isinstance(item_id, str) or not item_id for item_id in self.item_ids):
+            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint item IDs are required")
+        if len(set(self.item_ids)) != len(self.item_ids):
+            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint item IDs must be unique")
+        if self.supersedes_checkpoint_id is not None and (
+            not isinstance(self.supersedes_checkpoint_id, str)
+            or not self.supersedes_checkpoint_id
+            or self.supersedes_checkpoint_id == self.checkpoint_id
+        ):
+            raise PlatformContractError(
+                "INVALID_REVIEW_CHECKPOINT",
+                "Superseded checkpoint identity must be a different nonempty checkpoint ID",
+            )
+        object.__setattr__(self, "item_ids", tuple(self.item_ids))
+        object.__setattr__(self, "payload", _mapping(self.payload))
+
+
+@dataclass(frozen=True)
 class CommitReceipt:
     commit_id: str
     work_item_id: str
@@ -304,6 +347,8 @@ class PlatformLedger:
     decisions: tuple[DecisionProposal, ...] = ()
     failures: tuple[WorkFailure, ...] = ()
     decision_authority: str = "platform"
+    review_checkpoints: tuple[ReviewCheckpoint, ...] = ()
+    workflow: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.status not in {"running", "completed", "partial", "failed"}:
@@ -316,6 +361,10 @@ class PlatformLedger:
             raise PlatformContractError(
                 "INVALID_LEDGER_AUTHORITY", "A Run must have exactly one decision authority",
             )
+        checkpoint_ids = tuple(item.checkpoint_id for item in self.review_checkpoints)
+        if len(checkpoint_ids) != len(set(checkpoint_ids)):
+            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Ledger review checkpoint IDs must be unique")
+        object.__setattr__(self, "workflow", _mapping(self.workflow))
 
 
 @dataclass(frozen=True)
