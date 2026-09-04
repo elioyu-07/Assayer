@@ -26,6 +26,8 @@ from jsonschema import Draft202012Validator
 
 from .core import HostCore, TOOL_KINDS
 from .errors import HostError
+from .lifecycle import InstallationStatusBuilder
+from .lifecycle_product import LifecycleProductController, LifecycleProductToolTransport
 from .resources import default_rules_root, default_schema_root
 from assayer_platform import (
     DecisionProposal, DimensionObservation, EvidenceRecord, PlatformRunner,
@@ -50,6 +52,7 @@ _PRODUCT_INTERACTIVE_TOOLS = (
     "start_plugin_run", "advance_plugin_run", "get_plugin_result",
     "recover_work_item", "get_plugin_progress",
 )
+_INSTALLATION_STATUS_TOOL = "get_installation_status"
 _LOG = logging.getLogger(__name__)
 
 
@@ -781,9 +784,18 @@ class FrontendProductMcpToolTransport(McpToolTransport):
 
     def __init__(self, core: HostCore, *, plugin_registry: PluginRegistry | None = None,
                  plugin_id: str = "assayer.frontend-audit",
-                 output_root: str | Path = "./assayer-output"):
+                 output_root: str | Path = "./assayer-output",
+                 lifecycle_controller: LifecycleProductController | None = None):
         super().__init__(core)
         self._public_schemas = self._build_public_schemas()
+        self._installation_status = InstallationStatusBuilder(output_root)
+        self._installation_status_schema = json.loads(
+            (default_schema_root() / "installation-status.schema.json").read_text()
+        )
+        self._lifecycle_tools = (
+            LifecycleProductToolTransport(lifecycle_controller)
+            if lifecycle_controller is not None else None
+        )
         self._public_progress_validator = Draft202012Validator(
             json.loads((default_schema_root() / "public-progress.schema.json").read_text())
         )
@@ -1154,7 +1166,19 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         generic = self._platform_tools.list_tools() + [
             interactive[name] for name in _PRODUCT_INTERACTIVE_TOOLS
         ]
-        tools = []
+        tools = [{
+            "name": _INSTALLATION_STATUS_TOOL,
+            "description": (
+                "Report read-only Assayer installation, version, runtime-integrity, and safe feedback "
+                "diagnostics. This tool does not require an active Run and never starts a browser."
+            ),
+            "inputSchema": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "maxRecentRuns": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5}
+                },
+            },
+        }]
         for name in _PUBLIC_TOOLS:
             schema = deepcopy(self._public_schemas[name])
             schema.setdefault("properties", {})["decisionReason"] = {
@@ -1171,10 +1195,17 @@ class FrontendProductMcpToolTransport(McpToolTransport):
                 ),
                 "inputSchema": schema,
             })
-        return generic + tools
+        lifecycle = self._lifecycle_tools.list_tools() if self._lifecycle_tools is not None else []
+        return generic + lifecycle + tools
 
     def call_tool(self, name: str, arguments: object) -> dict:
         """Correlate all nested Host work to one product-level Agent call."""
+        if name == _INSTALLATION_STATUS_TOOL:
+            return self._installation_status_result(arguments)
+        if self._lifecycle_tools is not None and name in {
+            "plan_plugin_change", "execute_plugin_change",
+        }:
+            return self._lifecycle_tools.call_tool(name, arguments)
         if name in {self._platform_tools.TOOL, self._platform_tools.LIST_TOOL}:
             return self._platform_tools.call_tool(name, arguments)
         if name == "get_plugin_result" and self._frontend_result_document is not None:
@@ -1203,6 +1234,25 @@ class FrontendProductMcpToolTransport(McpToolTransport):
             self._public_call_depth -= 1
             if outer:
                 self._public_active_turn_id = None
+
+    def _installation_status_result(self, arguments: object) -> dict:
+        if not isinstance(arguments, dict):
+            raise HostError("INVALID_REQUEST", "Installation status arguments must be an object")
+        schema = next(
+            item["inputSchema"] for item in self.list_tools()
+            if item["name"] == _INSTALLATION_STATUS_TOOL
+        )
+        if next(Draft202012Validator(schema).iter_errors(arguments), None) is not None:
+            raise HostError("INVALID_REQUEST", "Installation status arguments do not satisfy the product schema")
+        status = self._installation_status.build(max_recent_runs=arguments.get("maxRecentRuns", 5))
+        if next(Draft202012Validator(self._installation_status_schema).iter_errors(status), None) is not None:
+            raise HostError("INTERNAL_FAILURE", "Installation status does not satisfy its product schema")
+        public = {"status": "ok", "result": status}
+        return {
+            "structuredContent": public,
+            "content": [{"type": "text", "text": json.dumps(public, ensure_ascii=False, separators=(",", ":"))}],
+            "isError": False,
+        }
 
     def _call_tool(self, name: str, arguments: object) -> dict:
         if name not in _PUBLIC_TOOLS:
@@ -1342,6 +1392,8 @@ class FrontendProductMcpToolTransport(McpToolTransport):
                     if platform_result.ledger is not None:
                         platform_terminal_artifacts = (
                             "platform-ledger.json", "platform-events.jsonl", "platform-run.log",
+                            "platform-performance-bill.json", "platform-performance-bill.md",
+                            "canonical-result.json",
                         )
                 except PlatformContractError as error:
                     raise HostError(error.code, error.message) from error
@@ -1362,6 +1414,9 @@ class FrontendProductMcpToolTransport(McpToolTransport):
             self._frontend_result_status = terminal_status
             public_response["summary"] = self._frontend_result_document.overview["summary"]
             public_response["resultDelivery"] = self._frontend_result_document.descriptor()
+            artifact_paths = public_response.get("result", {}).get("artifactPaths", ())
+            if "canonical-result.json" in artifact_paths:
+                public_response["canonicalResult"] = "canonical-result.json"
         public_response["progress"] = self._progress_block(name, public_response)
         public_content = [{"type": "text", "text": json.dumps(public_response, ensure_ascii=False, separators=(",", ":"))}]
         for block in result.get("content", [])[1:]:
@@ -2229,11 +2284,18 @@ def create_interactive_mcp_server(
     return server
 
 
-def create_product_mcp_server(core: HostCore, *, output_root: str | Path = "./assayer-output"):
+def create_product_mcp_server(
+    core: HostCore,
+    *,
+    output_root: str | Path = "./assayer-output",
+    lifecycle_controller: LifecycleProductController | None = None,
+):
     """Create the generic plugin MCP server with frontend compatibility tools."""
     FastMCP = _load_fast_mcp()
     server = FastMCP("Assayer")
-    adapter = FrontendProductMcpToolTransport(core, output_root=output_root)
+    adapter = FrontendProductMcpToolTransport(
+        core, output_root=output_root, lifecycle_controller=lifecycle_controller,
+    )
     server._assayer_transport = adapter
 
     def make_invoke(tool_name: str, input_schema: dict):
@@ -2258,7 +2320,13 @@ def create_product_mcp_server(core: HostCore, *, output_root: str | Path = "./as
 
     for item in adapter.list_tools():
         name = item["name"]
-        server.tool(name=name, description=item["description"])(make_invoke(name, item["inputSchema"]))
+        annotations = None
+        if isinstance(item.get("annotations"), dict):
+            from mcp.types import ToolAnnotations
+            annotations = ToolAnnotations(**item["annotations"])
+        server.tool(
+            name=name, description=item["description"], annotations=annotations,
+        )(make_invoke(name, item["inputSchema"]))
         registered = server._tool_manager.get_tool(name)
         if registered is not None:
             registered.parameters = deepcopy(item["inputSchema"])

@@ -50,6 +50,67 @@ The registry rejects duplicate plugin IDs, ambiguous selections, malformed
 entry points, and checks that are not declared by the selected manifest.
 There is no implicit fallback to another plugin.
 
+## Conformance before release
+
+Validate a source-tree registration before building or publishing its package:
+
+```text
+assayer-plugin-check my_package.plugin:registration
+```
+
+The target may also be a zero-argument factory that returns a `PluginRegistry`.
+The command emits a versioned JSON report and exits nonzero when the manifest,
+runtime factory, batch decision provider, capability declaration, scope schema,
+or safe execution profile is incomplete. Every issue names a stable `PCV1-*`
+contract identifier and a required next action.
+
+Registration discovery applies the same side-effect-free structural gate. The
+release command additionally constructs the plugin and batch decision provider
+and verifies their required interfaces. Construction must not contact a live
+browser, repository, API, database, or other provider; live access begins only
+after the platform starts an authorized Run.
+
+The Assayer bundle builder applies this release gate to every bundled reference
+plugin before creating wheels. This is the first package-time M3 gate. Package
+content is checked separately before any plugin code is imported:
+
+```text
+assayer-plugin-package-check ./my-plugin-release
+```
+
+An independent package contains `assayer-plugin-release.json`. The descriptor
+binds one plugin ID and version to its manifest, top-level scope schema, Python
+runtime source, Markdown semantic-review contract, deterministic JSON fixtures,
+and `pyproject.toml` entry point. All paths must remain inside the package and
+must not traverse symbolic links. The static gate validates cross-file identity,
+fixture Check references, and package metadata without executing plugin code.
+
+Passing both checks proves static release completeness and constructable
+interfaces. It does not yet install the distribution, execute its fixtures,
+verify upgrade/rollback, sign it, or publish it. Those remain later M3/M4 gates.
+
+The isolated release gate performs the remaining installation and fixture
+checks without changing the user's environment:
+
+```text
+assayer-plugin-install-check ./my-plugin-release
+```
+
+It installs the local package into a temporary target with dependency download
+disabled, launches a new Python worker, discovers exactly one matching
+`assayer.plugins` entry point from that target, reruns registration conformance,
+and reconciles runtime manifest and scope schema with the statically checked
+files. It then runs every declared deterministic fixture through
+`PlatformKernel` and compares exact terminal status and decision/failure
+multisets.
+
+Installation and fixture-worker budgets are release-test safeguards, not audit
+Run timeouts. They are independently configurable with
+`--install-timeout-seconds` and `--fixture-timeout-seconds`. The command does
+not permanently install, upgrade, roll back, sign, or publish a plugin. It is
+also process isolation for reproducibility, not an operating-system sandbox for
+hostile code; only reviewed source packages should enter this developer gate.
+
 ## Runtime boundary
 
 The plugin implements only domain operations:
@@ -96,6 +157,16 @@ and an opaque cursor; it never repeats earlier pages. The original unabridged
 terminal JSON is written to `result-summary.json`, while the ledger continues
 to retain canonical Evidence and decisions. Plugins do not implement cursors,
 chat-sized truncation, or result pagination themselves.
+
+Every terminal response starts with a platform-owned `resultOverview`. It
+states conclusion validity, coverage, outcome counts, review and failure
+counts, and a plain-language next action. Decision detail pages retain the
+committed decision reason and each dimension's status and reason.
+`needs_review` decisions also produce platform-derived review items naming the
+unresolved, blocked, or conflicting dimensions and the next evidence action.
+A failed Run reports invalidated conclusions and does not expose earlier
+decisions or optional plugin summary data as formal results; those records
+remain available only in the canonical ledger for diagnosis.
 
 Terminal publication stages `result-summary.pending.json` before the terminal
 ledger transition and atomically promotes it to `result-summary.json` after
@@ -159,6 +230,14 @@ The same kernel conformance gates apply to built-in and external plugins:
 - receipt-bound decision commits;
 - terminal status, diagnostics, performance, and artifact publication.
 
+Parallel inspection is opt-in. A plugin must declare both
+`parallelism=allowed` and `ordering=independent`; the caller must also provide a
+negotiated positive `maxConcurrency`. Otherwise the Kernel stays serial. Only
+independent inspection is parallelized: semantic decision and commit remain
+ordered, and packets are merged by original WorkItem order. Plugins must not
+create their own unbounded executor. Persistent or cross-process platform caching
+is not part of the current roadmap.
+
 If a plugin commits through a domain system, its committer may delegate only a
 narrow domain persistence callback. It must return a `CommitReceipt` with
 `authority="platform"`; domain-side IDs belong in receipt metadata and never
@@ -182,6 +261,42 @@ read-only Markdown parsing and bounded candidate excerpts; an Agent must review
 that evidence and submit the semantic decision. The platform still owns
 evidence closure, decision gates, receipts, and publication. Scanner hits are
 therefore never promoted into final Spec findings by the runtime alone.
+
+## Capability provider registration
+
+A reusable source adapter is registered separately from an audit plugin. Its
+descriptor declares capabilities, scope, authorization, limits, failure
+semantics, Evidence kinds, and algorithm versions. The Python distribution
+exports a `ProviderRegistration` through `assayer.providers`; it does not add
+provider code to the platform package or the plugin registry.
+
+Before packaging, run:
+
+```bash
+assayer-provider-check my_provider.registration:registration
+```
+
+The command constructs the provider without calling its live `collect`
+operation. Then validate the independent source package without importing its
+code, followed by temporary installation and deterministic fixture execution:
+
+```bash
+assayer-provider-package-check ./my-provider-release
+assayer-provider-install-check ./my-provider-release
+```
+
+The package root contains `assayer-provider-release.json`, a provider
+descriptor, Python runtime source, `pyproject.toml`, and deterministic JSON
+fixtures. Every declared capability needs a successful fact fixture, and the
+release needs at least one classified-failure fixture. The isolated gate loads
+exactly one `assayer.providers` entry point, reconciles the installed descriptor
+with static package data, and runs fixtures through negotiated provider
+requests. Release-test time budgets do not limit user audit Run duration.
+
+These commands prove metadata, packaging, interface, and deterministic runtime
+conformance. They do not access a production source, persistently install the
+provider, or provide an operating-system sandbox for untrusted code. Real
+adapter acceptance remains a distinct gate.
 
 ## Current migration boundary
 

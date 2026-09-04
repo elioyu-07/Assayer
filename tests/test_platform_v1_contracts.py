@@ -49,6 +49,10 @@ class PlatformV1ContractTests(unittest.TestCase):
             "platform-ledger.schema.json",
             "capability-provider.schema.json",
             "canonical-result.schema.json",
+            "plugin-progress.schema.json",
+            "plugin-result-overview.schema.json",
+            "platform-performance-bill.schema.json",
+            "result-conformance.schema.json",
         )
 
         def property_names(value):
@@ -139,6 +143,108 @@ class PlatformV1ContractTests(unittest.TestCase):
             "detailsAvailable": True,
             "pageBudgetBytes": 65536,
             "nextAction": "Request one detail section when needed.",
+        })
+
+    def test_plugin_conformance_report_requires_actionable_failures(self):
+        check = validator("plugin-conformance.schema.json")
+        check.validate({
+            "schemaVersion": "1.0.0",
+            "status": "failed",
+            "plugins": [{
+                "schemaVersion": "1.0.0",
+                "pluginId": "example.plugin",
+                "status": "failed",
+                "issues": [{
+                    "code": "PLUGIN_RUNTIME_UNAVAILABLE",
+                    "invariant": "PCV1-RUNTIME-FACTORY",
+                    "message": "The runtime factory is missing.",
+                    "nextAction": "Provide plugin_factory.",
+                }],
+            }],
+        })
+
+    def test_independent_plugin_release_descriptor_and_fixture_contracts(self):
+        release = validator("plugin-release.schema.json")
+        release.validate({
+            "schemaVersion": "1.0.0",
+            "pluginId": "example.plugin",
+            "pluginVersion": "1.0.0",
+            "platformApiVersion": "1.0.0",
+            "registration": "example_plugin.plugin:registration",
+            "manifest": "plugin/manifest.json",
+            "scopeSchema": "plugin/scope.schema.json",
+            "runtimeSource": "src",
+            "semanticReview": "plugin/review.md",
+            "fixtures": ["plugin/fixtures/pass.json"],
+            "packageMetadata": "pyproject.toml",
+            "conformance": {"contractVersion": "1.0.0"},
+        })
+
+        fixture = validator("plugin-fixture.schema.json")
+        fixture.validate({
+            "schemaVersion": "1.0.0",
+            "fixtureId": "example.pass",
+            "checkId": "EX-001",
+            "description": "A deterministic passing fixture.",
+            "scope": {"path": "example.json"},
+            "expected": {
+                "terminalStatus": "completed",
+                "decisionResults": ["scanned_no_issue"],
+            },
+        })
+
+    def test_plugin_progress_distinguishes_agent_waiting_from_platform_work(self):
+        check = validator("plugin-progress.schema.json")
+        check.validate({
+            "phase": "semantic_review",
+            "state": "awaiting_agent_decision",
+            "message": "Durable evidence is ready; semantic Agent judgment is required.",
+            "waitingOn": "agent",
+            "enteredAt": "2026-09-03T12:00:00Z",
+            "completed": {
+                "workItemsDiscovered": 1,
+                "workItemsInspected": 1,
+                "decisionsCommitted": 0,
+                "reviewCheckpoints": 0,
+            },
+            "remaining": {
+                "workItemsToInspect": 0,
+                "workItemsToDecide": 1,
+                "reviewItems": 12,
+                "failures": 0,
+            },
+            "requiredNextStep": "advance_plugin_run",
+            "nextAction": "Review the next evidence batch and save a durable checkpoint.",
+            "terminal": False,
+        })
+
+    def test_plugin_result_overview_explains_terminal_validity_and_action(self):
+        check = validator("plugin-result-overview.schema.json")
+        check.validate({
+            "schemaVersion": "1.0.0",
+            "status": "partial",
+            "conclusionValidity": "valid",
+            "message": "The Run closed with one valid decision and one unfinished WorkItem.",
+            "coverage": {
+                "discoveryComplete": True,
+                "discovered": 2,
+                "inspected": 1,
+                "decided": 1,
+                "failed": 0,
+                "unprocessed": 1,
+                "complete": False,
+            },
+            "outcomes": {
+                "issue_found": 0,
+                "scanned_no_issue": 1,
+                "not_applicable": 0,
+                "needs_review": 0,
+                "noise": 0,
+            },
+            "needsReviewCount": 0,
+            "failureCount": 0,
+            "invalidatedDecisionCount": 0,
+            "nextAction": "Inspect and decide the unfinished WorkItem.",
         })
 
 

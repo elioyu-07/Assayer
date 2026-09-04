@@ -11,6 +11,7 @@ import hashlib
 import json
 import time
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
@@ -28,6 +29,7 @@ from .contract import (
     PlatformEvent,
     PlatformLedger,
     Operation,
+    ProviderEvidenceExpectation,
     PlatformRun,
     PlatformRunResult,
     PluginManifest,
@@ -36,6 +38,7 @@ from .contract import (
 )
 from .ledger import PlatformLedgerStore
 from .plugin_registry import PluginRegistry
+from .parallel_execution import ParallelExecutionPlanner
 
 
 @runtime_checkable
@@ -103,6 +106,7 @@ class PlatformKernel:
         runtime: Any = None,
         decision_provider: SemanticDecisionProvider | None = None,
         committer: DecisionCommitter | None = None,
+        provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
     ) -> PlatformRunResult:
         """Run a plugin selected from the registry.
 
@@ -150,6 +154,7 @@ class PlatformKernel:
         return self.run(
             plugin, scope, check.check_id, provider, context,
             check_version=check.version, committer=selected_committer,
+            provider_evidence_expectation=provider_evidence_expectation,
         )
 
     def run(
@@ -162,7 +167,9 @@ class PlatformKernel:
         *,
         check_version: str | None = None,
         committer: DecisionCommitter | None = None,
+        provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
     ) -> PlatformRunResult:
+        run_started_tick = time.monotonic()
         manifest = plugin.manifest
         matches = tuple(item for item in manifest.checks
                         if item.check_id == check_id and (check_version is None or item.version == check_version))
@@ -175,9 +182,22 @@ class PlatformKernel:
                 (WorkFailure("run", check_id, code, message),),
                 {"discovered": 0, "inspected": 0, "cacheHits": 0, "operations": 0},
             )
+        if (
+            provider_evidence_expectation is not None
+            and provider_evidence_expectation.run_id != context.run_id
+        ):
+            return PlatformRunResult(
+                context.run_id, "failed", (),
+                (WorkFailure(
+                    "run", check_id, "PROVIDER_EVIDENCE_EXPECTATION_INVALID",
+                    "Provider Evidence expectation is bound to a different Run",
+                ),),
+                {"discovered": 0, "inspected": 0, "cacheHits": 0, "operations": 0},
+            )
         platform_run = PlatformRun(
             context.run_id, manifest.plugin_id, manifest.version,
             check.check_id, check.version, _digest(scope), _now(),
+            tuple(check.subject_kinds),
         )
         events: list[PlatformEvent] = []
         operation_records: list[Operation] = []
@@ -218,7 +238,10 @@ class PlatformKernel:
             ))
 
         def begin_operation(kind: str, work_item_id: str | None = None) -> str:
-            operation_id = f"operation:{context.run_id}:{len(operation_records) + 1}"
+            operation_id = (
+                f"operation:{context.run_id}:"
+                f"{len(operation_records) + len(operation_starts) + 1}"
+            )
             operation_starts[operation_id] = (_now(), time.monotonic())
             emit("operation.started", "start", "started", operation_id=operation_id,
                  work_item_id=work_item_id, details={"kind": kind})
@@ -241,13 +264,30 @@ class PlatformKernel:
         def finalize(status: str, decisions: Sequence[DecisionProposal], failures: Sequence[WorkFailure],
                      metrics: Mapping[str, int], receipts: Sequence[CommitReceipt] = ()) -> PlatformRunResult:
             emit("platform.run.terminal", "finish", status)
+            finalized_metrics = dict(metrics)
+            finalized_metrics["wallClockMs"] = max(
+                0, int((time.monotonic() - run_started_tick) * 1000),
+            )
             authority = receipts[0].authority if receipts else "platform"
+            workflow = {
+                "state": status,
+                "phase": "finished",
+                "canFinish": True,
+                "requiredNextStep": None,
+                "remaining": {
+                    "workItemsToInspect": 0,
+                    "workItemsToDecide": 0,
+                    "reviewItems": 0,
+                    "failures": len(failures),
+                },
+            }
             ledger = PlatformLedger(
                 platform_run, status, tuple(operation_records), tuple(events), tuple(receipts), (),
                 tuple(all_work_items), tuple(packets), tuple(decisions), tuple(failures), authority,
+                workflow=workflow, metrics=finalized_metrics,
             )
             result = PlatformRunResult(
-                context.run_id, status, tuple(decisions), tuple(failures), metrics,
+                context.run_id, status, tuple(decisions), tuple(failures), finalized_metrics,
                 tuple(receipts), ledger,
             )
             if self._ledger_store is not None:
@@ -261,6 +301,9 @@ class PlatformKernel:
             "adaptiveBatchReductions": 0,
             "commitAttempts": 0, "decisionsCommitted": 0, "durableCommits": 0,
             "commitReplays": 0,
+            "parallelEnabled": 0, "parallelWorkers": 1,
+            "parallelTasks": 0, "parallelWallMs": 0,
+            "parallelTaskDurationMs": 0, "parallelEstimatedWaitSavedMs": 0,
         }
         failures: list[WorkFailure] = []
         decisions: list[DecisionProposal] = []
@@ -302,7 +345,11 @@ class PlatformKernel:
 
         profile = manifest.execution_profile
         chunk_size = profile.inspect_batch_size
-        capability_digest = _digest(sorted(context.capabilities))
+        capability_digest = _digest({
+            "capabilities": sorted(context.capabilities),
+            "limits": dict(context.limits),
+            "provider": provider_evidence_expectation,
+        })
         def inspect_chunk(chunk: Sequence[WorkItem]) -> int:
             pending: list[WorkItem] = []
             for item in chunk:
@@ -320,7 +367,10 @@ class PlatformKernel:
                 metrics["inspectionBatches"] += 1
                 result = tuple(plugin.inspect(pending, check, context))
                 metrics["inspected"] += len(result)
-                self._validate_packets(result, pending, check)
+                self._validate_packets(
+                    result, pending, check,
+                    provider_evidence_expectation=provider_evidence_expectation,
+                )
                 finish_operation(operation_id, "inspect", "succeeded", pending[0].work_item_id if len(pending) == 1 else None)
                 for packet in result:
                     key = self._cache_key(manifest, check, packet.work_item, capability_digest)
@@ -365,18 +415,179 @@ class PlatformKernel:
                     return 0
 
         adaptive_chunk_size = chunk_size
-        offset = 0
-        while offset < len(applicable_items):
-            chunk = applicable_items[offset:offset + adaptive_chunk_size]
-            splits_before = metrics["batchSplits"]
-            learned_size = inspect_chunk(chunk)
-            if metrics["batchSplits"] > splits_before:
-                next_size = min(adaptive_chunk_size, max(learned_size, 1))
-                if next_size < adaptive_chunk_size:
-                    metrics["adaptiveBatchReductions"] += 1
-                    adaptive_chunk_size = next_size
-            offset += len(chunk)
+        initial_chunks = tuple(
+            applicable_items[offset:offset + chunk_size]
+            for offset in range(0, len(applicable_items), chunk_size)
+        )
+        parallel_candidates: list[tuple[WorkItem, ...]] = []
+        for chunk in initial_chunks:
+            pending = []
+            for item in chunk:
+                key = self._cache_key(manifest, check, item, capability_digest)
+                if profile.cache_reuse == "allowed" and key is not None and key in self._cache:
+                    continue
+                pending.append(item)
+            if pending:
+                parallel_candidates.append(tuple(pending))
+        try:
+            parallel_plan = ParallelExecutionPlanner().plan(
+                profile,
+                context.limits,
+                task_count=len(parallel_candidates),
+            )
+        except PlatformContractError as exc:
+            failures.extend(
+                WorkFailure(item.work_item_id, check_id, exc.code, exc.message)
+                for item in applicable_items
+            )
+            metrics["inspectBatchSize"] = adaptive_chunk_size
+            return finalize("failed", (), failures, metrics)
+        emit(
+            "inspection.parallel.planned", "instant", parallel_plan.mode,
+            details=parallel_plan.as_dict(),
+        )
+        metrics["parallelEnabled"] = int(parallel_plan.mode == "parallel")
+        metrics["parallelWorkers"] = parallel_plan.worker_count
+        metrics["parallelTasks"] = parallel_plan.task_count
+
+        if parallel_plan.mode == "parallel":
+            for item in applicable_items:
+                key = self._cache_key(manifest, check, item, capability_digest)
+                if profile.cache_reuse == "allowed" and key is not None and key in self._cache:
+                    packets.append(self._cache[key])
+                    metrics["cacheHits"] += 1
+
+            operations = []
+            for pending in parallel_candidates:
+                operation_id = begin_operation(
+                    "inspect", pending[0].work_item_id if len(pending) == 1 else None,
+                )
+                metrics["operations"] += 1
+                metrics["inspectionBatches"] += 1
+                operations.append((pending, operation_id))
+
+            def parallel_inspect(pending: tuple[WorkItem, ...]) -> tuple[Any, int]:
+                started = time.monotonic()
+                try:
+                    return tuple(plugin.inspect(pending, check, context)), max(
+                        0, int((time.monotonic() - started) * 1000),
+                    )
+                except Exception as error:
+                    return error, max(0, int((time.monotonic() - started) * 1000))
+
+            parallel_started = time.monotonic()
+            with ThreadPoolExecutor(
+                max_workers=parallel_plan.worker_count,
+                thread_name_prefix="assayer-inspect",
+            ) as executor:
+                futures = tuple(
+                    executor.submit(parallel_inspect, pending)
+                    for pending, _operation_id in operations
+                )
+                outcomes = tuple(future.result() for future in futures)
+            metrics["parallelWallMs"] = max(
+                0, int((time.monotonic() - parallel_started) * 1000),
+            )
+            metrics["parallelTaskDurationMs"] = sum(duration for _value, duration in outcomes)
+            metrics["parallelEstimatedWaitSavedMs"] = max(
+                0,
+                metrics["parallelTaskDurationMs"] - metrics["parallelWallMs"],
+            )
+            emit(
+                "inspection.parallel.measured", "finish", "measured",
+                details={
+                    "taskCount": parallel_plan.task_count,
+                    "workerCount": parallel_plan.worker_count,
+                    "parallelWallMs": metrics["parallelWallMs"],
+                    "summedTaskDurationMs": metrics["parallelTaskDurationMs"],
+                    "estimatedWaitReductionMs": metrics["parallelEstimatedWaitSavedMs"],
+                    "estimateOnly": True,
+                },
+            )
+
+            for (pending, operation_id), (outcome, _duration) in zip(operations, outcomes):
+                work_item_id = pending[0].work_item_id if len(pending) == 1 else None
+                if not isinstance(outcome, Exception):
+                    result = tuple(outcome)
+                    try:
+                        metrics["inspected"] += len(result)
+                        self._validate_packets(
+                            result,
+                            pending,
+                            check,
+                            provider_evidence_expectation=provider_evidence_expectation,
+                        )
+                        finish_operation(
+                            operation_id, "inspect", "succeeded", work_item_id,
+                        )
+                        result_by_id = {
+                            packet.work_item.work_item_id: packet for packet in result
+                        }
+                        for item in pending:
+                            packet = result_by_id[item.work_item_id]
+                            key = self._cache_key(
+                                manifest, check, packet.work_item, capability_digest,
+                            )
+                            if profile.cache_reuse == "allowed" and key is not None:
+                                self._cache[key] = packet
+                            packets.append(packet)
+                        continue
+                    except PlatformContractError as error:
+                        outcome = error
+                error_code = (
+                    outcome.code
+                    if isinstance(outcome, PlatformContractError)
+                    else "INSPECTION_FAILED"
+                )
+                message = (
+                    outcome.message
+                    if isinstance(outcome, PlatformContractError)
+                    else str(outcome)
+                )
+                finish_operation(
+                    operation_id, "inspect", "failed", work_item_id, error_code,
+                )
+                if len(pending) > 1 and profile.can_split_failed_inspection:
+                    metrics["batchSplits"] += 1
+                    midpoint = len(pending) // 2
+                    learned_size = max(
+                        inspect_chunk(pending[:midpoint]),
+                        inspect_chunk(pending[midpoint:]),
+                    )
+                    next_size = min(adaptive_chunk_size, max(learned_size, 1))
+                    if next_size < adaptive_chunk_size:
+                        metrics["adaptiveBatchReductions"] += 1
+                        adaptive_chunk_size = next_size
+                else:
+                    if len(pending) > 1:
+                        message = (
+                            "The inspection batch failed and the plugin does not permit safe "
+                            f"failure splitting. {message}"
+                        )
+                    failures.extend(
+                        WorkFailure(item.work_item_id, check_id, error_code, message)
+                        for item in pending
+                    )
+        else:
+            offset = 0
+            while offset < len(applicable_items):
+                chunk = applicable_items[offset:offset + adaptive_chunk_size]
+                splits_before = metrics["batchSplits"]
+                learned_size = inspect_chunk(chunk)
+                if metrics["batchSplits"] > splits_before:
+                    next_size = min(adaptive_chunk_size, max(learned_size, 1))
+                    if next_size < adaptive_chunk_size:
+                        metrics["adaptiveBatchReductions"] += 1
+                        adaptive_chunk_size = next_size
+                offset += len(chunk)
         metrics["inspectBatchSize"] = adaptive_chunk_size
+
+        packet_order = {packet.work_item.work_item_id: packet for packet in packets}
+        packets[:] = [
+            packet_order[item.work_item_id]
+            for item in applicable_items
+            if item.work_item_id in packet_order
+        ]
 
         packet_by_id = {packet.work_item.work_item_id: packet for packet in packets}
         decision_size = profile.max_batch_size if profile.decision_batching == "allowed" else 1
@@ -519,6 +730,15 @@ class PlatformKernel:
 
     def publish(self, result: PlatformRunResult, publisher: ArtifactPublisher) -> PlatformRunResult:
         """Run an external publisher only after the commit closure is valid."""
+        from .result_conformance import inspect_result_conformance
+
+        conformance = inspect_result_conformance(result)
+        if not conformance.passed:
+            first = conformance.issues[0]
+            raise PlatformContractError(
+                "PUBLICATION_CONFORMANCE_FAILED",
+                f"{first.message} Contract: {first.invariant}. Next action: {first.next_action}",
+            )
         if result.status == "failed" or result.ledger is None:
             raise PlatformContractError("PUBLICATION_GATE", "Failed or untracked runs cannot publish reports")
         if len(result.decisions) != len(result.receipts) or not result.receipts:
@@ -570,7 +790,13 @@ class PlatformKernel:
             ids.add(item.work_item_id)
 
     @staticmethod
-    def _validate_packets(packets: Sequence[InvestigationPacket], expected: Sequence[WorkItem], check: CheckContract) -> None:
+    def _validate_packets(
+        packets: Sequence[InvestigationPacket],
+        expected: Sequence[WorkItem],
+        check: CheckContract,
+        *,
+        provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
+    ) -> None:
         expected_by_id = {item.work_item_id: item for item in expected}
         seen: set[str] = set()
         for packet in packets:
@@ -595,6 +821,11 @@ class PlatformKernel:
                     raise PlatformContractError("EVIDENCE_CLOSURE", "Evidence is bound to a different WorkItem or Check")
                 if item.source_identity != packet.work_item.identity:
                     raise PlatformContractError("EVIDENCE_SOURCE", "Evidence source identity does not match the WorkItem")
+            PlatformKernel._validate_provider_evidence(
+                packet,
+                check,
+                provider_evidence_expectation,
+            )
             for dimension in packet.dimensions:
                 if not all(reference in evidence for reference in dimension.evidence_refs):
                     raise PlatformContractError("EVIDENCE_REFERENCE", "Dimension references unknown evidence")
@@ -606,6 +837,78 @@ class PlatformKernel:
                 raise PlatformContractError("RECOVERY_INVALID", "Decision evidence was not safely recovered")
         if seen != set(expected_by_id):
             raise PlatformContractError("PACKET_MISSING", "Inspection must return exactly one packet per WorkItem")
+
+    @staticmethod
+    def _validate_provider_evidence(
+        packet: InvestigationPacket,
+        check: CheckContract,
+        expectation: ProviderEvidenceExpectation | None,
+    ) -> None:
+        bound = tuple(item for item in packet.evidence if item.provider_bound)
+        if expectation is None:
+            if bound:
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_UNVERIFIED",
+                    "Provider-bound Evidence requires a frozen provider execution expectation",
+                )
+            return
+        if expectation.run_id == "":
+            raise PlatformContractError(
+                "PROVIDER_EVIDENCE_EXPECTATION_INVALID",
+                "Provider Evidence expectation must identify the current Run",
+            )
+        covered: set[str] = set()
+        for evidence in bound:
+            required = (
+                evidence.run_id,
+                evidence.provider_request_id,
+                evidence.provider_id,
+                evidence.provider_version,
+                evidence.capability,
+                evidence.source_state_digest,
+            )
+            if any(not isinstance(value, str) or not value for value in required):
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_INCOMPLETE",
+                    "Provider-bound Evidence is missing required execution identity",
+                )
+            if (
+                evidence.run_id != expectation.run_id
+                or evidence.provider_id != expectation.provider_id
+                or evidence.provider_version != expectation.provider_version
+            ):
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_IDENTITY_MISMATCH",
+                    "Provider Evidence identity does not match the frozen execution provider",
+                )
+            allowed_kinds = expectation.capability_evidence_kinds.get(evidence.capability)
+            if allowed_kinds is None or evidence.capability not in check.required_capabilities:
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_CAPABILITY_MISMATCH",
+                    "Provider Evidence names an unrequested or unnegotiated capability",
+                )
+            if evidence.kind not in allowed_kinds:
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_KIND_UNDECLARED",
+                    "Provider Evidence kind is not declared for its capability",
+                )
+            if evidence.source_state_digest != packet.work_item.state_digest:
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_STATE_MISMATCH",
+                    "Provider Evidence state does not match the current WorkItem",
+                )
+            if dict(evidence.algorithm_versions) != dict(expectation.algorithm_versions):
+                raise PlatformContractError(
+                    "PROVIDER_EVIDENCE_ALGORITHM_MISMATCH",
+                    "Provider Evidence algorithms do not match the frozen provider descriptor",
+                )
+            covered.add(evidence.capability)
+        missing = set(check.required_capabilities) - covered
+        if missing:
+            raise PlatformContractError(
+                "PROVIDER_EVIDENCE_INCOMPLETE",
+                "Provider Evidence does not cover every capability required by the Check",
+            )
 
     @staticmethod
     def _validate_proposals(proposals: Sequence[DecisionProposal], packets: Mapping[str, InvestigationPacket], check: CheckContract) -> None:

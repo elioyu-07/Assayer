@@ -3,7 +3,7 @@
 | Metadata | Value |
 |---|---|
 | Document version | 1.1.0 |
-| Date | 2026-09-03 |
+| Date | 2026-09-04 |
 | Status | Execution baseline |
 | Owner | Assayer maintainers |
 | Primary client | Codex CLI |
@@ -204,8 +204,10 @@ gates that every plugin shares.
   intentionally excluded scope.
 - Safe adaptive batch sizing and failure splitting, honoring plugin-declared
   ordering, isolation, parallelism, and cache constraints.
-- Platform-level Evidence cache keys and invalidation checks, plus measured
-  parallel execution only for independent WorkItems.
+- Measured parallel execution only for independent WorkItems, bounded by
+  negotiated runtime concurrency and merged deterministically. Persistent or
+  cross-process platform caching is explicitly deferred; the existing in-process
+  compatibility cache is not expanded in this milestone.
 - Performance conformance checks proving that call reduction does not reduce
   Evidence closure, coverage, recovery, result validity, or diagnostic detail.
 
@@ -271,13 +273,109 @@ Deterministic persistence and terminal-publication fault injection is
 implemented in Vertical Slice 053: running-ledger rollback, pending-result
 promotion, latest-terminal replay, orphan-pointer repair, and corrupt-state
 fail-closed behavior are now covered.
+The first plugin release gate is implemented in Vertical Slice 054: plugin
+registration and package validation now reject missing factories, undeclared
+capabilities, invalid scope schemas, unsafe execution profiles, manifest
+incompatibility, and incomplete constructed interfaces. The bundle builder
+runs the same gate before wheel creation and emits actionable `PCV1-*`
+conformance failures. Package-resource fixtures and independent installer
+enforcement remain open.
+Independent package resource validation is implemented in Vertical Slice 055:
+the static gate verifies a release descriptor, safe contained paths, manifest
+and project identity, business scope schema, runtime registration source,
+semantic-review instructions, deterministic fixture contracts, and Python
+entry-point metadata without importing plugin code. Isolated installation and
+fixture execution remain open.
+Isolated release execution is implemented in Vertical Slice 056: a statically
+valid local package is installed into a temporary target without dependency
+download, loaded in a new Python worker through exactly one declared entry
+point, reconciled against its static manifest and scope schema, and exercised
+through deterministic Platform Kernel fixtures. This gate does not persistently
+install, upgrade, or trust unreviewed code.
+Generic runtime progress and diary output are implemented in Vertical Slice
+057: every interactive plugin response now exposes a compact phase, lifecycle
+state, waiting owner, completed and remaining counters, durable next step, and
+plain-language next action. `platform-run.log` is a derived diary that explains
+the Run identity, chronological work, decisions, failures, current position,
+and whether Agent waiting is expected. The canonical ledger remains unchanged
+as the source of truth. Real clean-CLI acceptance remains open.
+Platform-owned result experience is implemented in Vertical Slice 058: every
+generic terminal response now explains validity, discovery and WorkItem
+coverage, common outcome counts, review/failure counts, and the next action.
+Decision pages preserve committed reasons and dimension reasons;
+`needs_review` exposes concrete unresolved dimensions; and failed Runs suppress
+invalidated Decisions and optional plugin summaries from the formal result
+while retaining immutable ledger history.
 The checkpoint and incremental semantic-review recovery path is accepted for
 this milestone. Bundle `0.1.0+codex.20260903082017` passed deterministic
 verification and isolated startup; the owner then completed a real Codex CLI
 trial and reported the interruption/continuation experience as acceptable on
 2026-09-03. Exact timing telemetry was not supplied and is not inferred.
-Cache/parallel execution and install/release conformance remain open for
-subsequent slices.
+Persistent platform caching is deferred. Parallel execution and provider
+install/release conformance are implemented in subsequent slices.
+Capability-provider registration conformance is implemented in Vertical Slice
+066: provider descriptors, API compatibility, scope schemas, authorization,
+failure and retry semantics, algorithm identity, factories, constructed
+interfaces, duplicate IDs, and ambiguous capability selection now fail closed
+through the shared `assayer-provider-check` gate. Runtime capability
+intersection and provider Evidence binding are implemented in the following
+slices; external package validation and isolated installation follow in Slice
+069.
+Four-way capability and budget negotiation is implemented in Vertical Slice
+067: the effective profile is the exact intersection of Check requirements,
+provider declarations, platform policy, and user scope; effective limits can
+only narrow provider ceilings; and blocked negotiation cannot create a runtime
+context. Provider-bound runner integration and provider Evidence/failure
+binding are implemented in Vertical Slice 068: Host-created requests carry
+Run, WorkItem, Check, provider, capability, source-state, idempotency, and
+effective-budget identity; responses must contain bounded source facts or a
+declared safe failure; and the Kernel rejects incomplete or substituted
+Provider Evidence before semantic decision. Existing product adapters remain
+explicit compatibility paths, while external provider packaging and isolated
+installation are implemented in Vertical Slice 069. Provider source packages
+now bind descriptor, entry point, runtime source, package metadata, and
+deterministic capability fixtures without static code import; a new-process
+temporary installation gate reconciles runtime identity and executes both fact
+and classified-failure fixtures through the negotiated Provider boundary.
+Persistent installation and product-adapter migration remain open.
+The parallel inspection contract is implemented in Vertical Slice 070:
+plugins must explicitly allow parallel work and guarantee independent ordering,
+the scheduler cannot exceed negotiated `maxConcurrency`, missing policy falls
+back to serial, failures remain isolated, and accepted packets are merged in
+original WorkItem order before semantic decision. The ledger and performance
+metrics record whether parallel execution occurred and why. Existing plugins
+remain serial until their independence is proven; no manifest is widened by
+this slice.
+The unified platform performance bill is implemented in Vertical Slice 071.
+Every generic Run now separates available wall-clock elapsed time, summed Host
+operation work, isolated Provider request work, parallel inspection elapsed
+time, and summed parallel task work. Missing Run, Agent, model, transport, or
+Provider telemetry is explicit and has no fabricated zero duration. Scheduler
+wait reduction is labeled as an estimate and is never reported as measured
+end-to-end speedup. JSON and summary-first Markdown views are derived from the
+canonical platform ledger and cannot affect Evidence, Decisions, or status.
+Shared terminal result and recovery conformance is implemented in Vertical
+Slice 072. Batch publication, interactive terminal persistence, and isolated
+external-plugin fixtures now enforce the same ledger/result identity,
+terminal-event, Evidence/Decision, latest-recovery, receipt, completed
+coverage, failed-result suppression, and artifact traceability invariants.
+The latest interactive recovery outcome is an active Decision barrier rather
+than passive diagnostic text.
+Portable canonical result publication is implemented in Vertical Slice 073.
+Generic batch and interactive terminal Runs now derive and validate one
+`canonical-result.json` from the canonical ledger, with common coverage,
+outcomes, Findings, review and unverified items, failures, performance, and
+relative trace references. The result binds the exact persisted ledger digest,
+and historical replay validates identity, status, schema, and digest before
+returning it. Plugins cannot override common result fields through their
+separate summary views.
+Frontend canonical result compatibility is implemented in Vertical Slice 074.
+The validated frontend AuditLedger now derives the same portable result
+contract without changing `audit-summary.md`, `issues.json`,
+`audit-ledger.json`, or browser diagnostics. The adapter preserves exact
+Assessment, Finding, Evidence, invalidation, coverage, performance, and ledger
+digest semantics; frontend-only counts live in a validated namespaced
+extension.
 
 ### Interruption recovery gate (J06b / M3-R)
 
@@ -415,7 +513,7 @@ Only after M4-M6 are stable:
 
 - additional domain plugins and capability providers;
 - organization policy, signing, trust, and marketplace workflows;
-- deeper batching, caching, parallelism, and incremental traversal;
+- deeper batching, parallelism, and incremental traversal;
 - screenshot sanitization and stronger source attribution;
 - distributed execution and larger-scale scheduling.
 
@@ -490,9 +588,9 @@ silently broaden the selected rule boundary.
 | Stage | Current status | Remaining release gate |
 |---|---|---|
 | M0 Scope and baseline | Scope is documented | Refresh the clean CLI baseline when owner acceptance runs |
-| M1 Vertical user journey | Partially implemented; J06b accepted | J04 observability, J07 clean CLI, and J08 lifecycle evidence |
+| M1 Vertical user journey | J04-J05 implementation and J06b recovery complete | J04-J05 owner acceptance, J07 clean CLI, and J08 lifecycle evidence |
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
-| M3 Enforceable and efficient platform | Active; Slices 042-053 packaged and J06b accepted | Conformance/release enforcement, then measured cache/parallel work |
+| M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted | Collect measured owner workloads and close remaining clean-CLI evidence |
 | M4 External Spec plugin | Queued | Starts only after the M3 reliability gate |
 | M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
@@ -521,18 +619,36 @@ silently broaden the selected rule boundary.
 
 ### Next work, in order
 
-1. Start the M3 plugin conformance and release gate: turn the shared plugin
-   constitution into package-time validation that rejects incompatible or
-   incomplete plugins before installation.
-2. Close the remaining J04-J08 implementation gaps, including the M1 bounded
-   Agent-waiting safeguard, readable diary output, and fresh clean-CLI
-   evidence. Retain three independent owner-run CLI journeys as an explicit
-   acceptance item until they are actually run.
-3. Complete the remaining M3 platform conformance, install, and performance
-   gates: shared contract enforcement, release rejection, cache/parallel
-   measurements, and result/recovery invariants across generic plugins.
-4. Externalize the Spec plugin and complete its independent lifecycle.
-5. Build the Agent-first plugin workbench.
+1. Obtain fresh clean-CLI evidence for the implemented J04 runtime and J05
+   result behavior, then close the remaining J07 and J08 journey gaps. J08a
+   read-only installation and feedback status is implemented in Vertical Slice
+   059; fail-closed lifecycle planning is implemented in Vertical Slice 060.
+   Durable transaction execution and automatic compensation are implemented
+   behind an adapter in Vertical Slice 061. The restricted Codex
+   list/add/remove adapter is implemented and isolated-tested in Vertical
+   Slice 062. Two-stage product authorization with durable one-use plan tokens,
+   external authorization, and terminal replay is implemented behind an
+   optional product controller in Vertical Slice 063. Safe private-runtime
+   cleanup is implemented as an out-of-process,
+   transaction-gated capability in Vertical Slice 064. A Codex client boundary
+   that proves the source of user approval, invokes cleanup after the old MCP
+   stops, and passes real lifecycle acceptance remains. Vertical Slice 065
+   passes the complete composed lifecycle against a stateful fake Codex process
+   and is explicitly non-publishable; it does not satisfy UAT-08.
+   Retain
+   three independent owner-run CLI journeys as an explicit acceptance item
+   until they are actually run.
+2. Complete the remaining M3 platform performance evidence:
+   collect measured parallel workloads across generic plugins. The legacy
+   frontend compatibility result adapter is complete without changing
+   historical outputs. Provider timing and the unified performance bill are implemented
+   in Slice 071; shared result/recovery conformance is implemented in Slice
+   072; portable canonical results are implemented in Slice 073, and frontend
+   compatibility publication is implemented in Slice 074. Persistent
+   platform caching is deferred and is not a prerequisite.
+3. Externalize the Spec plugin and complete its independent lifecycle,
+   including persistent install, upgrade, rollback, and uninstall.
+4. Build the Agent-first plugin workbench.
 
 ### Deferred
 

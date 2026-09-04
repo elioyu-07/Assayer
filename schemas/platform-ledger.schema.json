@@ -16,7 +16,12 @@
         "check_id": { "$ref": "common.schema.json#/$defs/ruleId" },
         "check_version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
         "scope_digest": { "$ref": "common.schema.json#/$defs/sha256" },
-        "started_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+        "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "subject_kinds": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "uniqueItems": true
+        }
       }
     },
     "status": { "enum": ["running", "completed", "partial", "failed"] },
@@ -87,6 +92,10 @@
           }
         }
       }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
     }
   }
 }

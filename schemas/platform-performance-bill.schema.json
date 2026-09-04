@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/platform-performance-bill.schema.json",
+  "title": "AssayerPlatformPerformanceBill",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "runId", "status", "source", "measurement", "parallelism", "limitations"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "status": { "enum": ["running", "completed", "partial", "failed"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ledgerKind", "eventCount", "operationCount"],
+      "properties": {
+        "ledgerKind": { "const": "platform-ledger" },
+        "eventCount": { "type": "integer", "minimum": 0 },
+        "operationCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wallClock", "hostOperations", "provider", "agentWait", "transport", "model"],
+      "properties": {
+        "wallClock": { "$ref": "#/$defs/timing" },
+        "hostOperations": { "$ref": "#/$defs/timing" },
+        "provider": { "$ref": "#/$defs/providerTiming" },
+        "agentWait": { "$ref": "#/$defs/timing" },
+        "transport": { "$ref": "#/$defs/timing" },
+        "model": { "$ref": "#/$defs/timing" }
+      }
+    },
+    "parallelism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "reason", "taskCount", "workerCount", "inspectionWindow", "summedTaskWork", "estimatedWaitReduction"],
+      "properties": {
+        "mode": { "enum": ["serial", "parallel", "unavailable"] },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "taskCount": { "type": "integer", "minimum": 0 },
+        "workerCount": { "type": "integer", "minimum": 0 },
+        "inspectionWindow": { "$ref": "#/$defs/timing" },
+        "summedTaskWork": { "$ref": "#/$defs/timing" },
+        "estimatedWaitReduction": { "$ref": "#/$defs/estimate" }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "timing": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "durationMs", "aggregation"],
+          "properties": {
+            "status": { "const": "captured" },
+            "durationMs": { "type": "integer", "minimum": 0 },
+            "aggregation": { "enum": ["elapsed", "summed_work"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "enum": ["partial", "not_exposed"] },
+            "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          }
+        }
+      ]
+    },
+    "providerTiming": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "durationMs", "aggregation", "requestCount"],
+          "properties": {
+            "status": { "const": "captured" },
+            "durationMs": { "type": "integer", "minimum": 0 },
+            "aggregation": { "const": "summed_work" },
+            "requestCount": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "enum": ["partial", "not_exposed"] },
+            "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          }
+        }
+      ]
+    },
+    "estimate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "durationMs", "basis"],
+          "properties": {
+            "status": { "const": "estimated" },
+            "durationMs": { "type": "integer", "minimum": 0 },
+            "basis": { "const": "summed_task_work_minus_parallel_elapsed_window" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason"],
+          "properties": {
+            "status": { "enum": ["not_applicable", "unavailable"] },
+            "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+          }
+        }
+      ]
+    }
+  }
+}

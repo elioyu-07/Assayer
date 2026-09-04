@@ -32,8 +32,9 @@ from .contract import (
 )
 from .plugin_registry import PluginRegistry, PluginRegistration
 from .result_delivery import StagedResultDocument
+from .canonical_result import validate_canonical_result
+from .ledger import JsonPlatformLedgerStore, workflow_progress
 from .session import InteractivePlatformRun, InteractivePlatformSession
-from .ledger import JsonPlatformLedgerStore
 
 
 INTERACTIVE_PROTOCOL_VERSION = "1.0"
@@ -79,6 +80,129 @@ def _proposal(value: Mapping[str, Any], check_id: str, check_version: str) -> De
         value.get("reason") or value.get("decisionReason") or "",
         value.get("details", {}),
     )
+
+
+def _decision_view(item: DecisionProposal) -> dict[str, Any]:
+    return {
+        "workItemId": item.work_item_id,
+        "checkId": item.check_id,
+        "checkVersion": item.check_version,
+        "result": item.result,
+        "reason": item.reason,
+        "findings": {
+            finding.dimension: {"status": finding.status, "reason": finding.reason}
+            for finding in item.findings
+        },
+    }
+
+
+def _terminal_result_views(
+    status: str, work_items: Sequence[WorkItem], investigations: Sequence[InvestigationPacket],
+    decisions: Sequence[DecisionProposal], failures: Sequence[WorkFailure], *,
+    discovery_complete: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Derive a concise, domain-neutral terminal presentation from durable facts."""
+    work_item_ids = {item.work_item_id for item in work_items}
+    decided_ids = {item.work_item_id for item in decisions}
+    failed_ids = {item.work_item_id for item in failures if item.work_item_id in work_item_ids}
+    unprocessed = work_item_ids - decided_ids - failed_ids
+    outcome_counts = {
+        result: sum(item.result == result for item in decisions)
+        for result in (
+            "issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise",
+        )
+    }
+    review_items = []
+    for decision in decisions:
+        if decision.result != "needs_review":
+            continue
+        gaps = {
+            finding.dimension: {"status": finding.status, "reason": finding.reason}
+            for finding in decision.findings
+            if finding.status in {"unresolved", "blocked", "conflicted"}
+        }
+        dimensions = ", ".join(sorted(gaps)) or "the unresolved audit dimensions"
+        review_items.append({
+            "workItemId": decision.work_item_id,
+            "checkId": decision.check_id,
+            "reason": decision.reason,
+            "gaps": gaps,
+            "nextAction": (
+                f"Resolve the missing or conflicting facts documented for {dimensions}, "
+                "then start a new Run to obtain an evidence-backed decision."
+            ),
+        })
+
+    discovered = len(work_item_ids)
+    inspected = len({item.work_item.work_item_id for item in investigations})
+    decided = len(decided_ids)
+    failure_count = len(failures)
+    needs_review_count = outcome_counts["needs_review"]
+    if status == "failed":
+        message = (
+            f"The Run failed with {failure_count} recorded failure(s). "
+            "No formal conclusion from this Run is valid."
+        )
+        next_action = (
+            "Resolve the recorded failures, then start a new Run; "
+            "do not use this Run as a formal conclusion."
+        )
+    elif status == "partial":
+        incomplete_scope = 0 if discovery_complete else 1
+        message = (
+            f"The Run closed with {decided} valid recorded decision(s), "
+            f"{len(unprocessed)} unfinished WorkItem(s), and "
+            f"{failure_count} recorded failure(s)."
+        )
+        if incomplete_scope:
+            message += " Scope discovery did not finish, so additional WorkItems may exist."
+        next_action = (
+            "Review unfinished WorkItems and failures, resolve the stated blockers, "
+            "then start a new Run for the unfinished scope."
+        )
+    elif needs_review_count:
+        message = (
+            f"The Run completed its declared scope; {needs_review_count} decision(s) "
+            "still require review before they can be treated as resolved."
+        )
+        next_action = (
+            f"Review the {needs_review_count} needs-review decision(s) and resolve "
+            "the concrete gaps listed for each WorkItem."
+        )
+    elif outcome_counts["issue_found"]:
+        message = (
+            f"The Run completed its declared scope and found "
+            f"{outcome_counts['issue_found']} issue decision(s)."
+        )
+        next_action = "Review the issue decisions and their evidence-backed reasons."
+    else:
+        message = f"The Run completed its declared scope with {decided} recorded decision(s)."
+        next_action = "No further audit action is required."
+
+    overview = {
+        "schemaVersion": "1.0.0",
+        "status": status,
+        "conclusionValidity": "invalidated" if status == "failed" else "valid",
+        "message": message,
+        "coverage": {
+            "discoveryComplete": discovery_complete,
+            "discovered": discovered,
+            "inspected": inspected,
+            "decided": decided,
+            "failed": len(failed_ids),
+            "unprocessed": len(unprocessed),
+            "complete": status == "completed" and not unprocessed and not failures,
+        },
+        "outcomes": outcome_counts if status != "failed" else {
+            result: 0 for result in outcome_counts
+        },
+        "needsReviewCount": needs_review_count if status != "failed" else 0,
+        "failureCount": failure_count,
+        "invalidatedDecisionCount": decided if status == "failed" else 0,
+        "nextAction": next_action,
+    }
+    visible_decisions = [] if status == "failed" else [_decision_view(item) for item in decisions]
+    return overview, visible_decisions, [] if status == "failed" else review_items
 
 
 def _work_item(item: WorkItem) -> dict[str, Any]:
@@ -436,6 +560,21 @@ class InteractivePluginController:
             raise PlatformContractError(
                 "RESULT_PUBLICATION_FAILED", "Terminal Run result identity does not match its ledger",
             )
+        canonical_path = self.output_root / run_id / f"{run_id}.canonical-result.json"
+        ledger_path = self.output_root / run_id / f"{run_id}.platform-ledger.json"
+        try:
+            canonical = json.loads(canonical_path.read_text(encoding="utf-8"))
+            validate_canonical_result(
+                canonical,
+                ledger_bytes=ledger_path.read_bytes(),
+                expected_run_id=run_id,
+                expected_status=str(status),
+            )
+        except (OSError, ValueError, PlatformContractError) as error:
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED",
+                "Canonical terminal result is unavailable, invalid, or detached from its ledger",
+            ) from error
         expected_digest = hashlib.sha256(json.dumps(
             full_result, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
@@ -452,7 +591,7 @@ class InteractivePluginController:
                 ) from error
         document = StagedResultDocument({
             key: item for key, item in full_result.items()
-            if key in {"summary", "decisions", "failures"}
+            if key in {"resultOverview", "summary", "decisions", "reviewItems", "failures"}
         }, source_digest=expected_digest)
         workflow = ledger.get("workflow")
         if not isinstance(workflow, Mapping) or workflow.get("state") != status:
@@ -467,7 +606,27 @@ class InteractivePluginController:
         result_payload["artifacts"] = list(dict.fromkeys([
             *(artifacts if isinstance(artifacts, (tuple, list)) else ()), result_path.name,
         ]))
+        canonical_name = f"{run_id}.canonical-result.json"
+        result_payload["canonicalResult"] = canonical_name
         result_payload["resultDelivery"] = document.descriptor()
+        events = ledger.get("events", ())
+        boundary_event = next((
+            event for event in reversed(events)
+            if isinstance(event, Mapping)
+            and event.get("name") in {"platform.workflow.transition", "platform.run.terminal"}
+        ), None)
+        result_payload["progress"] = workflow_progress(
+            workflow,
+            discovered=int(result_payload["metrics"].get("discovered", 0) or 0),
+            inspected=int(result_payload["metrics"].get("inspected", 0) or 0),
+            decisions=int(result_payload["metrics"].get("decisionsCommitted", 0) or 0),
+            checkpoints=int(result_payload["metrics"].get("reviewCheckpoints", 0) or 0),
+            entered_at=(
+                str(boundary_event.get("occurred_at"))
+                if boundary_event is not None and boundary_event.get("occurred_at") is not None
+                else None
+            ),
+        )
         response = self._response(
             run_id, str(status), result_payload, workflow=dict(workflow),
             run_revision=run_revision,
@@ -1442,26 +1601,35 @@ class InteractivePluginController:
             if failure not in prospective_failures:
                 prospective_failures.append(failure)
         prospective_metrics = state["run"].metrics()
+        canonical_result_name = f"{run_id}.canonical-result.json"
+        result_overview, decision_views, review_items = _terminal_result_views(
+            status,
+            tuple(state["run"].work_items.values()),
+            tuple(state["run"].investigations.values()),
+            tuple(state["run"].decisions.values()),
+            tuple(prospective_failures),
+            discovery_complete=state["run"].discovery_complete,
+        )
         full_result_payload = {
-            "decisions": [
-                {"workItemId": item.work_item_id, "result": item.result}
-                for item in state["run"].decisions.values()
-            ],
+            "resultOverview": result_overview,
+            "decisions": decision_views,
+            "reviewItems": review_items,
             "failures": [
                 {"workItemId": item.work_item_id, "code": item.code, "message": item.message}
                 for item in prospective_failures
             ],
             "metrics": prospective_metrics,
-            "artifacts": published_artifacts,
+            "artifacts": [*published_artifacts, canonical_result_name],
+            "canonicalResult": canonical_result_name,
         }
-        if summary:
+        if summary and status != "failed":
             full_result_payload["summary"] = summary
         full_result_digest = hashlib.sha256(json.dumps(
             full_result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
         result_document = StagedResultDocument({
             key: value for key, value in full_result_payload.items()
-            if key in {"summary", "decisions", "failures"}
+            if key in {"resultOverview", "summary", "decisions", "reviewItems", "failures"}
         }, source_digest=full_result_digest)
         result_artifact = state["run"].store.root / "result-summary.json"
         pending_result_artifact = state["run"].store.root / "result-summary.pending.json"
@@ -1480,6 +1648,11 @@ class InteractivePluginController:
             raise PlatformContractError(
                 "PLATFORM_LEDGER_PERSIST_FAILED", "Terminal platform ledger could not be durably persisted",
             ) from error
+        canonical_path = state["run"].store.root / canonical_result_name
+        if not canonical_path.is_file():
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED", "Canonical result was not durably published",
+            )
         try:
             pending_result_artifact.replace(result_artifact)
         except OSError as error:
@@ -1489,8 +1662,9 @@ class InteractivePluginController:
         result_payload = dict(result_document.overview)
         result_payload["metrics"] = dict(result.metrics)
         result_payload["artifacts"] = list(dict.fromkeys(
-            [*published_artifacts, result_artifact.name]
+            [*full_result_payload["artifacts"], result_artifact.name]
         ))
+        result_payload["canonicalResult"] = canonical_path.name
         result_payload["resultDelivery"] = result_document.descriptor()
         terminal_response = self._response(
             run_id, status, result_payload, workflow=terminal_workflow,
@@ -1598,6 +1772,26 @@ class InteractivePluginController:
             "lastOperationId": last_operation_id,
             "requiredNextStep": workflow.get("requiredNextStep") if workflow is not None else None,
         })
+        if workflow is not None:
+            run = state["run"] if state is not None else None
+            metrics = result_payload.get("metrics") if isinstance(result_payload.get("metrics"), Mapping) else {}
+            boundary_event = next((
+                event for event in reversed(run.events)
+                if event.name in {"platform.workflow.transition", "platform.run.terminal"}
+            ), None) if run is not None else None
+            result_payload.setdefault("progress", workflow_progress(
+                workflow,
+                discovered=len(run.work_items) if run is not None else int(metrics.get("discovered", 0) or 0),
+                inspected=len(run.investigations) if run is not None else int(metrics.get("inspected", 0) or 0),
+                decisions=len(run.decisions) if run is not None else int(metrics.get("decisionsCommitted", 0) or 0),
+                checkpoints=(
+                    len(run.effective_review_checkpoints)
+                    if run is not None else int(metrics.get("reviewCheckpoints", 0) or 0)
+                ),
+                entered_at=boundary_event.occurred_at if boundary_event is not None else (
+                    run.run.started_at if run is not None else None
+                ),
+            ))
         response = {
             "protocolVersion": INTERACTIVE_PROTOCOL_VERSION,
             "runId": run_id,

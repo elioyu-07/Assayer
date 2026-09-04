@@ -14,6 +14,7 @@ from assayer_host import (CredentialVault, DeterministicEvidenceAdapter, Determi
                           ProductMcpToolTransport, create_mcp_server,
                           create_product_mcp_server)
 from assayer_host.page import EntrypointExecution, EntrypointObservation, PageObservation
+from assayer_host.release_lifecycle import PluginInstallation, PluginLifecyclePlanner
 
 
 VALID_RESPONSE = {
@@ -21,6 +22,16 @@ VALID_RESPONSE = {
     "runRevision": 1, "status": "ok", "result": {"operationId": "operation-001", "runRevision": 1},
     "evidenceRefs": [], "diagnosticRefs": [],
 }
+
+
+def blocked_lifecycle_plan(operation="upgrade"):
+    current = PluginInstallation(
+        "assayer@release-010", "0.1.0", True, True, True, True, True,
+    )
+    return PluginLifecyclePlanner().build(
+        operation, current, target=None, active_run=False,
+        release_direction_verified=False,
+    )
 
 
 class RecordingCore:
@@ -132,6 +143,30 @@ class ProductRecordingCore(RecordingCore):
             "processedEntrypointRefs": [], "skippedEntrypoints": [],
             "ruleSummaries": [], "unprocessedEntrypointRefs": [],
             "completionReason": completion_reason or "auto",
+        }
+
+
+class RecordingLifecycleController:
+    def __init__(self):
+        self.calls = []
+
+    def plan(self, operation):
+        self.calls.append(("plan", operation))
+        return {
+            "schemaVersion": "1.0.0", "phase": "planned",
+            "plan": blocked_lifecycle_plan(operation),
+            "planToken": None, "expiresAt": None,
+        }
+
+    def execute(self, token, *, confirmed):
+        self.calls.append(("execute", token, confirmed))
+        return {
+            "schemaVersion": "1.0.0", "phase": "authorization_required",
+            "replayed": False,
+            "result": {
+                "code": "EXTERNAL_AUTHORIZATION_REQUIRED",
+                "message": "Trusted external authorization is required.",
+            },
         }
 
 
@@ -356,7 +391,7 @@ class TransportTest(unittest.TestCase):
     def test_product_mcp_exposes_only_business_inputs(self):
         adapter = ProductMcpToolTransport(ProductRecordingCore())
         tools = adapter.list_tools()
-        self.assertEqual(len(tools), 23)
+        self.assertEqual(len(tools), 24)
         forbidden = {
             "protocolVersion", "requestId", "agentTurnId", "idempotencyKey",
             "scanId", "runId", "expectedRunRevision", "ruleRegistryVersion",
@@ -382,6 +417,8 @@ class TransportTest(unittest.TestCase):
         self.assertIn("get_plugin_result", {tool["name"] for tool in tools})
         self.assertIn("recover_work_item", {tool["name"] for tool in tools})
         self.assertIn("get_plugin_progress", {tool["name"] for tool in tools})
+        installation = next(tool for tool in tools if tool["name"] == "get_installation_status")
+        self.assertEqual(set(installation["inputSchema"]["properties"]), {"maxRecentRuns"})
         for diagnostic_name in {
             "discover_work_items", "inspect_work_items", "expand_investigation",
             "expand_evidence_collection", "checkpoint_review", "submit_decisions",
@@ -399,6 +436,36 @@ class TransportTest(unittest.TestCase):
         self.assertNotIn("record_findings", {tool["name"] for tool in tools})
         self.assertNotIn("commit_decision", {tool["name"] for tool in tools})
         self.assertNotIn("get_rule_contract", {tool["name"] for tool in tools})
+
+    def test_product_installation_status_requires_no_run_or_browser(self):
+        with tempfile.TemporaryDirectory() as directory:
+            core = ProductRecordingCore()
+            adapter = ProductMcpToolTransport(core, output_root=directory)
+            response = adapter.call_tool("get_installation_status", {"maxRecentRuns": 3})
+        self.assertEqual(response["structuredContent"]["status"], "ok")
+        self.assertIn(response["structuredContent"]["result"]["status"], {"healthy", "limited", "degraded"})
+        self.assertEqual(core.requests, [])
+
+    def test_product_installation_status_rejects_unknown_input(self):
+        adapter = ProductMcpToolTransport(ProductRecordingCore())
+        with self.assertRaises(HostError) as error:
+            adapter.call_tool("get_installation_status", {"path": "/private"})
+        self.assertEqual(error.exception.code, "INVALID_REQUEST")
+
+    def test_product_mcp_adds_lifecycle_tools_only_with_trusted_controller(self):
+        controller = RecordingLifecycleController()
+        adapter = ProductMcpToolTransport(
+            ProductRecordingCore(), lifecycle_controller=controller,
+        )
+        tools = {item["name"]: item for item in adapter.list_tools()}
+        self.assertEqual(len(tools), 26)
+        self.assertIn("plan_plugin_change", tools)
+        self.assertIn("execute_plugin_change", tools)
+        self.assertFalse(tools["plan_plugin_change"]["annotations"]["destructiveHint"])
+        self.assertTrue(tools["execute_plugin_change"]["annotations"]["destructiveHint"])
+        planned = adapter.call_tool("plan_plugin_change", {"operation": "upgrade"})
+        self.assertEqual(planned["structuredContent"]["result"]["phase"], "planned")
+        self.assertEqual(controller.calls, [("plan", "upgrade")])
 
     def test_generic_platform_mcp_runs_registered_configuration_plugin(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -888,8 +955,11 @@ class TransportTest(unittest.TestCase):
                 completion = adapter.call_tool("complete_audit", {})["structuredContent"]
                 self.assertEqual(completion["result"]["scanStatus"], "completed")
                 self.assertTrue(completion["result"]["conclusionsValid"])
+                self.assertEqual(completion["canonicalResult"], "canonical-result.json")
                 self.assertTrue({
                     "platform-ledger.json", "platform-events.jsonl", "platform-run.log",
+                    "platform-performance-bill.json", "platform-performance-bill.md",
+                    "canonical-result.json",
                 }.issubset(set(completion["result"]["artifactPaths"])))
                 self.assertTrue((Path(output) / "platform-ledger.json").is_file())
                 self.assertTrue((Path(output) / "platform-events.jsonl").is_file())
@@ -907,6 +977,10 @@ class TransportTest(unittest.TestCase):
                 receipt = platform_ledger["receipts"][0]
                 self.assertEqual(receipt["authority"], "platform")
                 self.assertEqual(receipt["metadata"]["hostAssessmentId"], decision["result"]["assessmentId"])
+                canonical = json.loads((Path(output) / "canonical-result.json").read_text())
+                self.assertEqual(canonical["run"]["pluginId"], "assayer.frontend-audit")
+                self.assertEqual(canonical["trace"]["ledgerRef"], "audit-ledger.json")
+                self.assertEqual(canonical["outcomes"][0]["result"], "scanned_no_issue")
             finally:
                 adapter.close()
 
@@ -985,11 +1059,32 @@ class TransportTest(unittest.TestCase):
             self.skipTest("MCP optional dependency is not installed")
         core = ProductRecordingCore()
         server = create_product_mcp_server(core)
+        installation = server._tool_manager.get_tool("get_installation_status")
+        self.assertIsNotNone(installation)
+        installation_result = asyncio.run(installation.run({"maxRecentRuns": 1}))
+        self.assertEqual(installation_result["structuredContent"]["status"], "ok")
+        self.assertEqual(core.requests, [])
         start = server._tool_manager.get_tool("start_audit")
         self.assertEqual(set(start.parameters["properties"]), {"url", "decisionReason"})
         result = asyncio.run(start.run({"url": "https://test.example.com"}))
         self.assertEqual(result["structuredContent"]["status"], "ok")
         self.assertEqual(core.requests[0]["protocolVersion"], "1.0")
+        server._assayer_transport.close()
+
+    def test_product_fastmcp_server_preserves_lifecycle_annotations(self):
+        try:
+            import mcp  # noqa: F401
+        except ImportError:
+            self.skipTest("MCP optional dependency is not installed")
+        controller = RecordingLifecycleController()
+        server = create_product_mcp_server(
+            ProductRecordingCore(), lifecycle_controller=controller,
+        )
+        planned = server._tool_manager.get_tool("plan_plugin_change")
+        executed = server._tool_manager.get_tool("execute_plugin_change")
+        self.assertFalse(planned.annotations.destructiveHint)
+        self.assertTrue(executed.annotations.destructiveHint)
+        self.assertTrue(executed.annotations.idempotentHint)
         server._assayer_transport.close()
 
 

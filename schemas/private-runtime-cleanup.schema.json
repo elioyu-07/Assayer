@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/private-runtime-cleanup.schema.json",
+  "title": "AssayerPrivateRuntimeCleanup",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "transactionId", "status", "runtimeRef", "deleted", "retryable", "result"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "transactionId": { "type": ["string", "null"], "pattern": "^lifecycle-[0-9a-f]{32}$" },
+    "status": { "enum": ["removed", "already_absent", "pending", "rejected"] },
+    "runtimeRef": { "type": ["string", "null"], "pattern": "^runtime-[0-9A-Za-z.+-]{1,128}$" },
+    "deleted": { "type": "boolean" },
+    "retryable": { "type": "boolean" },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "removed" } }, "required": ["status"] },
+      "then": { "properties": { "deleted": { "const": true }, "retryable": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "already_absent" } }, "required": ["status"] },
+      "then": { "properties": { "deleted": { "const": false }, "retryable": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "pending" } }, "required": ["status"] },
+      "then": { "properties": { "deleted": { "const": false }, "retryable": { "const": true } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "rejected" } }, "required": ["status"] },
+      "then": { "properties": { "deleted": { "const": false }, "retryable": { "const": false } } }
+    }
+  ]
+}

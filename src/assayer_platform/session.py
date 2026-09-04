@@ -93,6 +93,7 @@ class InteractivePlatformRun:
         self.run = PlatformRun(
             context.run_id, manifest.plugin_id, manifest.version,
             check.check_id, check.version, _digest(scope), _now(),
+            tuple(check.subject_kinds),
         )
         self.work_items: dict[str, WorkItem] = {}
         self.investigations: dict[str, InvestigationPacket] = {}
@@ -146,6 +147,7 @@ class InteractivePlatformRun:
             str(raw_run["run_id"]), str(raw_run["plugin_id"]), str(raw_run["plugin_version"]),
             str(raw_run["check_id"]), str(raw_run["check_version"]),
             str(raw_run["scope_digest"]), str(raw_run.get("started_at", "")),
+            tuple(str(item) for item in raw_run.get("subject_kinds", ())),
         )
         if restored_run.run_id != context.run_id:
             raise PlatformContractError("RUN_MISMATCH", "Resume descriptor and ledger Run identity differ")
@@ -256,11 +258,18 @@ class InteractivePlatformRun:
         if normalized == self.workflow:
             return
         previous_state = self.workflow.get("state")
+        previous_phase = self.workflow.get("phase")
         self.workflow = normalized
-        if previous_state != normalized.get("state"):
+        if (
+            previous_state != normalized.get("state")
+            or previous_phase != normalized.get("phase")
+        ):
             self._emit(
                 "platform.workflow.transition", "instant", str(normalized.get("state")),
                 details={
+                    "previousState": previous_state,
+                    "previousPhase": previous_phase,
+                    "phase": normalized.get("phase"),
                     "canFinish": bool(normalized.get("canFinish")),
                     "requiredNextStep": normalized.get("requiredNextStep"),
                 },
@@ -363,11 +372,20 @@ class InteractivePlatformRun:
         self._require_running()
         if work_item_id not in self.work_items:
             raise PlatformContractError("UNKNOWN_WORK_ITEM", "Recovery references an undiscovered WorkItem")
+        if work_item_id in self.decisions:
+            raise PlatformContractError(
+                "COMMIT_CONFLICT", "Recovery cannot change after the WorkItem decision is committed",
+            )
         if status not in {"restored", "not_required", "uncertain", "failed"}:
             raise PlatformContractError("INVALID_RECOVERY", "Recovery status is not supported")
-        self._record_operation("recover", status, work_item_id)
+        operation_id = self._record_operation(
+            "recover",
+            "succeeded" if status in {"restored", "not_required"} else "failed",
+            work_item_id,
+        )
         self._emit(
-            "recovery.finished", "finish", status, work_item_id=work_item_id,
+            "recovery.finished", "finish", status,
+            operation_id=operation_id, work_item_id=work_item_id,
             details=details or {},
         )
         self._save()
@@ -381,6 +399,15 @@ class InteractivePlatformRun:
         packet = self.investigations.get(proposal.work_item_id)
         if packet is None:
             raise PlatformContractError("UNKNOWN_INVESTIGATION", "Decision references an uninvestigated WorkItem")
+        latest_recovery = next((
+            event.outcome for event in reversed(self.events)
+            if event.name == "recovery.finished"
+            and event.work_item_id == proposal.work_item_id
+        ), packet.recovery_status)
+        if latest_recovery not in {"restored", "not_required"}:
+            raise PlatformContractError(
+                "RECOVERY_INVALID", "The latest WorkItem recovery does not permit a Decision commit",
+            )
         PlatformKernel._validate_proposals((proposal,), {proposal.work_item_id: packet}, self.check)
         PlatformKernel._validate_receipt(receipt, proposal)
         existing = self.receipts.get(proposal.work_item_id)
@@ -572,6 +599,20 @@ class InteractivePlatformRun:
         pending = set(self.investigations) - set(self.decisions)
         if status == "completed" and pending:
             raise PlatformContractError("DECISION_MISSING", "Completed Run has an uncommitted investigation")
+        latest_recovery: dict[str, str] = {}
+        for event in self.events:
+            if event.name == "recovery.finished" and event.work_item_id:
+                latest_recovery[event.work_item_id] = event.outcome
+        unsafe_decisions = {
+            work_item_id for work_item_id in self.decisions
+            if latest_recovery.get(
+                work_item_id, self.investigations[work_item_id].recovery_status,
+            ) not in {"restored", "not_required"}
+        }
+        if status == "completed" and unsafe_decisions:
+            raise PlatformContractError(
+                "RECOVERY_INVALID", "Completed Run contains a Decision after unresolved recovery",
+            )
 
     def finish(self, status: str, failures: Sequence[WorkFailure] = ()) -> PlatformRunResult:
         self.validate_finish(status, failures)
@@ -606,8 +647,10 @@ class InteractivePlatformRun:
             raise
         metrics = self.metrics()
         return PlatformRunResult(
-            self.run.run_id, status, tuple(self.decisions.values()), tuple(self.failures),
-            metrics, tuple(self.receipts.values()), ledger,
+            self.run.run_id, status,
+            () if status == "failed" else tuple(self.decisions.values()),
+            tuple(self.failures), metrics,
+            () if status == "failed" else tuple(self.receipts.values()), ledger,
         )
 
     def metrics(self) -> dict[str, int]:
@@ -664,8 +707,27 @@ class InteractivePlatformRun:
             tuple(self.receipts.values()), (), tuple(self.work_items.values()),
             tuple(self.investigations.values()), tuple(self.decisions.values()),
             tuple(self.failures), authority, tuple(self.review_checkpoints.values()),
-            self.workflow,
+            self.workflow, self.metrics(),
         )
+        if ledger.status in {"completed", "partial", "failed"}:
+            from .result_conformance import inspect_result_conformance
+
+            prospective = PlatformRunResult(
+                self.run.run_id,
+                ledger.status,
+                () if ledger.status == "failed" else ledger.decisions,
+                ledger.failures,
+                ledger.metrics,
+                () if ledger.status == "failed" else ledger.receipts,
+                ledger,
+            )
+            conformance = inspect_result_conformance(prospective)
+            if not conformance.passed:
+                first = conformance.issues[0]
+                raise PlatformContractError(
+                    "RESULT_CONFORMANCE_FAILED",
+                    f"{first.message} Contract: {first.invariant}. Next action: {first.next_action}",
+                )
         self.store.save(ledger)
         exporter = getattr(self.store, "export", None)
         if callable(exporter):

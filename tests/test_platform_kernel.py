@@ -166,14 +166,25 @@ class PlatformKernelTest(unittest.TestCase):
             self.assertEqual(store.load(result.run_id)["status"], "completed")
             ledger_root = Path(directory) / "ledger"
             self.assertTrue((ledger_root / f"{result.run_id}.platform-events.jsonl").is_file())
+            self.assertTrue((ledger_root / f"{result.run_id}.platform-performance-bill.json").is_file())
+            self.assertTrue((ledger_root / f"{result.run_id}.platform-performance-bill.md").is_file())
             journal = (ledger_root / f"{result.run_id}.platform-run.log").read_text(encoding="utf-8")
+            self.assertIn("Assayer Platform Run Diary", journal)
+            self.assertIn("Status: Completed", journal)
+            self.assertIn("Progress", journal)
             self.assertIn("platform.run.started", journal)
             self.assertIn("operation.finished", journal)
             self.assertIn("platform.run.terminal", journal)
+            self.assertIn("Next action: No further action is required.", journal)
+            self.assertNotIn("outcome=", journal)
+            self.assertNotIn("work_item=", journal)
             publisher = JsonSummaryPublisher(Path(directory) / "reports")
             published = kernel.publish(result, publisher)
             artifact = published.ledger.artifacts[0]
             self.assertTrue(Path(artifact.location).is_file())
+            self.assertTrue(
+                (Path(directory) / "reports" / f"{result.run_id}.platform-performance-bill.json").is_file()
+            )
             self.assertEqual(store.load(result.run_id)["artifacts"][0]["artifact_id"], artifact.artifact_id)
 
     def test_failed_result_cannot_be_published(self):

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/provider-execution.schema.json",
+  "title": "AssayerProviderExecutionEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "oneOf": [
+    { "required": ["request"] },
+    { "required": ["response"] }
+  ],
+  "properties": {
+    "request": { "$ref": "#/$defs/request" },
+    "response": { "$ref": "#/$defs/response" }
+  },
+  "$defs": {
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeoutMs", "maxBytes", "maxItems", "maxConcurrency"],
+      "properties": {
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "maxBytes": { "type": "integer", "minimum": 1 },
+        "maxItems": { "type": "integer", "minimum": 1 },
+        "maxConcurrency": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "idempotencyKey", "runId", "workItemId", "checkId", "checkVersion", "providerId", "providerVersion", "capability", "sourceIdentity", "stateDigest", "scope", "limits"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "idempotencyKey": { "$ref": "common.schema.json#/$defs/sha256" },
+        "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "checkId": { "$ref": "common.schema.json#/$defs/ruleId" },
+        "checkVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "providerId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "providerVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+        "sourceIdentity": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "stateDigest": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "scope": { "type": "object" },
+        "limits": { "$ref": "#/$defs/limits" }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sourceIdentity", "stateDigest", "payload"],
+      "properties": {
+        "kind": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "sourceIdentity": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "stateDigest": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "payload": { "type": "object" }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "requestId", "providerId", "providerVersion", "capability", "status", "facts", "failure"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "providerId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "providerVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+        "status": { "enum": ["succeeded", "failed"] },
+        "facts": { "type": "array", "items": { "$ref": "#/$defs/fact" } },
+        "failure": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/failure" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "succeeded" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "facts": { "minItems": 1 },
+              "failure": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "facts": { "maxItems": 0 },
+              "failure": { "$ref": "#/$defs/failure" }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -83,6 +83,7 @@ def installed_fixture_registration():
         plugin_factory=lambda: InstalledFixturePlugin(),
         decision_provider_factory=lambda: InstalledFixtureDecisionProvider(),
         capabilities=frozenset({"fixture_read"}),
+        scope_schema={"type": "object"},
     )
 
 
@@ -97,7 +98,13 @@ class PluginRegistryTest(unittest.TestCase):
         self.assertEqual(config.manifest.plugin_id, "assayer.config-quality")
 
     def test_duplicate_plugin_identity_fails_closed(self):
-        registration = PluginRegistration(ConfigQualityPlugin.manifest)
+        registration = PluginRegistration(
+            ConfigQualityPlugin.manifest,
+            plugin_factory=lambda: ConfigQualityPlugin(),
+            decision_provider_factory=lambda: ConfigurationDecisionProvider(),
+            capabilities=frozenset({"structured_read"}),
+            scope_schema={"type": "object"},
+        )
         registry = PluginRegistry((registration,))
 
         with self.assertRaisesRegex(PlatformContractError, "already registered"):
@@ -123,22 +130,22 @@ class PluginRegistryTest(unittest.TestCase):
         self.assertEqual(result.decisions[0].result, "scanned_no_issue")
         self.assertEqual(result.ledger.run.plugin_id, "assayer.config-quality")
 
-    def test_registered_plugin_missing_runtime_factory_is_explicit(self):
-        registry = PluginRegistry((PluginRegistration(ConfigQualityPlugin.manifest),))
-
-        result = PlatformKernel().run_registered(
-            registry, {}, "CFG-001",
-            PlatformContext("run-missing-factory", frozenset({"structured_read"})),
-        )
-
-        self.assertEqual(result.status, "failed")
-        self.assertEqual(result.failures[0].code, "PLUGIN_RUNTIME_UNAVAILABLE")
+    def test_registered_plugin_missing_runtime_factory_is_rejected_before_run(self):
+        with self.assertRaisesRegex(PlatformContractError, "PCV1-RUNTIME-FACTORY"):
+            PluginRegistry((PluginRegistration(
+                ConfigQualityPlugin.manifest,
+                decision_provider_factory=lambda: ConfigurationDecisionProvider(),
+                capabilities=frozenset({"structured_read"}),
+                scope_schema={"type": "object"},
+            ),))
 
     def test_entry_point_registration_is_loaded(self):
         registration = PluginRegistration(
             ConfigQualityPlugin.manifest,
             plugin_factory=lambda: ConfigQualityPlugin(),
             decision_provider_factory=lambda: ConfigurationDecisionProvider(),
+            capabilities=frozenset({"structured_read"}),
+            scope_schema={"type": "object"},
         )
 
         class EntryPoint:
@@ -204,6 +211,8 @@ class PluginRegistryTest(unittest.TestCase):
                 ).manifest,
             })(),
             decision_provider_factory=lambda: ConfigurationDecisionProvider(),
+            capabilities=frozenset({"structured_read"}),
+            scope_schema={"type": "object"},
         )
         result = PlatformKernel().run_registered(
             PluginRegistry((registration,)), {}, "CFG-001",
@@ -220,6 +229,8 @@ class PluginRegistryTest(unittest.TestCase):
             ConfigQualityPlugin.manifest,
             plugin_factory=fail,
             decision_provider_factory=lambda: ConfigurationDecisionProvider(),
+            capabilities=frozenset({"structured_read"}),
+            scope_schema={"type": "object"},
         )
         result = PlatformKernel().run_registered(
             PluginRegistry((registration,)), {}, "CFG-001",

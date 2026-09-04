@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/frontend-canonical-extension.schema.json",
+  "title": "FrontendCanonicalResultExtension",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "scanId", "auditLedgerRef", "issuesRef", "coverage", "issues", "diagnostics"],
+  "properties": {
+    "schemaVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "scanId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "auditLedgerRef": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "issuesRef": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pages", "objects", "entrypoints"],
+      "properties": {
+        "pages": { "$ref": "#/$defs/coverageCounts" },
+        "objects": { "$ref": "#/$defs/coverageCounts" },
+        "entrypoints": { "$ref": "#/$defs/entrypointCoverageCounts" }
+      }
+    },
+    "issues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["published", "invalidated"],
+      "properties": {
+        "published": { "$ref": "#/$defs/count" },
+        "invalidated": { "$ref": "#/$defs/count" }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["records", "failedOperations"],
+      "properties": {
+        "records": { "$ref": "#/$defs/count" },
+        "failedOperations": { "$ref": "#/$defs/count" }
+      }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0 },
+    "coverageCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovered", "processed", "unprocessed"],
+      "properties": {
+        "discovered": { "$ref": "#/$defs/count" },
+        "processed": { "$ref": "#/$defs/count" },
+        "unprocessed": { "$ref": "#/$defs/count" }
+      }
+    },
+    "entrypointCoverageCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovered", "processed", "skipped", "unprocessed"],
+      "properties": {
+        "discovered": { "$ref": "#/$defs/count" },
+        "processed": { "$ref": "#/$defs/count" },
+        "skipped": { "$ref": "#/$defs/count" },
+        "unprocessed": { "$ref": "#/$defs/count" }
+      }
+    }
+  }
+}

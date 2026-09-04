@@ -80,6 +80,14 @@ post-recovery proposals. Commit receipts are durable when production
 persistence is available and are replay-safe by Run/WorkItem/Check identity
 and proposal digest.
 
+The latest recovery outcome is an active commit barrier, not merely a diary
+entry. `uncertain` or `failed` recovery blocks a new Decision; a later
+`restored` or `not_required` outcome is required before commit. Recovery state
+cannot change after that WorkItem Decision is committed. Failed terminal Runs
+may retain earlier invalidated Decisions in the canonical ledger for
+diagnosis, but their formal result and publication surface must suppress those
+Decisions and receipts.
+
 ## 5. Execution and optimization
 
 The plugin declares whether discovery, inspection, or decision batching,
@@ -175,11 +183,30 @@ full plugin summary is durably published as `result-summary.json`, and staging
 must never remove Evidence, decisions, receipts, or failures from the ledger.
 Plugins provide semantic summary content but do not own transport pagination.
 
+The platform also derives a mandatory terminal `resultOverview` from the
+ledger. It exposes conclusion validity, discovery and WorkItem coverage,
+outcome counts, review and failure counts, and a next action independently of
+optional plugin summary content. Decision pages preserve the committed reason
+and every dimension reason. `needs_review` creates an actionable review item
+from its unresolved, blocked, or conflicting Findings. A failed Run publishes
+no formal decision or plugin-summary content; invalidated Decisions remain in
+the immutable ledger for diagnosis and are counted only as invalidated.
+
 ## 6. Summary and release requirements
 
 An optional plugin summary is a domain explanation derived from the canonical
 result. It cannot add a new terminal state, override a decision, hide
 unverified scope, or mutate the ledger. A release must include the manifest,
 runtime source, scope schema, semantic-review instructions, deterministic
-fixtures, and conformance metadata. M3 will make these requirements an
-install-time gate for built-in and external packages alike.
+fixtures, and conformance metadata. The first M3 gate validates registrations,
+manifest compatibility, capability declarations, scope schemas, execution
+profiles, and constructed runtime interfaces before publication. Package
+resource completeness and independent installer enforcement remain mandatory
+follow-up gates for built-in and external packages alike.
+
+Every isolated release fixture also passes the shared terminal result
+conformance gate. The gate validates ledger/result identity, terminal-event
+closure, Evidence and Decision references, latest recovery state,
+authoritative receipts, completed coverage, failed-result suppression, and
+artifact-to-receipt traceability. A fixture whose expected outcome happens to
+match still fails release when any of these platform invariants is broken.

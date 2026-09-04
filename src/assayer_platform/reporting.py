@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from .contract import Artifact, PlatformContractError, PlatformRunResult
+from .platform_performance import render_platform_performance_bill
 
 
 class JsonSummaryPublisher:
@@ -53,9 +54,24 @@ class JsonSummaryPublisher:
                 "message": failure.message,
             } for failure in result.failures],
             "metrics": dict(result.metrics),
+            "performanceBill": f"{run_id}.platform-performance-bill.json",
+            "canonicalResult": f"{run_id}.canonical-result.json",
         }
         content = (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
         digest = hashlib.sha256(content).hexdigest()
+        performance_json, performance_markdown, _bill = render_platform_performance_bill(
+            result.ledger,
+        )
+        for suffix, rendered in (
+            ("platform-performance-bill.json", performance_json),
+            ("platform-performance-bill.md", performance_markdown),
+        ):
+            performance_destination = self.root / f"{run_id}.{suffix}"
+            performance_temporary = performance_destination.with_name(
+                performance_destination.name + ".tmp"
+            )
+            performance_temporary.write_bytes(rendered)
+            performance_temporary.replace(performance_destination)
         destination = self.root / f"{run_id}.platform-summary.json"
         temporary = destination.with_name(destination.name + ".tmp")
         temporary.write_bytes(content)

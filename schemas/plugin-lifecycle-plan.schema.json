@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-lifecycle-plan.schema.json",
+  "title": "AssayerPluginLifecyclePlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "status", "current", "target", "preconditions", "steps", "compensationSteps", "rollback", "nextAction"],
+  "$defs": {
+    "installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "version", "installed", "enabled", "available", "releaseVerified", "immutableRelease"],
+      "properties": {
+        "selector": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}@[a-z0-9][a-z0-9._-]{0,63}$" },
+        "version": { "type": ["string", "null"], "maxLength": 128 },
+        "installed": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "releaseVerified": { "type": "boolean" },
+        "immutableRelease": { "type": "boolean" }
+      }
+    }
+  },
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "operation": { "enum": ["upgrade", "rollback", "uninstall"] },
+    "status": { "enum": ["ready", "blocked", "noop"] },
+    "current": { "$ref": "#/$defs/installation" },
+    "target": { "oneOf": [{ "$ref": "#/$defs/installation" }, { "type": "null" }] },
+    "preconditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "status", "message"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+          "status": { "enum": ["pass", "fail"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "action", "message"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "action": { "enum": ["verify_preconditions", "install_target", "verify_target", "remove_current", "verify_terminal_state", "verify_absent", "remove_failed_target", "restore_current", "verify_restored"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "compensationSteps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "action", "message"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "action": { "enum": ["remove_failed_target", "restore_current", "verify_restored"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["readyBeforeMutation", "reason"],
+      "properties": {
+        "readyBeforeMutation": { "type": "boolean" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "nextAction": { "type": "string", "minLength": 1, "maxLength": 512 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "blocked" } }, "required": ["status"] },
+      "then": { "properties": { "steps": { "maxItems": 0 }, "compensationSteps": { "maxItems": 0 }, "rollback": { "properties": { "readyBeforeMutation": { "const": false } } } } }
+    },
+    {
+      "if": { "properties": { "operation": { "enum": ["upgrade", "rollback"] }, "status": { "const": "ready" } }, "required": ["operation", "status"] },
+      "then": { "properties": { "target": { "$ref": "#/$defs/installation" }, "rollback": { "properties": { "readyBeforeMutation": { "const": true } } } } }
+    }
+  ]
+}

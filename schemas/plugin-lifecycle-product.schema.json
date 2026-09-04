@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-lifecycle-product.schema.json",
+  "title": "AssayerPluginLifecycleProductResult",
+  "oneOf": [
+    { "$ref": "#/$defs/planningResult" },
+    { "$ref": "#/$defs/terminalResult" },
+    { "$ref": "#/$defs/nonTerminalExecutionResult" }
+  ],
+  "$defs": {
+    "planningResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "phase", "plan", "planToken", "expiresAt"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "phase": { "enum": ["planned", "awaiting_confirmation"] },
+        "plan": { "$ref": "plugin-lifecycle-plan.schema.json" },
+        "planToken": {
+          "type": ["string", "null"],
+          "pattern": "^lifecycle-token-[0-9a-f]{64}$"
+        },
+        "expiresAt": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "phase": { "const": "awaiting_confirmation" } }, "required": ["phase"] },
+          "then": {
+            "properties": {
+              "plan": { "properties": { "status": { "const": "ready" } }, "required": ["status"] },
+              "planToken": { "type": "string" },
+              "expiresAt": { "type": "integer" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "phase": { "const": "planned" } }, "required": ["phase"] },
+          "then": {
+            "properties": {
+              "plan": { "properties": { "status": { "enum": ["blocked", "noop"] } }, "required": ["status"] },
+              "planToken": { "type": "null" },
+              "expiresAt": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "terminalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "phase", "replayed", "transaction"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "phase": { "const": "terminal" },
+        "replayed": { "type": "boolean" },
+        "transaction": { "$ref": "plugin-lifecycle-transaction.schema.json" }
+      }
+    },
+    "nonTerminalExecutionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "phase", "replayed", "result"],
+      "properties": {
+        "schemaVersion": { "const": "1.0.0" },
+        "phase": {
+          "enum": [
+            "confirmation_required",
+            "authorization_required",
+            "expired",
+            "rejected",
+            "result_unknown"
+          ]
+        },
+        "replayed": { "const": false },
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+            "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        }
+      }
+    }
+  }
+}

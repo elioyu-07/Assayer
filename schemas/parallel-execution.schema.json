@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/parallel-execution.schema.json",
+  "title": "AssayerParallelExecutionPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mode", "reason", "taskCount", "workerCount", "orderedMerge", "failureIsolation"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "mode": { "enum": ["serial", "parallel"] },
+    "reason": { "enum": ["enabled", "plugin_forbidden", "limit_missing", "limit_one", "insufficient_work"] },
+    "taskCount": { "type": "integer", "minimum": 0 },
+    "workerCount": { "type": "integer", "minimum": 1 },
+    "orderedMerge": { "const": true },
+    "failureIsolation": { "const": true }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "parallel" } }, "required": ["mode"] },
+      "then": {
+        "properties": {
+          "reason": { "const": "enabled" },
+          "taskCount": { "minimum": 2 },
+          "workerCount": { "minimum": 2 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "mode": { "const": "serial" } }, "required": ["mode"] },
+      "then": { "properties": { "workerCount": { "const": 1 } } }
+    }
+  ]
+}

@@ -44,6 +44,11 @@ bounded fact response or a classified failure. A response must identify the
 source identity and state digest used to collect it. Raw credentials, hidden
 model reasoning, and unbounded source bodies are never ordinary Agent output.
 
+The Host freezes provider ID and version, Check ID and version, capability,
+source state, scope, and effective limits in each request. A response must echo
+the request, provider, version, and capability identity. Timeout is a bounded
+provider-operation budget, never a fixed lifetime for the complete Run.
+
 Providers may not make a compliance decision, alter a Check, write to the
 platform ledger, or widen authorization. Write-capable providers require a
 separate explicit platform safety contract; audit providers default to

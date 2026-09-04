@@ -13,6 +13,7 @@ from typing import Any
 from assayer_platform.contract import PlatformLedger
 from assayer_platform.ledger import write_platform_artifacts
 
+from .frontend_canonical_result import FRONTEND_PLUGIN_ID, render_frontend_canonical_result
 from .store import SQLiteStore
 
 
@@ -96,4 +97,29 @@ class SQLitePlatformLedgerStore:
             root = str(Path(self._path).expanduser().resolve().parent)
         if root is None:
             return ()
-        return tuple(str(path) for path in write_platform_artifacts(ledger, root))
+        destination = Path(root).expanduser().resolve()
+        audit_ledger_path = destination / "audit-ledger.json"
+        use_frontend_adapter = (
+            ledger.run.plugin_id == FRONTEND_PLUGIN_ID and audit_ledger_path.is_file()
+        )
+        written = list(write_platform_artifacts(
+            ledger, destination, include_canonical_result=not use_frontend_adapter,
+        ))
+        if use_frontend_adapter and ledger.status in {"completed", "partial", "failed"}:
+            audit_ledger_bytes = audit_ledger_path.read_bytes()
+            audit_ledger = json.loads(audit_ledger_bytes)
+            if audit_ledger.get("scan", {}).get("runId") != ledger.run.run_id:
+                raise ValueError("Frontend AuditLedger Run does not match the platform ledger")
+            bill_path = destination / "performance-bill.json"
+            bill = json.loads(bill_path.read_bytes()) if bill_path.is_file() else None
+            canonical_bytes, _canonical = render_frontend_canonical_result(
+                audit_ledger,
+                ledger_bytes=audit_ledger_bytes,
+                performance_bill=bill,
+            )
+            canonical_path = destination / "canonical-result.json"
+            temporary = canonical_path.with_name(canonical_path.name + ".tmp")
+            temporary.write_bytes(canonical_bytes)
+            temporary.replace(canonical_path)
+            written.append(canonical_path)
+        return tuple(str(path) for path in written)

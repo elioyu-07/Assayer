@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-release.schema.json",
+  "title": "AssayerPluginReleaseDescriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "pluginId",
+    "pluginVersion",
+    "platformApiVersion",
+    "registration",
+    "manifest",
+    "scopeSchema",
+    "runtimeSource",
+    "semanticReview",
+    "fixtures",
+    "packageMetadata",
+    "conformance"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "pluginId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pluginVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "platformApiVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "registration": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "manifest": { "$ref": "#/$defs/relativePath" },
+    "scopeSchema": { "$ref": "#/$defs/relativePath" },
+    "runtimeSource": { "$ref": "#/$defs/relativePath" },
+    "semanticReview": { "$ref": "#/$defs/relativePath" },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/relativePath" }
+    },
+    "packageMetadata": { "$ref": "#/$defs/relativePath" },
+    "conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractVersion"],
+      "properties": {
+        "contractVersion": { "const": "1.0.0" }
+      }
+    }
+  },
+  "$defs": {
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    }
+  }
+}

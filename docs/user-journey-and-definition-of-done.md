@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.1.0 |
-| Date | 2026-09-01 |
-| Status | J00-J03 confirmed; J04 in progress |
+| Document version | 1.2.0 |
+| Date | 2026-09-03 |
+| Status | J00-J03 and J06b confirmed; J04-J05 implementation complete, acceptance pending |
 | Owner | Product Owner / Agent Runtime / Host Core |
 
 This document is the sole user-journey baseline for the Assayer productization phase. It defines whether a user can actually use the product and when completion may be claimed. Plugin, Skill, MCP, Host, tests, and observability are implementation means and cannot independently prove product completion.
@@ -94,6 +94,56 @@ Alpha end-to-end user-journey completion may be claimed only when all conditions
 | UAT-08 | Upgrade and uninstall | Installation environment | New sessions load the upgraded version; uninstall leaves no stale broken MCP configuration |
 | UAT-09 | Interruption and resume | CLI | Interrupt before and after a checkpoint acknowledgement, then continue; the Host resumes from the unique durable boundary with no duplicate decision or Evidence loss |
 
+J08a read-only diagnosis is implemented through `get_installation_status`:
+the operation is Run-independent, does not start a browser, reports release
+identity and consistency, and returns only safe Run IDs and allowlisted
+relative diagnostic artifact names. UAT-08 remains open until upgrade,
+rollback, uninstall, and cleanup are proven through the official Codex plugin
+management boundary.
+
+J08b lifecycle planning is implemented as a fail-closed, schema-validated
+transaction plan. It requires immutable verified current and target releases,
+blocks while a Run is active, prevents simultaneously installed Assayer
+releases from contributing duplicate names, and fixes compensation before any
+mutation. Codex-backed execution and cleanup remain unaccepted.
+
+J08c1 adds the durable transaction engine behind an injected adapter. It
+requires immediate confirmation, rejects stale plans, journals before mutation,
+reconciles uncertain command results, verifies terminal state, and restores the
+immutable previous release when forward execution fails. The real Codex
+adapter and user-facing execution path remain unaccepted.
+
+J08c2a connects that engine to a restricted Codex adapter. The adapter accepts
+only validated selectors, emits fixed list/add/remove argument vectors without
+a shell, bounds and validates JSON output, combines Codex state with Assayer
+release attestations, and suppresses raw command output. Product authorization
+and real lifecycle acceptance remain open.
+
+J08c2b implements the product authorization boundary behind an optional
+controller. Planning is non-destructive and returns a displayable plan with a
+bounded one-use token only when every precondition passes. Execution requires
+both explicit confirmation and an injected trusted external authorizer;
+`confirmed=true` from an Agent is not authority by itself. Only a token digest
+is persisted, claims are atomic, terminal retries replay the journal, and an
+interrupted executing token fails unknown unless a terminal transaction
+journal can repair it. The shipped launcher does not expose these tools until
+J08d provides its trusted client integration, cleanup, and isolated acceptance.
+
+J08d cleanup enforcement is partially implemented in Slice 064. The release
+launcher atomically records a path-free runtime identity after verification,
+and an out-of-process cleaner accepts only a schema-valid completed uninstall
+whose final Codex snapshot proves the same selector and version absent. It
+derives one cache target, rejects symbolic links and identity mismatch, and
+uses a transaction-specific quarantine for retry. The installed MCP does not
+invoke this cleaner while running from the target runtime. Trusted Codex client
+wiring and real isolated UAT-08 remain open.
+
+Slice 065 composes the production planner, token store, transaction engine,
+restricted subprocess client, journal, and cleaner against a stateful fake
+Codex executable. Upgrade, rollback, uninstall, and cleanup pass in one
+isolated scenario, but its schema fixes `publishable=false`; this evidence
+cannot replace the real approval and disposable-installation UAT-08 gate.
+
 B07c (automatic sensitive-region identification and pixel sanitization) is deferred to a later security phase and is not a J01-J08 completion gate. Current trials must use controlled synthetic or already sanitized data; any `sanitizationStatus=not_performed` screenshot is explicitly marked in results and must not be copied into a production report or described as screenshot-safe. Harness issue samples do not replace real user-journey acceptance.
 
 ## 6. Evidence That Does Not Constitute Completion
@@ -119,3 +169,20 @@ B07c (automatic sensitive-region identification and pixel sanitization) is defer
 On 2026-09-01, a real Codex CLI fresh session received only `http://localhost:8081/#/lease-mock`, automatically loaded the Assayer Plugin Skill and deferred local MCP, called `start_audit` to launch real Chromium, and completed FUA-10 decisions for three objects. This is real CLI evidence for J02 activation/discovery and J03 audit start.
 
 The same run lasted about 10 minutes 44 seconds without an intermediate progress message, and its public `decisionReason` count was 0/38, so J04 has not passed. Performance and experience baselines, fixes, and revalidation gates are defined in [vertical slice 037](implementation-slice-037.md).
+
+On 2026-09-03, Vertical Slice 057 closed the generic implementation gap for
+interactive plugin Runs. Each response carries compact phase, state, waiting
+ownership, completed and remaining counts, durable next step, and a human next
+action. The derived `platform-run.log` now reads as a chronological Run diary
+and explicitly distinguishes saved, expected Agent semantic waiting from Host
+work or recovery. Deterministic lifecycle, terminal replay, and failure tests
+pass. This does not replace the deferred owner-run clean-CLI evidence, so J04
+acceptance remains pending.
+
+Vertical Slice 058 adds a platform-owned terminal overview for all plugins. It
+explains conclusion validity, actual coverage, outcome and review/failure
+counts, and the next action; Decision detail retains its committed reason and
+dimension reasons. `needs_review` lists concrete unresolved dimensions, while
+a failed Run suppresses invalidated Decisions from the formal result without
+rewriting ledger history. J05 implementation is complete, but clean-CLI
+acceptance for all terminal and review states remains pending.

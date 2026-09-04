@@ -3,6 +3,7 @@
 from .contract import (
     Artifact,
     CapabilityProfile,
+    CapabilityProviderDescriptor,
     Check,
     CheckContract,
     CommitReceipt,
@@ -22,6 +23,13 @@ from .contract import (
     PlatformLedger,
     PlatformRun,
     PlatformRunResult,
+    ProviderCollectionResult,
+    ProviderCapability,
+    ProviderEvidenceExpectation,
+    ProviderFact,
+    ProviderFailure,
+    ProviderRequest,
+    ProviderResponse,
     ReviewCheckpoint,
     PluginManifest,
     WorkFailure,
@@ -40,13 +48,52 @@ from .interactive import (
 )
 from .registry import load_plugin_manifest, validate_plugin_manifest
 from .plugin_registry import PluginRegistration, PluginRegistry
+from .provider_registry import (
+    ProviderRegistration,
+    ProviderRegistry,
+    load_provider_descriptor,
+    validate_provider_descriptor,
+)
+from .provider_conformance import (
+    ProviderConformanceIssue,
+    ProviderConformanceReport,
+    inspect_provider_registration,
+    inspect_provider_registrations,
+    require_provider_registration_conformance,
+)
+from .capability_negotiation import CapabilityNegotiation, CapabilityNegotiator
+from .provider_execution import BoundCapabilityProvider
+from .provider_package_conformance import inspect_provider_package
+from .provider_installation_conformance import inspect_provider_installation
+from .parallel_execution import ParallelExecutionPlan, ParallelExecutionPlanner
+from .platform_performance import build_platform_performance_bill, render_platform_performance_bill
+from .canonical_result import (
+    build_canonical_result,
+    canonical_ledger_bytes,
+    render_canonical_result,
+    validate_canonical_result,
+)
+from .result_conformance import (
+    ResultConformanceIssue,
+    ResultConformanceReport,
+    inspect_result_conformance,
+)
 from .result_delivery import StagedResultDocument
+from .conformance import (
+    PluginConformanceIssue,
+    PluginConformanceReport,
+    inspect_plugin_registration,
+    inspect_plugin_registrations,
+    inspect_plugin_package,
+    require_plugin_registration_conformance,
+)
 from .runner import PlatformRunner
 
 __all__ = [
     "Artifact",
     "ArtifactPublisher",
     "CapabilityProfile",
+    "CapabilityProviderDescriptor",
     "Check",
     "CheckContract",
     "CommitReceipt",
@@ -75,6 +122,13 @@ __all__ = [
     "PlatformLedgerStore",
     "PlatformRun",
     "PlatformRunResult",
+    "ProviderCollectionResult",
+    "ProviderCapability",
+    "ProviderEvidenceExpectation",
+    "ProviderFact",
+    "ProviderFailure",
+    "ProviderRequest",
+    "ProviderResponse",
     "ReviewCheckpoint",
     "PluginManifest",
     "JsonPlatformLedgerStore",
@@ -88,6 +142,37 @@ __all__ = [
     "validate_plugin_manifest",
     "PluginRegistration",
     "PluginRegistry",
+    "ProviderRegistration",
+    "ProviderRegistry",
+    "load_provider_descriptor",
+    "validate_provider_descriptor",
+    "ProviderConformanceIssue",
+    "ProviderConformanceReport",
+    "inspect_provider_registration",
+    "inspect_provider_registrations",
+    "require_provider_registration_conformance",
+    "CapabilityNegotiation",
+    "CapabilityNegotiator",
+    "BoundCapabilityProvider",
+    "inspect_provider_package",
+    "inspect_provider_installation",
+    "ParallelExecutionPlan",
+    "ParallelExecutionPlanner",
+    "build_platform_performance_bill",
+    "render_platform_performance_bill",
+    "build_canonical_result",
+    "canonical_ledger_bytes",
+    "render_canonical_result",
+    "validate_canonical_result",
+    "ResultConformanceIssue",
+    "ResultConformanceReport",
+    "inspect_result_conformance",
     "StagedResultDocument",
+    "PluginConformanceIssue",
+    "PluginConformanceReport",
+    "inspect_plugin_registration",
+    "inspect_plugin_registrations",
+    "inspect_plugin_package",
+    "require_plugin_registration_conformance",
     "PlatformRunner",
 ]

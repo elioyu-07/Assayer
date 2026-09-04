@@ -32,18 +32,49 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `result-delivery.schema.json`: summary-first terminal delivery metadata,
   stable section references, and result-bound delta pages.
 - `plugin-manifest.schema.json`: domain-neutral plugin checks, evidence requirements, capabilities, and performance/recovery constraints.
+- `plugin-conformance.schema.json`: package-time plugin registration results, violated contract identifiers, and required next actions.
+- `plugin-release.schema.json`: static, import-free plugin package layout, registration metadata, policy resources, and deterministic fixture declarations.
+- `plugin-fixture.schema.json`: deterministic package fixture input and expected terminal decision or failure outcomes.
+- `plugin-progress.schema.json`: compact generic phase, waiting ownership, completed and remaining counts, and next-action guidance for interactive plugin Runs.
+- `plugin-result-overview.schema.json`: platform-owned terminal validity, coverage, outcome counts, review/failure counts, and plain-language next action.
+- `installation-status.schema.json`: read-only package, plugin, private-runtime, bundle-integrity, and safe feedback-diagnostic status for the product MCP.
+- `plugin-lifecycle-plan.schema.json`: fail-closed upgrade, rollback, and uninstall preconditions, ordered Codex operations, and compensation readiness.
+- `plugin-lifecycle-transaction.schema.json`: sanitized durable execution journal for confirmed lifecycle changes, terminal verification, and compensation outcomes.
+- `plugin-lifecycle-product.schema.json`: two-stage planning, one-use confirmation token, trusted-authorization outcomes, terminal replay, and transaction-result delivery.
+- `private-runtime-cleanup.schema.json`: verified post-uninstall runtime removal, idempotent absence, quarantined retry, and fail-closed ownership rejection.
+- `lifecycle-acceptance.schema.json`: explicitly non-publishable isolated upgrade, rollback, uninstall, and runtime-cleanup acceptance result.
 - `capability-provider.schema.json`: provider identity, capability names,
   authorization, scope, budgets, failure semantics, and algorithm versions.
+- `provider-conformance.schema.json`: actionable `CPV1-*` registration and constructed-runtime conformance results for capability providers.
+- `capability-negotiation.schema.json`: four-way capability intersection, denial ownership, provider identity, and effective provider-budget ceilings.
+- `provider-execution.schema.json`: Host-created idempotent provider requests and identity-bearing fact or classified-failure responses.
+- `provider-release.schema.json`: external provider identity, descriptor, runtime source, fixtures, package metadata, and conformance binding.
+- `provider-fixture.schema.json`: deterministic provider fact or classified-failure fixture input and exact expected outcome.
+- `parallel-execution.schema.json`: fail-closed serial/parallel inspection plan, policy reason, task count, worker ceiling, ordered merge, and failure isolation.
+- `platform-performance-bill.schema.json`: domain-neutral measured Run, Host,
+  Provider, and parallel-inspection timing; explicit unavailable Agent/model/
+  transport telemetry; and estimate-only scheduler wait reduction.
+- `result-conformance.schema.json`: shared terminal result, ledger identity,
+  Evidence, Decision, recovery, receipt, coverage, invalidation, and artifact
+  publication conformance report.
 - `platform-ledger.schema.json`: generic run operations, event timeline, commit receipts, and published artifact correlations.
 - `canonical-result.schema.json`: portable terminal result, coverage, outcomes,
-  findings, review items, failures, performance, and trace references. This is
-  the M2 result contract; adapters must emit it before M3 publication gates are
-  complete.
+  findings, review items, failures, performance, and exact ledger trace
+  references. Generic batch and interactive platform Runs emit and validate
+  this artifact at terminal persistence.
+- `frontend-canonical-extension.schema.json`: privacy-safe frontend page,
+  object, entrypoint, issue, and diagnostic counts attached to the common
+  result without changing its domain-neutral vocabulary.
 
 The product runtime also exports the validated platform ledger as
-`platform-ledger.json`, `platform-events.jsonl`, and `platform-run.log` in the
-Scan output directory. The JSON file is canonical; JSONL is machine-oriented,
-and the log is the human-readable chronological view.
+`platform-ledger.json`, `platform-events.jsonl`, `platform-run.log`, and the
+JSON/Markdown `platform-performance-bill` views and `canonical-result.json` in
+the Run output directory. The legacy frontend journey derives its
+`canonical-result.json` from the validated `audit-ledger.json`; its platform
+ledger remains an execution trace and cannot replace that result.
+The ledger JSON is canonical; JSONL is machine-oriented, the log is a
+diary-like human view, and the performance bill is a conclusion-neutral
+diagnostic view derived from ledger operations, events, and metrics.
 
 The aggregate ledger described by `audit-ledger.schema.json` is the only runtime source of truth. Primary issue JSON, `page-element-judgement.json`, summary Markdown, and diagnostic Markdown must be derived deterministically and cannot modify the ledger. The current version does not generate HTML.
 

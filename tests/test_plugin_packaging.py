@@ -32,6 +32,13 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertIn('"$WHEEL_DIR" "$PLUGIN_VERSION"', launcher)
         self.assertNotIn('"$WHEEL_DIR" "$BASE_VERSION" <<', launcher)
         self.assertIn('"assayer[browser,mcp]==$BASE_VERSION"', launcher)
+        self.assertIn('export ASSAYER_PLUGIN_VERSION="$PLUGIN_VERSION"', launcher)
+        self.assertIn('print(version("assayer"))', launcher)
+        self.assertIn('if [ "$RUNTIME_VERSION" != "$BASE_VERSION" ]', launcher)
+        self.assertIn('export ASSAYER_RUNTIME_VERSION="$RUNTIME_VERSION"', launcher)
+        self.assertIn("export ASSAYER_BUNDLE_VERIFIED=1", launcher)
+        self.assertIn('"$RUNTIME_ROOT/runtime-identity.json" "$PLUGIN_VERSION" "$RUNTIME_VERSION"', launcher)
+        self.assertIn('temporary.replace(destination)', launcher)
 
     def test_assayer_skill_declares_local_mcp_dependency_for_cli_discovery(self):
         # Keep the packaging gate dependency-light; the plugin validator owns
@@ -62,6 +69,12 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "config_quality" / "manifest.json").is_file())
         self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "frontend_audit" / "manifest.json").is_file())
         self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "spec_quality" / "manifest.json").is_file())
+
+    def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
+        source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
+        validation = source.index("_validate_builtin_plugin_releases()", source.index("def build("))
+        wheel = source.index('"wheel"', source.index("def build("))
+        self.assertLess(validation, wheel)
 
 
 if __name__ == "__main__":

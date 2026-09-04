@@ -203,8 +203,10 @@ The ABC acronym is defined by context.
             self.assertGreater(summary["review"]["candidateCount"], 0)
             self.assertEqual(summary["review"]["handledCandidateCount"], 0)
             self.assertEqual(summary["review"]["pendingCandidateCount"], summary["review"]["candidateCount"])
-            self.assertEqual(result["artifacts"], ["result-summary.json"])
-            result_path = Path(directory) / "output" / run_id / result["artifacts"][0]
+            self.assertEqual(set(result["artifacts"]), {
+                "result-summary.json", f"{run_id}.canonical-result.json",
+            })
+            result_path = Path(directory) / "output" / run_id / "result-summary.json"
             self.assertTrue(result_path.is_file())
             complete_result = json.loads(result_path.read_text(encoding="utf-8"))
             self.assertEqual(complete_result["result"]["summary"]["review"]["candidateCount"], summary["review"]["candidateCount"])
@@ -649,8 +651,9 @@ The ABC acronym is defined by context.
             self.assertEqual(summary["review"]["statusCounts"]["SUPPRESSED"], len(candidate_ids))
             self.assertEqual(summary["review"]["checklist"]["statusCounts"]["PASS"], 18)
             self.assertEqual(summary["review"]["confirmedFindings"], [])
-            self.assertEqual(len(result["artifacts"]), 1)
-            self.assertEqual(result["artifacts"][0], "result-summary.json")
+            self.assertEqual(set(result["artifacts"]), {
+                "result-summary.json", result["canonicalResult"],
+            })
             self.assertFalse((Path(directory) / "output" / "report.html").exists())
 
     def test_formal_issue_requires_canonical_review_envelope(self):

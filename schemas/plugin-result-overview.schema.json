@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-result-overview.schema.json",
+  "title": "AssayerPluginResultOverview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "conclusionValidity", "message", "coverage", "outcomes", "needsReviewCount", "failureCount", "invalidatedDecisionCount", "nextAction"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "status": { "enum": ["completed", "partial", "failed"] },
+    "conclusionValidity": { "enum": ["valid", "invalidated"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discoveryComplete", "discovered", "inspected", "decided", "failed", "unprocessed", "complete"],
+      "properties": {
+        "discoveryComplete": { "type": "boolean" },
+        "discovered": { "type": "integer", "minimum": 0 },
+        "inspected": { "type": "integer", "minimum": 0 },
+        "decided": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "unprocessed": { "type": "integer", "minimum": 0 },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"],
+      "properties": {
+        "issue_found": { "type": "integer", "minimum": 0 },
+        "scanned_no_issue": { "type": "integer", "minimum": 0 },
+        "not_applicable": { "type": "integer", "minimum": 0 },
+        "needs_review": { "type": "integer", "minimum": 0 },
+        "noise": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "needsReviewCount": { "type": "integer", "minimum": 0 },
+    "failureCount": { "type": "integer", "minimum": 0 },
+    "invalidatedDecisionCount": { "type": "integer", "minimum": 0 },
+    "nextAction": { "type": "string", "minLength": 1, "maxLength": 512 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "completed" } }, "required": ["status"] },
+      "then": { "properties": { "conclusionValidity": { "const": "valid" }, "coverage": { "properties": { "complete": { "const": true } } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+      "then": { "properties": { "conclusionValidity": { "const": "invalidated" }, "needsReviewCount": { "const": 0 }, "outcomes": { "properties": { "issue_found": { "const": 0 }, "scanned_no_issue": { "const": 0 }, "not_applicable": { "const": 0 }, "needs_review": { "const": 0 }, "noise": { "const": 0 } } } } }
+    }
+  ]
+}

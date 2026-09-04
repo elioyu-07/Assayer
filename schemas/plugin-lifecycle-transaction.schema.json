@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-lifecycle-transaction.schema.json",
+  "title": "AssayerPluginLifecycleTransaction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "transactionId", "planDigest", "operation", "status", "current", "target", "events", "finalInstallation", "result"],
+  "$defs": {
+    "installation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selector", "version", "installed", "enabled", "available", "releaseVerified", "immutableRelease"],
+      "properties": {
+        "selector": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}@[a-z0-9][a-z0-9._-]{0,63}$" },
+        "version": { "type": ["string", "null"], "maxLength": 128 },
+        "installed": { "type": "boolean" },
+        "enabled": { "type": "boolean" },
+        "available": { "type": "boolean" },
+        "releaseVerified": { "type": "boolean" },
+        "immutableRelease": { "type": "boolean" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  },
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "transactionId": { "type": "string", "pattern": "^lifecycle-[0-9a-f]{32}$" },
+    "planDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "operation": { "enum": ["upgrade", "rollback", "uninstall"] },
+    "status": { "enum": ["planned", "running", "confirmation_required", "rejected", "completed", "rolled_back", "failed"] },
+    "current": { "$ref": "#/$defs/installation" },
+    "target": { "oneOf": [{ "$ref": "#/$defs/installation" }, { "type": "null" }] },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "action", "outcome", "message"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "action": { "enum": ["preflight", "verify_preconditions", "remove_current", "install_target", "verify_target", "verify_terminal_state", "verify_absent", "forward_change", "remove_failed_target", "restore_current", "verify_restored", "compensation"] },
+          "outcome": { "enum": ["succeeded", "failed"] },
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,63}$" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "finalInstallation": { "oneOf": [{ "$ref": "#/$defs/installation" }, { "type": "null" }] },
+    "result": { "oneOf": [{ "$ref": "#/$defs/result" }, { "type": "null" }] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "enum": ["completed", "rolled_back", "failed", "rejected", "confirmation_required"] } }, "required": ["status"] },
+      "then": { "properties": { "result": { "$ref": "#/$defs/result" } } }
+    }
+  ]
+}

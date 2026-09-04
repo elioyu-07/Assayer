@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/capability-negotiation.schema.json",
+  "title": "AssayerCapabilityNegotiation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "providerId", "providerVersion", "requested", "granted", "denied", "limits"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "status": { "enum": ["ready", "blocked"] },
+    "providerId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "providerVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "requested": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" }
+    },
+    "granted": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" }
+    },
+    "denied": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["capability", "code", "message"],
+        "properties": {
+          "capability": { "type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$" },
+          "code": { "enum": ["provider_absent", "platform_denied", "user_scope_missing"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeoutMs", "maxBytes", "maxItems", "maxConcurrency"],
+      "properties": {
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "maxBytes": { "type": "integer", "minimum": 1 },
+        "maxItems": { "type": "integer", "minimum": 1 },
+        "maxConcurrency": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ready" } }, "required": ["status"] },
+      "then": { "properties": { "denied": { "maxItems": 0 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "blocked" } }, "required": ["status"] },
+      "then": { "properties": { "denied": { "minItems": 1 } } }
+    }
+  ]
+}

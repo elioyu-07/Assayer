@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-progress.schema.json",
+  "title": "AssayerPluginRunProgress",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["phase", "state", "message", "waitingOn", "enteredAt", "completed", "remaining", "requiredNextStep", "nextAction", "terminal"],
+  "properties": {
+    "phase": { "enum": ["discovery", "inspection", "semantic_review", "recovery", "closeout", "finished"] },
+    "state": { "enum": ["running", "awaiting_agent_decision", "ready_to_finish", "blocked", "completed", "partial", "failed"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "waitingOn": { "enum": ["platform", "agent", "recovery", "none"] },
+    "enteredAt": { "type": ["string", "null"], "format": "date-time" },
+    "completed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItemsDiscovered", "workItemsInspected", "decisionsCommitted", "reviewCheckpoints"],
+      "properties": {
+        "workItemsDiscovered": { "type": "integer", "minimum": 0 },
+        "workItemsInspected": { "type": "integer", "minimum": 0 },
+        "decisionsCommitted": { "type": "integer", "minimum": 0 },
+        "reviewCheckpoints": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "remaining": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workItemsToInspect", "workItemsToDecide", "reviewItems", "failures"],
+      "properties": {
+        "workItemsToInspect": { "type": "integer", "minimum": 0 },
+        "workItemsToDecide": { "type": "integer", "minimum": 0 },
+        "reviewItems": { "type": "integer", "minimum": 0 },
+        "failures": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "requiredNextStep": { "type": ["string", "null"] },
+    "nextAction": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "terminal": { "type": "boolean" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "awaiting_agent_decision" } }, "required": ["state"] },
+      "then": { "properties": { "waitingOn": { "const": "agent" }, "terminal": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "state": { "enum": ["completed", "partial", "failed"] } }, "required": ["state"] },
+      "then": { "properties": { "waitingOn": { "const": "none" }, "terminal": { "const": true } } }
+    }
+  ]
+}

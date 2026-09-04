@@ -111,4 +111,38 @@ if [ ! -x "$VENV_ROOT/bin/assayer-mcp" ] || [ ! -f "$STAMP" ]; then
   : > "$STAMP"
 fi
 
+RUNTIME_VERSION=$(
+  "$VENV_ROOT/bin/python" -c 'from importlib.metadata import version; print(version("assayer"))'
+) || {
+  echo "ASSAYER_RUNTIME_VERIFY_FAILED: the private runtime package identity is unavailable." >&2
+  exit 78
+}
+if [ "$RUNTIME_VERSION" != "$BASE_VERSION" ]; then
+  echo "ASSAYER_RUNTIME_VERSION_MISMATCH: the private runtime does not match this plugin release; reinstall the release bundle." >&2
+  exit 78
+fi
+
+if ! "$VENV_ROOT/bin/python" - "$RUNTIME_ROOT/runtime-identity.json" "$PLUGIN_VERSION" "$RUNTIME_VERSION" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+destination = Path(sys.argv[1])
+value = {
+    "schemaVersion": "1.0.0",
+    "pluginVersion": sys.argv[2],
+    "runtimeVersion": sys.argv[3],
+}
+temporary = destination.with_suffix(".json.tmp")
+temporary.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+temporary.replace(destination)
+PY
+then
+  echo "ASSAYER_RUNTIME_VERIFY_FAILED: the private runtime identity could not be persisted." >&2
+  exit 78
+fi
+
+export ASSAYER_PLUGIN_VERSION="$PLUGIN_VERSION"
+export ASSAYER_RUNTIME_VERSION="$RUNTIME_VERSION"
+export ASSAYER_BUNDLE_VERIFIED=1
 exec "$VENV_ROOT/bin/assayer-mcp" --output-root "${ASSAYER_OUTPUT_ROOT:-${TMPDIR:-/tmp}/assayer-output}"

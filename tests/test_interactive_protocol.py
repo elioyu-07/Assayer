@@ -233,6 +233,27 @@ class InteractiveProtocolTest(unittest.TestCase):
                 inspected["structuredContent"]["result"]["result"]["workflow"]["state"],
                 "awaiting_agent_decision",
             )
+            waiting = inspected["structuredContent"]["result"]["result"]["progress"]
+            self.assertEqual(waiting["waitingOn"], "agent")
+            self.assertEqual(waiting["phase"], "semantic_review")
+            self.assertEqual(waiting["completed"]["workItemsInspected"], 1)
+            self.assertEqual(waiting["remaining"]["workItemsToDecide"], 1)
+            self.assertEqual(waiting["requiredNextStep"], "checkpoint_review")
+            self.assertIn("semantic Agent judgment", waiting["message"])
+            self.assertIsNotNone(waiting["enteredAt"])
+            diary = (
+                Path(directory) / "output" / run_id
+                / f"{run_id}.platform-run.log"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Assayer Platform Run Diary", diary)
+            self.assertIn("Status: Waiting for Agent decision", diary)
+            self.assertIn("Phase: semantic review", diary)
+            self.assertIn("1 awaiting decision", diary)
+            self.assertIn("Waiting is expected here", diary)
+            self.assertIn(
+                "Next action: Review the next evidence batch and save a durable checkpoint.",
+                diary,
+            )
             transport.call_tool("submit_decisions", {"decisions": [{
                 "workItemId": item_id, "result": "scanned_no_issue",
                 "findings": [{"dimension": "present", "status": "satisfied", "reason": "The fixture is present."}],
@@ -246,6 +267,9 @@ class InteractiveProtocolTest(unittest.TestCase):
             )
             finished = transport.call_tool("finish_plugin_run", {"status": "completed"})
             self.assertEqual(finished["structuredContent"]["result"]["status"], "completed")
+            terminal_progress = finished["structuredContent"]["result"]["result"]["progress"]
+            self.assertTrue(terminal_progress["terminal"])
+            self.assertEqual(terminal_progress["waitingOn"], "none")
             self.assertEqual(transport._controller._runs, {})
 
     def test_transport_allows_a_second_independent_plugin_run(self):
@@ -258,7 +282,12 @@ class InteractiveProtocolTest(unittest.TestCase):
                 "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001",
                 "scope": {"target": "first"},
             })["structuredContent"]["result"]["runId"]
-            transport.call_tool("finish_plugin_run", {"status": "partial"})
+            partial = transport.call_tool("finish_plugin_run", {"status": "partial"})[
+                "structuredContent"
+            ]["result"]["result"]["resultOverview"]
+            self.assertEqual(partial["status"], "partial")
+            self.assertFalse(partial["coverage"]["discoveryComplete"])
+            self.assertIn("Scope discovery did not finish", partial["message"])
             second = transport.call_tool("start_plugin_run", {
                 "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001",
                 "scope": {"target": "second"},
@@ -586,6 +615,19 @@ class InteractiveProtocolTest(unittest.TestCase):
             self.assertEqual(finished["status"], "completed")
             self.assertEqual(finished["result"]["workflow"]["state"], "completed")
             self.assertTrue(finished["result"]["workflow"]["canFinish"])
+            overview = finished["result"]["resultOverview"]
+            self.assertEqual(overview["conclusionValidity"], "valid")
+            self.assertEqual(overview["coverage"], {
+                "discoveryComplete": True,
+                "discovered": 1,
+                "inspected": 1,
+                "decided": 1,
+                "failed": 0,
+                "unprocessed": 0,
+                "complete": True,
+            })
+            self.assertEqual(overview["outcomes"]["scanned_no_issue"], 1)
+            self.assertEqual(overview["nextAction"], "No further audit action is required.")
             delivery = finished["result"]["resultDelivery"]
             self.assertEqual(delivery["mode"], "summary_first")
             self.assertTrue(delivery["detailsAvailable"])
@@ -594,6 +636,14 @@ class InteractiveProtocolTest(unittest.TestCase):
                 "sectionId": decisions_section, "pageSize": 1,
             })["structuredContent"]["result"]
             self.assertEqual(decision_page["result"]["page"]["total"], 1)
+            self.assertEqual(
+                decision_page["result"]["items"][0]["reason"],
+                "All signals satisfy the Check.",
+            )
+            self.assertEqual(
+                decision_page["result"]["items"][0]["findings"]["present"]["status"],
+                "satisfied",
+            )
             self.assertTrue(decision_page["result"]["deltaOnly"])
             self.assertIsNone(transport._active_run_id)
             ledger = json.loads(
@@ -1211,7 +1261,97 @@ class InteractiveProtocolTest(unittest.TestCase):
             })["structuredContent"]["result"]
             self.assertEqual(closed["status"], "failed")
             self.assertEqual(closed["result"]["workflow"]["state"], "failed")
+            overview = closed["result"]["resultOverview"]
+            self.assertEqual(overview["conclusionValidity"], "invalidated")
+            self.assertFalse(overview["coverage"]["discoveryComplete"])
+            self.assertIn("No formal conclusion", overview["message"])
+            self.assertIn("do not use this Run", overview["nextAction"])
+            self.assertEqual(closed["result"]["decisions"], [])
             self.assertIsNone(transport._active_run_id)
+
+    def test_needs_review_result_exposes_concrete_gaps_and_next_action(self):
+        registry = PluginRegistry((registration(),))
+        with tempfile.TemporaryDirectory() as directory:
+            transport = InteractivePlatformMcpToolTransport(
+                Path(directory) / "output", plugin_registry=registry,
+            )
+            transport.call_tool("start_plugin_run", {
+                "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+            })
+            transport.call_tool("discover_work_items", {})
+            inspected = transport.call_tool("inspect_work_items", {})[
+                "structuredContent"
+            ]["result"]["result"]
+            work_item_id = inspected["investigations"][0]["workItem"]["workItemId"]
+            transport.call_tool("submit_decisions", {"decisions": [{
+                "workItemId": work_item_id,
+                "result": "needs_review",
+                "findings": [{
+                    "dimension": "present",
+                    "status": "unresolved",
+                    "reason": "The available source does not identify whether the fixture is active.",
+                }],
+                "reason": "The fixture activation state cannot be established from current Evidence.",
+            }]})
+            terminal = transport.call_tool("finish_plugin_run", {"status": "completed"})[
+                "structuredContent"
+            ]["result"]["result"]
+            overview = terminal["resultOverview"]
+            self.assertEqual(overview["needsReviewCount"], 1)
+            self.assertEqual(overview["outcomes"]["needs_review"], 1)
+            self.assertIn("still require review", overview["message"])
+            review_page = transport.call_tool("get_plugin_result", {
+                "sectionId": terminal["reviewItems"]["sectionId"],
+            })["structuredContent"]["result"]["result"]
+            review_item = review_page["items"][0]
+            self.assertEqual(
+                review_item["gaps"]["present"]["reason"],
+                "The available source does not identify whether the fixture is active.",
+            )
+            self.assertIn("present", review_item["nextAction"])
+
+    def test_failed_result_invalidates_and_hides_previously_committed_decisions(self):
+        registry = PluginRegistry((registration(),))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
+            started = transport.call_tool("start_plugin_run", {
+                "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+            })["structuredContent"]["result"]
+            transport.call_tool("discover_work_items", {})
+            work_item_id = transport.call_tool("inspect_work_items", {})[
+                "structuredContent"
+            ]["result"]["result"]["investigations"][0]["workItem"]["workItemId"]
+            transport.call_tool("submit_decisions", {"decisions": [{
+                "workItemId": work_item_id,
+                "result": "scanned_no_issue",
+                "findings": [{
+                    "dimension": "present", "status": "satisfied", "reason": "The fixture is present.",
+                }],
+                "reason": "The current Evidence satisfies the Check.",
+            }]})
+            terminal = transport.call_tool("finish_plugin_run", {
+                "status": "failed",
+                "failures": [{
+                    "code": "INTEGRITY_LOST",
+                    "message": "Terminal integrity could not be established.",
+                }],
+            })["structuredContent"]["result"]["result"]
+            self.assertEqual(terminal["decisions"], [])
+            self.assertEqual(terminal["reviewItems"], [])
+            self.assertEqual(terminal["resultOverview"]["invalidatedDecisionCount"], 1)
+            self.assertEqual(sum(terminal["resultOverview"]["outcomes"].values()), 0)
+            stored_result = json.loads(
+                (output / started["runId"] / "result-summary.json").read_text(encoding="utf-8")
+            )["result"]
+            self.assertEqual(stored_result["decisions"], [])
+            ledger = json.loads(
+                (
+                    output / started["runId"]
+                    / f"{started['runId']}.platform-ledger.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(ledger["decisions"]), 1)
 
     def test_host_driven_advance_rejects_closeout_mixed_with_semantic_input(self):
         registry = PluginRegistry((registration(),))
@@ -1242,10 +1382,10 @@ class InteractiveProtocolTest(unittest.TestCase):
             transport = InteractivePlatformMcpToolTransport(
                 Path(directory) / "output", plugin_registry=PluginRegistry((registration_value,)),
             )
-            transport.call_tool("start_plugin_run", {
+            started = transport.call_tool("start_plugin_run", {
                 "pluginId": registration_value.manifest.plugin_id,
                 "checkId": "FIX-INT-003", "scope": {},
-            })
+            })["structuredContent"]["result"]
             discovered = transport.call_tool("discover_work_items", {})
             ids = [item["workItemId"] for item in discovered["structuredContent"]["result"]["result"]["workItems"]]
             first = transport.call_tool("inspect_work_items", {
@@ -1281,10 +1421,10 @@ class InteractiveProtocolTest(unittest.TestCase):
             transport = InteractivePlatformMcpToolTransport(
                 Path(directory) / "output", plugin_registry=PluginRegistry((registration_value,)),
             )
-            transport.call_tool("start_plugin_run", {
+            started = transport.call_tool("start_plugin_run", {
                 "pluginId": registration_value.manifest.plugin_id,
                 "checkId": "FIX-INT-003", "scope": {},
-            })
+            })["structuredContent"]["result"]
             discovered = transport.call_tool("discover_work_items", {})
             ids = [item["workItemId"] for item in discovered["structuredContent"]["result"]["result"]["workItems"]]
             inspected = transport.call_tool("inspect_work_items", {
@@ -1298,11 +1438,22 @@ class InteractiveProtocolTest(unittest.TestCase):
                 transport.call_tool("finish_plugin_run", {"status": "completed"})
             self.assertEqual(completion.exception.code, "UNRESOLVED_FAILURE")
             finished = transport.call_tool("finish_plugin_run", {"status": "failed"})
-            failure_section = finished["structuredContent"]["result"]["result"]["failures"]
+            terminal_result = finished["structuredContent"]["result"]["result"]
+            self.assertTrue(terminal_result["progress"]["terminal"])
+            self.assertEqual(terminal_result["progress"]["state"], "failed")
+            failure_section = terminal_result["failures"]
             failures = transport.call_tool("get_plugin_result", {
                 "sectionId": failure_section["sectionId"],
             })["structuredContent"]["result"]["result"]
             self.assertEqual(failures["page"]["total"], 4)
+            diary = (
+                Path(directory) / "output" / started["runId"]
+                / f"{started['runId']}.platform-run.log"
+            ).read_text(encoding="utf-8")
+            self.assertIn("Status: Failed", diary)
+            self.assertIn("Failures: 4", diary)
+            self.assertIn("INSPECTION_FAILED", diary)
+            self.assertIn("Next action: No further action is required.", diary)
 
     def test_tool_catalog_contains_only_domain_neutral_names(self):
         transport = InteractivePlatformMcpToolTransport(plugin_registry=PluginRegistry((registration(),)))

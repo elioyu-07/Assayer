@@ -102,13 +102,132 @@ class CapabilityProfile:
 
 
 @dataclass(frozen=True)
+class ProviderCapability:
+    name: str
+    version: str
+    access_mode: str
+    evidence_kinds: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CapabilityProviderDescriptor:
+    provider_id: str
+    version: str
+    platform_api_version: str
+    capabilities: tuple[ProviderCapability, ...]
+    scope_schema: Mapping[str, Any]
+    authorization: Mapping[str, Any]
+    limits: Mapping[str, Any]
+    failure_policy: tuple[Mapping[str, Any], ...]
+    algorithm_versions: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scope_schema", _mapping(self.scope_schema))
+        object.__setattr__(self, "authorization", _mapping(self.authorization))
+        object.__setattr__(self, "limits", _mapping(self.limits))
+        object.__setattr__(self, "failure_policy", tuple(_mapping(item) for item in self.failure_policy))
+        object.__setattr__(self, "algorithm_versions", _mapping(self.algorithm_versions))
+
+
+@dataclass(frozen=True)
+class ProviderRequest:
+    """One bounded, Host-created request to a capability provider."""
+
+    request_id: str
+    idempotency_key: str
+    run_id: str
+    work_item_id: str
+    check_id: str
+    check_version: str
+    provider_id: str
+    provider_version: str
+    capability: str
+    source_identity: str
+    state_digest: str
+    scope: Mapping[str, Any]
+    limits: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scope", _mapping(self.scope))
+        object.__setattr__(self, "limits", _mapping(self.limits))
+
+
+@dataclass(frozen=True)
+class ProviderFact:
+    """A source-bound fact returned by a capability provider."""
+
+    kind: str
+    source_identity: str
+    state_digest: str
+    payload: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "payload", _mapping(self.payload))
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """A classified provider failure; it is not a compliance decision."""
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True)
+class ProviderResponse:
+    """The identity-bearing provider response envelope."""
+
+    request_id: str
+    provider_id: str
+    provider_version: str
+    capability: str
+    status: str
+    facts: tuple[ProviderFact, ...] = ()
+    failure: ProviderFailure | None = None
+
+
+@dataclass(frozen=True)
+class ProviderCollectionResult:
+    """A validated Host result containing Evidence or one provider failure."""
+
+    request: ProviderRequest
+    evidence: tuple["EvidenceRecord", ...] = ()
+    failure: ProviderFailure | None = None
+    retry: str | None = None
+
+
+@dataclass(frozen=True)
+class ProviderEvidenceExpectation:
+    """Frozen provider identity used by the Kernel Evidence gate."""
+
+    run_id: str
+    provider_id: str
+    provider_version: str
+    capability_evidence_kinds: Mapping[str, tuple[str, ...]]
+    algorithm_versions: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "capability_evidence_kinds",
+            _mapping({key: tuple(value) for key, value in self.capability_evidence_kinds.items()}),
+        )
+        object.__setattr__(self, "algorithm_versions", _mapping(self.algorithm_versions))
+
+
+@dataclass(frozen=True)
 class PlatformContext:
     run_id: str
     capabilities: frozenset[str]
+    limits: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "capabilities", frozenset(self.capabilities))
+        object.__setattr__(self, "limits", _mapping(self.limits))
 
     @property
     def capability_profile(self) -> CapabilityProfile:
-        return CapabilityProfile(self.capabilities)
+        return CapabilityProfile(self.capabilities, self.limits)
 
 
 @dataclass(frozen=True)
@@ -120,6 +239,7 @@ class PlatformRun:
     check_version: str
     scope_digest: str
     started_at: str = ""
+    subject_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,9 +311,28 @@ class EvidenceRecord:
     kind: str
     source_identity: str
     payload: Mapping[str, Any]
+    run_id: str | None = None
+    provider_request_id: str | None = None
+    provider_id: str | None = None
+    provider_version: str | None = None
+    capability: str | None = None
+    source_state_digest: str | None = None
+    algorithm_versions: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payload", _mapping(self.payload))
+        object.__setattr__(self, "algorithm_versions", _mapping(self.algorithm_versions))
+
+    @property
+    def provider_bound(self) -> bool:
+        return any(value is not None for value in (
+            self.run_id,
+            self.provider_request_id,
+            self.provider_id,
+            self.provider_version,
+            self.capability,
+            self.source_state_digest,
+        )) or bool(self.algorithm_versions)
 
 
 @dataclass(frozen=True)
@@ -349,6 +488,7 @@ class PlatformLedger:
     decision_authority: str = "platform"
     review_checkpoints: tuple[ReviewCheckpoint, ...] = ()
     workflow: Mapping[str, Any] = field(default_factory=dict)
+    metrics: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.status not in {"running", "completed", "partial", "failed"}:
@@ -365,6 +505,7 @@ class PlatformLedger:
         if len(checkpoint_ids) != len(set(checkpoint_ids)):
             raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Ledger review checkpoint IDs must be unique")
         object.__setattr__(self, "workflow", _mapping(self.workflow))
+        object.__setattr__(self, "metrics", _mapping(self.metrics))
 
 
 @dataclass(frozen=True)

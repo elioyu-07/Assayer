@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-conformance.schema.json",
+  "title": "AssayerPluginConformanceReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "status", "plugins"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "status": { "enum": ["passed", "failed"] },
+    "plugins": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["schemaVersion", "pluginId", "status", "issues"],
+        "properties": {
+          "schemaVersion": { "const": "1.0.0" },
+          "pluginId": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed"] },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["code", "invariant", "message", "nextAction"],
+              "properties": {
+                "code": { "type": "string", "minLength": 1 },
+                "invariant": { "type": "string", "pattern": "^PCV1-[A-Z0-9-]+$" },
+                "message": { "type": "string", "minLength": 1 },
+                "nextAction": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

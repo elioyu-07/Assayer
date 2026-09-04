@@ -134,6 +134,9 @@ class PluginRegistry:
         return registry
 
     def register(self, registration: PluginRegistration) -> None:
+        from .conformance import require_plugin_registration_conformance
+
+        require_plugin_registration_conformance(registration)
         plugin_id = registration.manifest.plugin_id
         if plugin_id in self._registrations:
             raise PlatformContractError("PLUGIN_CONFLICT", f"Plugin is already registered: {plugin_id}")

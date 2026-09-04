@@ -2,8 +2,8 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0-draft |
-| Date | 2026-08-31 |
+| Document version | 1.1.0-draft |
+| Date | 2026-09-04 |
 | Status | C08.1-C08.4 completed; ongoing governance baseline for J04-J08 acceptance |
 | Owner | Agent Runtime / Host Core / Product Owner |
 
@@ -91,7 +91,57 @@ If any core closure is missing, the report must explicitly state that diagnostic
 | C08.3 | Agent Decision Trace, model/transport/lease events, and cross-entity references | completed |
 | C08.4 | Assessment timeline, diagnostic reports, integrity gates, and regression samples | completed |
 
-## 10. Relationship to Deferred Work
+## 10. Generic Plugin Run Views
+
+Interactive plugin Runs expose one canonical history and three derived reading
+views:
+
+- `platform-ledger.json` is the canonical structured history;
+- `platform-events.jsonl` is the machine-oriented chronological stream;
+- `platform-run.log` is the derived human diary;
+- `progress` in interactive responses is the compact current-position view.
+
+The progress view identifies the phase, lifecycle state, waiting owner,
+completed and remaining counts, durable required next step, plain-language next
+action, and terminal status. `awaiting_agent_decision` means durable state is
+saved and semantic Agent judgment is genuinely required; it must not look like
+a Host timeout or unexplained hang. The diary gives Run/plugin/Check identity,
+chronological lifecycle explanations, decisions, failures, current position,
+and the same next action. These views are deterministically derived and cannot
+create or alter Evidence, Decisions, failures, coverage, or recovery history.
+
+Batch Runs also record `inspection.parallel.planned`. The event states whether
+inspection is serial or parallel, why that mode was selected, and the bounded
+task and worker counts. Metrics separate parallel wall time, summed task time,
+and estimated wait reduction. The estimate is diagnostic, not an audit fact or
+an exact end-to-end performance claim.
+
+Generic platform Runs publish `platform-performance-bill.json` and a
+summary-first Markdown view. The bill keeps elapsed wall time separate from
+summed Host, Provider, and task work because concurrent work can overlap.
+Provider timing is captured at the controlled Provider boundary; Agent wait,
+transport, and model time remain `not_exposed` unless their owning client
+supplies measurements. Missing telemetry has no numeric duration. Scheduler
+wait reduction is labeled `estimated` and cannot be presented as measured
+end-to-end speedup or used to change an audit conclusion.
+
+Terminal result conformance is independently derived from the canonical
+ledger. It verifies that the terminal event, latest recovery status,
+Evidence/Decision references, authoritative receipts, formal result, and
+published artifacts agree. A failed conformance report blocks publication and
+identifies the violated `RCV1-*` invariant; it never repairs or rewrites the
+ledger silently.
+
+Every terminal plugin Run also publishes `canonical-result.json`. Generic Runs
+derive it from `platform-ledger.json`; the frontend compatibility journey
+derives it from its validated `audit-ledger.json`. It is the portable public
+result and contains only stable relative trace references. Its ledger digest
+covers the exact persisted source-ledger bytes. Historical result loading
+validates the schema, Run identity, status, and digest before returning a
+terminal acknowledgement. Plugin-specific summary content remains a separate
+derived view unless a declared extension schema and privacy gate authorize it.
+
+## 11. Relationship to Deferred Work
 
 - B07c automatic screenshot sanitization remains an independent security task. C08 must not write unsanitized images to events or relax the `issue_found` gate.
 - `inspect_source` remains a future capability. C08 may record that it is unavailable or that a call was rejected, but must not fabricate source evidence.

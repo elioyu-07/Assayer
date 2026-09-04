@@ -24,6 +24,7 @@ from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, Rec
 from .evidence import EvidenceAdapter, EvidenceSanitizer, UnavailableEvidenceAdapter, is_page_observation
 from .reporting import DerivedReportBuilder
 from .observability import render_observability, render_performance_bill
+from .frontend_canonical_result import render_frontend_canonical_result
 from .resources import default_rules_root, default_schema_root
 from .store import SQLiteStore
 from .platform_store import SQLitePlatformLedgerStore
@@ -194,14 +195,19 @@ class HostCore:
         replacements = {"runtime-events.jsonl": stream, "observability-manifest.json": manifest_bytes}
         ledger_path = Path(scan["outputDir"]) / "audit-ledger.json"
         if ledger_path.is_file():
-            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger_bytes = ledger_path.read_bytes()
+            ledger = json.loads(ledger_bytes)
             performance_json, performance_markdown, bill = render_performance_bill(
                 ledger, events, scan["outputDir"]
             )
             self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
+            canonical_bytes, _canonical = render_frontend_canonical_result(
+                ledger, ledger_bytes=ledger_bytes, performance_bill=bill,
+            )
             replacements.update({
                 "performance-bill.json": performance_json,
                 "performance-bill.md": performance_markdown,
+                "canonical-result.json": canonical_bytes,
             })
         self._replace_observability_artifacts(scan["outputDir"], replacements)
 
@@ -2146,7 +2152,8 @@ class HostCore:
                 elif ref in unprocessed: embedded["status"] = "unprocessed"
         ledger = {"schemaVersion": "1.0.0", "createdAt": ended_at, "scan": scan_entity, "ruleRegistry": self._rule_registry, "pageStates": pages, "entrypoints": entrypoints, "objects": objects, "operations": operations, "dimensionFindings":self._store.list_entities("dimension_findings", scan["scanId"]), "assessments": self._store.list_entities("assessments", scan["scanId"]), "cases": self._store.list_entities("reverse_cases", scan["scanId"]), "evidence": self._store.list_entities("evidence", scan["scanId"]), "screenshots": self._store.list_entities("screenshots", scan["scanId"]), "issues": self._store.list_entities("issues", scan["scanId"])}
         self._validate_entity(self._ledger_validator, ledger, "AuditLedger")
-        artifacts = {"audit-ledger.json": (json.dumps(ledger, ensure_ascii=False, indent=2) + "\n").encode("utf-8")}
+        ledger_bytes = (json.dumps(ledger, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+        artifacts = {"audit-ledger.json": ledger_bytes}
         platform_artifact_names: tuple[str, ...] = ()
         platform_ledger = self.platform_ledger_store.load(scan["runId"])
         if platform_ledger is not None:
@@ -2158,6 +2165,7 @@ class HostCore:
             )
             platform_artifact_names = (
                 "platform-ledger.json", "platform-events.jsonl", "platform-run.log",
+                "platform-performance-bill.json", "platform-performance-bill.md",
             )
             root = Path(scan["outputDir"])
             for name in platform_artifact_names:
@@ -2183,11 +2191,15 @@ class HostCore:
             ledger, runtime_events, scan["outputDir"]
         )
         self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
+        canonical_bytes, _canonical = render_frontend_canonical_result(
+            ledger, ledger_bytes=ledger_bytes, performance_bill=bill,
+        )
         artifacts.update({
             "runtime-events.jsonl": event_stream,
             "observability-manifest.json": manifest_bytes,
             "performance-bill.json": performance_json,
             "performance-bill.md": performance_markdown,
+            "canonical-result.json": canonical_bytes,
         })
         self._publish_artifacts(scan["outputDir"], artifacts)
         return sorted(artifacts)

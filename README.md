@@ -52,9 +52,11 @@ browser profiles, and commit receipts. The user supplies only intent and the
 business target.
 
 The current Alpha package is validated for macOS arm64 with CPython 3.13.
-Python and Chromium are external prerequisites. Stable public installation and
-release lifecycle documentation are part of the remaining J08 work; current
-package construction and acceptance evidence are documented in
+Python and Chromium are external prerequisites. The product MCP can report
+read-only installation identity, version alignment, bundle status, and safe
+feedback references without starting a browser. Stable upgrade, rollback,
+uninstall, and cleanup remain part of J08; current package construction and
+acceptance evidence are documented in
 [J01 installation delivery](docs/j01-install-delivery.md) and
 [J02 activation and discovery](docs/j02-activation-and-discovery.md).
 
@@ -79,6 +81,12 @@ Each WorkItem and Check uses a common decision vocabulary:
 `needs_review` must identify the missing discriminating fact, the safe checks
 already attempted, and the next condition that could resolve it. Unknown or
 ambiguous evidence is never converted into a pass.
+
+Generic plugin Runs return a platform-owned result overview before optional
+domain detail. It explains conclusion validity, actual coverage, outcome
+counts, review/failure counts, and the next action. Paged Decision details
+retain the committed reason and dimension reasons. A failed Run never presents
+its earlier Decisions or plugin summary as valid conclusions.
 
 Canonical conclusions live in the immutable structured ledger. Markdown,
 screenshots, diagnostics, and other presentations are derived artifacts and
@@ -191,6 +199,50 @@ The builder packages the Skill, MCP launcher, Python runtime dependencies,
 rules, schemas, and plugin resources into one version-aligned archive. It
 verifies the offline runtime and launcher in a clean temporary environment.
 
+Validate one or more audit-plugin registrations before packaging them:
+
+```bash
+assayer-plugin-check my_package.plugin:registration
+```
+
+The JSON result identifies each violated `PCV1-*` contract and its required
+next action. A failed report exits nonzero and must block publication.
+
+Before installing an independent plugin distribution, validate its package
+resources without importing its Python code:
+
+```bash
+assayer-plugin-package-check ./my-plugin-release
+```
+
+The package root must contain `assayer-plugin-release.json`, which binds the
+manifest, business-input schema, runtime source, semantic-review instructions,
+deterministic fixtures, and Python entry point to one plugin identity.
+
+Run the isolated installation and deterministic fixture gate before release:
+
+```bash
+assayer-plugin-install-check ./my-plugin-release
+```
+
+This installs only into a temporary target, performs no dependency download,
+loads exactly one declared entry point in a new Python process, reconciles the
+runtime registration with the static package, and executes the declared
+fixtures through the platform kernel. The temporary installation is deleted
+after validation; this command does not promote the plugin into a user setup.
+
+Capability providers use an independent entry-point and release gate:
+
+```bash
+assayer-provider-check my_provider.registration:registration
+assayer-provider-package-check ./my-provider-release
+assayer-provider-install-check ./my-provider-release
+```
+
+The static provider gate never imports runtime code. The isolated gate requires
+exactly one `assayer.providers` entry point and executes deterministic success
+and classified-failure fixtures through the negotiated Provider boundary.
+
 ## Standalone and diagnostic tools
 
 Inside an existing Codex task, prefer the natural-language workflow above. For
@@ -228,6 +280,8 @@ Assayer records four related views:
 - a public Agent decision trace explaining objectives and actions without
   exposing hidden reasoning;
 - derived diagnostics and a performance bill for attribution and optimization.
+- a portable `canonical-result.json` shared by every audit plugin and bound to
+  the exact persisted source-ledger digest.
 
 Diagnostics distinguish environment, capability provider, Host contract, Agent
 strategy, rule contract, transport runtime, and target-application failures.
