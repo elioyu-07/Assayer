@@ -1,41 +1,59 @@
 # Assayer
 
-Assayer is an evidence-backed audit platform for Codex. A user describes what
-to audit and provides a business input such as a Web URL or Markdown file.
-Assayer selects a domain plugin, collects facts through controlled runtime
-capabilities, and produces traceable audit decisions.
+**Evidence-backed audits, governed from intent to result.**
 
-Codex CLI is the primary client. Codex Desktop follows the same Skill, MCP, and
-Host path as a compatibility client.
+Assayer is an audit platform for Codex. Give it an audit intent and a business
+target—a web URL, a specification, or another supported source—and it coordinates
+the evidence collection, semantic review, coverage accounting, recovery, and
+publication needed to produce a traceable result.
 
-## What works today
+Codex CLI is the primary client. Codex Desktop uses the same Skill, MCP, and Host
+path as a compatibility client.
 
-Assayer is an Alpha with two usable audit journeys:
+> Assayer is in active Alpha development. Two audit journeys are usable today;
+> independent plugin distribution and the complete release lifecycle are still
+> being finished.
 
-- **Frontend audit:** inspect an anonymous test or staging URL with real
-  Chromium, safe interactions, structured and visual evidence, recovery gates,
-  and five-state decisions.
-- **Spec-quality audit:** inspect a Markdown product or software specification,
-  collect bounded candidate evidence, and let the Agent perform the required
-  semantic review against the bundled Spec-quality policy.
+## Why Assayer exists
 
-The repository also contains a domain-neutral platform kernel, plugin registry,
-interactive lifecycle, durable ledger, result schemas, conformance tests, and
-configuration-quality reference plugin.
+An Agent can interpret a rule, but an audit needs more than a plausible answer.
+It needs to show what was inspected, which evidence supports each decision, what
+remains unknown, whether an interrupted run resumed safely, and why the final
+conclusion is valid.
 
-The plugin ecosystem is not complete yet. The frontend, Spec-quality, and
-configuration-quality plugins are currently built-in reference implementations.
-Independent plugin installation, upgrade, rollback, and uninstall are planned
-work and must not be treated as delivered capabilities. See the
-[project plan](docs/project-plan.md) for the ordered delivery gates.
+Assayer moves those responsibilities into a small, domain-neutral platform:
 
-## Use Assayer from Codex CLI
+- users provide intent and business input, not protocol bookkeeping;
+- plugins provide versioned domain rules, not private execution frameworks;
+- capability providers expose controlled access to browsers, files, repositories,
+  APIs, databases, or logs;
+- the platform enforces evidence integrity, lifecycle, recovery, coverage, and
+  result semantics across every audit domain;
+- the Agent performs semantic judgment only where deterministic software cannot.
 
-Install and enable the current Assayer Codex Plugin release, then open a new
-Codex CLI task so its Skill and deferred local MCP server can be discovered.
-Users do not configure MCP paths or provide protocol fields.
+The goal is an ecosystem in which a new audit domain can be added without
+rebuilding the trust model around it.
 
-Ask naturally:
+## Plugins
+
+The current plugins are built-in implementations. They exercise the same generic
+contracts intended for independently packaged plugins, but the external plugin
+lifecycle is not yet a delivered ecosystem feature.
+
+| Plugin | Status | What it does |
+|---|---|---|
+| `assayer.frontend-audit` | Usable Alpha | Audits anonymous test or staging web interfaces in Chromium with safe interactions and DOM/visual evidence; currently ships the FUA-10 filter-action check. |
+| `assayer.spec-quality` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point Spec-quality policy with Agent semantic judgment. |
+| `assayer.config-quality` | Reference | Demonstrates deterministic, batched auditing of structured configuration files through the generic platform kernel. |
+
+Every plugin publishes the same portable `canonical-result.json`. A plugin may
+also publish richer domain reports, but those reports cannot redefine the formal
+result.
+
+## Quick start
+
+Once the Assayer Codex Plugin is installed and enabled, open a new Codex CLI task
+and ask naturally:
 
 ```text
 Audit http://localhost:8081/#/lease-mock
@@ -47,128 +65,139 @@ or:
 Audit this project's spec.md
 ```
 
-Assayer owns internal run IDs, protocol versions, output locations, revisions,
-browser profiles, and commit receipts. The user supplies only intent and the
-business target.
+That is the intended product boundary. Assayer owns run IDs, protocol versions,
+revisions, output locations, browser profiles, checkpoint receipts, and recovery
+state. The user supplies the audit intent and the target.
 
-The current Alpha package is validated for macOS arm64 with CPython 3.13.
-Python and Chromium are external prerequisites. The product MCP can report
-read-only installation identity, version alignment, bundle status, and safe
-feedback references without starting a browser. Stable upgrade, rollback,
-uninstall, and cleanup remain part of J08; current package construction and
-acceptance evidence are documented in
-[J01 installation delivery](docs/j01-install-delivery.md) and
-[J02 activation and discovery](docs/j02-activation-and-discovery.md).
+The current Alpha bundle is validated on macOS arm64 with CPython 3.13. Python
+and Chromium are external prerequisites. The release is currently built from
+source and installed through a personal Codex marketplace; a stable public
+installation and lifecycle flow is not yet available.
 
-## Understand the result
+For the current delivery evidence, see [installation](docs/j01-install-delivery.md)
+and [activation and discovery](docs/j02-activation-and-discovery.md).
+
+## How it works
+
+```text
+natural-language intent + business target
+                    |
+              Agent / Skill
+        routing and semantic judgment
+                    |
+             Assayer platform
+      lifecycle · safety · evidence · recovery
+       coverage · observability · publication
+              /                 \
+       audit plugin       capability provider
+     rules and domain      controlled access to
+      interpretation       browser/file/API/etc.
+```
+
+The boundaries are deliberate:
+
+| Component | Owns |
+|---|---|
+| Platform | Lifecycle, permissions, evidence integrity, decision gates, persistence, recovery, observability, performance accounting, and canonical result semantics |
+| Audit plugin | Versioned rules, applicability, WorkItem discovery, evidence organization, semantic-review requirements, and domain summary data |
+| Capability provider | Authorized, bounded access to an environment or data source; never the compliance decision |
+| Agent and Skill | User-intent resolution, orchestration, and semantic decisions requested by the plugin |
+
+Plugins and providers cannot bypass platform safety, evidence, persistence, or
+publication gates.
+
+## Results you can reason about
 
 Every run ends in one platform status:
 
 | Status | Meaning |
 |---|---|
-| `completed` | The declared scope met its coverage requirements and its decisions are valid. |
-| `partial` | Some decisions are valid, but explicitly identified scope remains uncovered. |
-| `failed` | The run cannot publish formal conclusions; diagnostics and a recovery step are provided. |
+| `completed` | The declared scope met its coverage requirements and the conclusions are valid. |
+| `partial` | Some conclusions are valid, but named parts of the declared scope remain uncovered. |
+| `failed` | Formal conclusions are unavailable; the result contains diagnostics and a recovery action instead. |
 
-Each WorkItem and Check uses a common decision vocabulary:
+Individual checks use five common decision states:
 
-- `issue_found`
-- `scanned_no_issue`
-- `not_applicable`
-- `needs_review`
-- `noise`
+| Decision | Meaning |
+|---|---|
+| `issue_found` | The evidence demonstrates a rule violation. |
+| `scanned_no_issue` | The required evidence closes the check without finding a violation. |
+| `not_applicable` | The rule does not apply to the inspected subject. |
+| `needs_review` | A named discriminating fact is still missing after documented safe checks. |
+| `noise` | The candidate is not a valid audit subject or signal. |
 
-`needs_review` must identify the missing discriminating fact, the safe checks
-already attempted, and the next condition that could resolve it. Unknown or
-ambiguous evidence is never converted into a pass.
+`needs_review` is not a confidence escape hatch. It must identify the unresolved
+fact, what was already attempted, and what could resolve the decision. Missing,
+stale, ambiguous, or contaminated evidence is never converted into a pass.
 
-Generic plugin Runs return a platform-owned result overview before optional
-domain detail. It explains conclusion validity, actual coverage, outcome
-counts, review/failure counts, and the next action. Paged Decision details
-retain the committed reason and dimension reasons. A failed Run never presents
-its earlier Decisions or plugin summary as valid conclusions.
+Formal conclusions live in an immutable structured ledger. The platform derives
+and validates `canonical-result.json` from that ledger and binds it to the exact
+ledger digest. Markdown summaries, screenshots, diagnostics, and plugin-specific
+views are presentation artifacts—not competing sources of truth.
 
-Canonical conclusions live in the immutable structured ledger. Markdown,
-screenshots, diagnostics, and other presentations are derived artifacts and
-cannot independently change an audit decision.
+## Reliability and observability
 
-## How the platform is divided
+Long audits should be inspectable and resumable, not opaque.
 
-```text
-User intent and business input
-              |
-         Agent / Skill
-  selection and semantic review
-              |
-       Assayer platform
- lifecycle, safety, evidence, decisions,
- persistence, recovery, diagnostics
-          /             \
- Audit plugin       Capability provider
- rules and domain   browser, file, repository,
- interpretation     API, database, or log access
-```
+- There is no fixed total audit timeout. Large scopes advance through bounded,
+  durable checkpoints instead of being invalidated after an arbitrary duration.
+- Interactive runs expose whether the Host is working, the Agent owes a semantic
+  decision, recovery is required, or the run is terminal.
+- Idempotent operations, revision fencing, and append-only corrections prevent a
+  resumed Agent from duplicating or overwriting accepted work.
+- Summary-first and paged responses keep Agent context bounded while complete
+  evidence remains available in durable artifacts.
+- Safe parallel inspection is available only when a plugin declares independent
+  ordering and negotiated runtime policy permits it.
 
-- **Platform:** owns lifecycle, permissions, evidence integrity, decision
-  gates, persistence, recovery, observability, and common result semantics.
-- **Audit plugin:** owns versioned domain rules, applicability, WorkItem
-  discovery, evidence organization, semantic review requirements, and domain
-  summary data.
-- **Capability provider:** owns controlled access to an environment or data
-  source and does not decide compliance.
-- **Agent/Skill:** understands user intent, orchestrates the run, and makes
-  semantic decisions where the plugin requires expert judgment.
+Each run records complementary views for different readers:
 
-Plugins and providers cannot bypass platform safety, evidence, persistence, or
-publication gates.
+| View | Purpose |
+|---|---|
+| Canonical ledger | Immutable facts, evidence bindings, decisions, recovery, and terminal state |
+| `canonical-result.json` | Portable, plugin-independent result for tools and downstream systems |
+| Run diary | Human-readable chronology of phases, progress, waits, decisions, failures, and next actions |
+| Diagnostics and performance bill | Failure ownership and time attribution across Agent, transport, Host, provider, browser, and scheduling |
 
-## Current plugin interfaces
+Unavailable telemetry is reported as unavailable, never fabricated as zero. A
+failed run never republishes earlier observations as formal conclusions.
 
-Registered plugins can be inspected from the developer CLI:
+## Project status
 
-```bash
-assayer plugins list --json
-```
+Assayer is deliberately separating implemented foundations from accepted product
+journeys.
 
-A registered batch Check can be run with explicit business scope:
+| Area | Current state |
+|---|---|
+| Frontend and Spec audits | Usable Alpha implementations |
+| Platform contracts | v1 constitution, audit-plugin, capability-provider, and canonical-result contracts documented |
+| Contract enforcement | Registration, package, isolated-installation, result, recovery, provider, and performance conformance implemented |
+| Recovery | Durable interruption recovery implemented and accepted in a real Codex CLI trial |
+| Result model | Unified `canonical-result.json` implemented for every current plugin |
+| End-to-end acceptance | J04/J05 implementation complete; fresh clean-CLI evidence and the real J08 lifecycle gate remain open |
+| Plugin ecosystem | Built-in plugins today; independent persistent installation, upgrade, rollback, and uninstall remain in progress |
 
-```bash
-assayer plugins run \
-  --plugin assayer.config-quality \
-  --check CFG-001 \
-  --scope-json '{"files":[{"path":"settings.json"}]}'
-```
+The ordered roadmap is:
 
-Interactive plugins use the shared lifecycle:
+1. close the remaining clean-CLI and release-lifecycle evidence for the current
+   user journey;
+2. complete measured platform-performance evidence;
+3. externalize the Spec-quality plugin without changing platform source;
+4. build an Agent-first plugin workbench backed by inspectable packages and
+   mandatory conformance gates;
+5. externalize frontend auditing and reusable capability providers;
+6. expand the ecosystem only after two materially different external plugins
+   prove the abstractions.
 
-```text
-start_plugin_run
-  -> advance_plugin_run
-  -> advance_plugin_run (with each bounded semantic checkpoint)
-  -> advance_plugin_run (with the final semantic decision)
-  -> formal summary
-  -> get_plugin_result (only for requested detail pages)
-```
+Deep crawler expansion, new FUA rules, marketplace UI, distributed execution,
+automatic screenshot redaction, source-version attribution, persistent
+cross-process caching, and plugin-specific micro-optimizations are intentionally
+deferred. See the [project plan](docs/project-plan.md) for the authoritative
+stage gates and sequencing.
 
-The Host owns deterministic discovery, inspection, paging, checkpoint
-persistence, decision assembly, and eligible closeout. Recovery and progress
-are available through `recover_work_item` and `get_plugin_progress`. Terminal
-arrays and oversized text are exposed as result sections; the Agent reads only
-needed pages while `result-summary.json` retains the complete output. Primitive
-lifecycle tools remain available only through the standalone diagnostic
-transport. Frontend MCP names such as `start_audit`, `discover_scope`, and
-`investigate_object` remain compatibility aliases while the browser vertical
-is migrated.
+## Develop Assayer
 
-The frozen platform laws are documented in the
-[Platform Constitution v1](docs/platform-constitution-v1.md). The current
-Python packaging path and its limitations are documented in
-[Plugin development](docs/plugin-development.md). Agent-assisted plugin creation
-is planned after the M3 conformance and install gates are complete.
-
-## Developer setup
-
-Install the project with the real browser and MCP test dependencies:
+Create an environment with the real browser and MCP dependencies:
 
 ```bash
 python3 -m venv .venv
@@ -176,14 +205,14 @@ uv pip install --python .venv/bin/python -e '.[test]'
 .venv/bin/python -m playwright install chromium
 ```
 
-Run the fast deterministic gate:
+Run the deterministic development gate:
 
 ```bash
 .venv/bin/python scripts/run_tests.py fast
 ```
 
 Run the full gate, which launches Chromium, exercises the MCP SDK, and rejects
-all skipped tests:
+skipped tests:
 
 ```bash
 .venv/bin/python scripts/run_tests.py full
@@ -195,43 +224,31 @@ Build the current Codex Plugin bundle:
 python3 scripts/build_plugin_bundle.py --output ./dist
 ```
 
-The builder packages the Skill, MCP launcher, Python runtime dependencies,
-rules, schemas, and plugin resources into one version-aligned archive. It
-verifies the offline runtime and launcher in a clean temporary environment.
+The bundle contains the Skill, MCP launcher, version-aligned Python runtime,
+rules, schemas, and plugin resources. The builder verifies offline installation
+and launcher startup in a clean temporary environment.
 
-Validate one or more audit-plugin registrations before packaging them:
+## Build an audit plugin
+
+An independently packaged audit plugin declares an `assayer.plugins` Python
+entry point and ships its manifest, scope schema, runtime, semantic-review
+instructions, and deterministic fixtures as one versioned identity.
+
+Validate the registration during development:
 
 ```bash
 assayer-plugin-check my_package.plugin:registration
 ```
 
-The JSON result identifies each violated `PCV1-*` contract and its required
-next action. A failed report exits nonzero and must block publication.
-
-Before installing an independent plugin distribution, validate its package
-resources without importing its Python code:
+Then validate the release without importing it, followed by an isolated local
+installation and fixture run:
 
 ```bash
 assayer-plugin-package-check ./my-plugin-release
-```
-
-The package root must contain `assayer-plugin-release.json`, which binds the
-manifest, business-input schema, runtime source, semantic-review instructions,
-deterministic fixtures, and Python entry point to one plugin identity.
-
-Run the isolated installation and deterministic fixture gate before release:
-
-```bash
 assayer-plugin-install-check ./my-plugin-release
 ```
 
-This installs only into a temporary target, performs no dependency download,
-loads exactly one declared entry point in a new Python process, reconciles the
-runtime registration with the static package, and executes the declared
-fixtures through the platform kernel. The temporary installation is deleted
-after validation; this command does not promote the plugin into a user setup.
-
-Capability providers use an independent entry-point and release gate:
+Capability providers have an independent contract and equivalent gates:
 
 ```bash
 assayer-provider-check my_provider.registration:registration
@@ -239,102 +256,62 @@ assayer-provider-package-check ./my-provider-release
 assayer-provider-install-check ./my-provider-release
 ```
 
-The static provider gate never imports runtime code. The isolated gate requires
-exactly one `assayer.providers` entry point and executes deterministic success
-and classified-failure fixtures through the negotiated Provider boundary.
+These commands fail with stable contract identifiers and required next actions.
+They do not permanently install the package or download its dependencies. Start
+with the [plugin development guide](docs/plugin-development.md), then use the
+normative [Audit Plugin Contract v1](docs/plugin-contract-v1.md).
 
-## Standalone and diagnostic tools
+## Standalone diagnostics
 
-Inside an existing Codex task, prefer the natural-language workflow above. For
-terminal-only compatibility, `assayer audit` starts a separate Codex execution
-and connects it to a local Assayer MCP process:
-
-```bash
-assayer audit 'http://localhost:8081/#/lease-mock' \
-  --output-root ./assayer-output
-```
-
-Run a non-publishable Host fact diagnostic without Agent semantics:
+Inside Codex, prefer the natural-language workflow. The standalone commands are
+useful for development and diagnosis:
 
 ```bash
-assayer smoke 'http://localhost:8081/#/lease-mock' \
-  --output-dir ./assayer-smoke-output
+# Start a separate Codex execution connected to a local Assayer MCP process.
+assayer audit 'http://localhost:8081/#/lease-mock' --output-root ./assayer-output
+
+# Collect Host facts only; this cannot publish an Agent-reviewed audit result.
+assayer smoke 'http://localhost:8081/#/lease-mock' --output-dir ./assayer-smoke-output
 ```
 
-`audit` never silently falls back to `smoke`. The deterministic harness and
-low-level transports are development interfaces, not user-facing proof that a
-real audit journey works:
+`audit` never silently falls back to `smoke`. Low-level harness and transport
+commands are development interfaces, not substitutes for a real user journey.
 
-```bash
-assayer-harness --output-dir ./audit-output
-assayer-json --stdio --output-root ./assayer-output < requests.jsonl
-assayer-mcp --output-root ./assayer-output
-```
-
-## Observability
-
-Assayer records four related views:
-
-- an immutable ledger containing formal audit facts and conclusions;
-- a runtime event stream showing what happened and when;
-- a public Agent decision trace explaining objectives and actions without
-  exposing hidden reasoning;
-- derived diagnostics and a performance bill for attribution and optimization.
-- a portable `canonical-result.json` shared by every audit plugin and bound to
-  the exact persisted source-ledger digest.
-
-Diagnostics distinguish environment, capability provider, Host contract, Agent
-strategy, rule contract, transport runtime, and target-application failures.
-Model or transport telemetry that is unavailable is reported as unavailable,
-never as zero.
-
-## Delivery priorities
-
-Development follows one active path:
+## Repository map
 
 ```text
-close the current J04-J08 user journey
-  -> freeze the platform constitution and contracts
-  -> enforce shared conformance and install gates
-  -> externalize the Spec-quality plugin
-  -> build the Agent-first plugin workbench
-  -> externalize frontend auditing and capability providers
-```
-
-New FUA rules, marketplace UI, distributed execution, automatic screenshot
-redaction, source-version proof, and unmeasured plugin-specific optimizations
-are deferred while these foundations are completed.
-
-## Repository layout
-
-```text
-plugins/                Codex Plugin delivery source and bundled Skills
-src/assayer_platform/   Domain-neutral contracts, kernel, registry, and references
-src/assayer_host/       Product Host, browser runtime, transport, and persistence
+plugins/                Codex Plugin source, Skills, launcher, and bundled resources
+src/assayer_platform/   Domain-neutral contracts, kernel, registry, and reference plugins
+src/assayer_host/       Product Host, browser runtime, transport, persistence, and recovery
 src/assayer_agent/      Model-independent Agent orchestration
 rules/                  Versioned frontend audit rules
-schemas/                Persistent, protocol, result, and diagnostic schemas
+schemas/                Protocol, ledger, result, provider, and diagnostic schemas
 docs/                   Product, architecture, journey, and governance documents
-tests/                  Deterministic, browser, MCP, plugin, and conformance tests
-scripts/                Test, bundle, resilience, and language-governance tools
+tests/                  Deterministic, browser, MCP, plugin, provider, and conformance tests
+scripts/                Test, release, resilience, and language-governance tooling
 ```
 
-## Core documentation
+## Documentation
 
-- [Platform project plan](docs/project-plan.md)
+- [Project plan](docs/project-plan.md) — authoritative priorities, stage gates,
+  progress, and deferrals
 - [User journey and Definition of Done](docs/user-journey-and-definition-of-done.md)
-- [Platform Constitution v1](docs/platform-constitution-v1.md)
-- [Audit Plugin Contract v1](docs/plugin-contract-v1.md)
-- [Capability Provider Contract v1](docs/capability-provider-contract-v1.md)
-- [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md)
-- [Platform v1 contract traceability](docs/platform-contract-traceability-v1.md)
-- [Detailed platform contract reference](docs/platform-contract.md)
-- [Plugin development contract](docs/plugin-development.md)
-- [Architecture](docs/architecture.md)
-- [Design governance](docs/design-governance.md)
-- [Observability governance](docs/observability-governance.md)
+  — the release acceptance boundary
+- [Platform Constitution v1](docs/platform-constitution-v1.md) — frozen platform
+  laws and ownership
+- [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — plugin behavior and
+  lifecycle contract
+- [Capability Provider Contract v1](docs/capability-provider-contract-v1.md) —
+  controlled runtime capability contract
+- [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md) —
+  portable terminal result semantics
+- [Plugin development](docs/plugin-development.md) — Python packaging,
+  registration, and conformance workflow
+- [Architecture](docs/architecture.md) — system structure and boundaries
+- [Observability governance](docs/observability-governance.md) — logs, traces,
+  diagnostics, and performance evidence
 
 When documents conflict, follow the authority order in
-[Design governance](docs/design-governance.md). Examples, tests, and derived
-reports cannot override the product contract, user-journey gates, safety
-invariants, protocols, or schemas.
+[Design governance](docs/design-governance.md). Examples, tests, and generated
+reports cannot override product contracts, user-journey gates, safety invariants,
+protocols, or schemas.
