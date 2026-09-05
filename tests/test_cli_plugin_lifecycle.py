@@ -139,6 +139,58 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "PLUGIN_EXECUTION_MODE_UNSUPPORTED")
 
+    def _bad_package(self, directory: Path, plugin_id: str = "assayer.bad", version: str = "1.0.0") -> Path:
+        root = directory / f"bad-{plugin_id}"
+        root.mkdir()
+        (root / "assayer-plugin-release.json").write_text(json.dumps({
+            "pluginId": plugin_id,
+            "pluginVersion": version,
+        }), encoding="utf-8")
+        return root
+
+    def test_bad_install_quarantines_and_refuses_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, installed = _run([
+                "plugins", "install", str(self._bad_package(root)), "--store", str(store),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(installed["status"], "quarantined")
+            self.assertEqual(installed["state"], "dirty")
+            self.assertEqual(installed["reason"], "PLUGIN_RELEASE_DESCRIPTOR_INVALID")
+
+            code, listing = _run(["plugins", "list", "--json", "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual([item["pluginId"] for item in listing["plugins"]],
+                             ["assayer.config-quality", "assayer.frontend-audit"])
+            self.assertEqual(
+                [item["pluginId"] for item in listing["quarantined"]], ["assayer.bad"],
+            )
+            self.assertEqual(listing["quarantined"][0]["stateReason"], "PLUGIN_RELEASE_DESCRIPTOR_INVALID")
+
+            code, info = _run(["plugins", "info", "assayer.bad", "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(info["state"], "dirty")
+            self.assertEqual(info["stateReason"], "PLUGIN_RELEASE_DESCRIPTOR_INVALID")
+
+            code, result = _run([
+                "plugins", "run", "--plugin", "assayer.bad", "--check", "X",
+                "--scope-json", "{}", "--store", str(store),
+            ])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_DIRTY")
+
+    def test_install_unreachable_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run([
+                "plugins", "install", str(root / "missing"), "--store", str(store),
+            ])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_SOURCE_UNREACHABLE")
+
     def test_list_without_store_reports_builtins_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

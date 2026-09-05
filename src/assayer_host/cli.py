@@ -99,6 +99,14 @@ def _store_registry(store_root: str):
     )
 
 
+def _store_index_entries(store_root: str) -> list[dict]:
+    """Raw store index entries (including quarantined plugins) without imports."""
+    store_path = Path(store_root).expanduser().resolve()
+    if not (store_path / "index.json").is_file():
+        return []
+    return _lifecycle_manager(store_path).list()
+
+
 def _print_json(value: dict) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
@@ -185,6 +193,16 @@ def main(argv: list[str] | None = None) -> int:
             router.close()
     if args.command == "plugins":
         if args.plugin_command == "run":
+            store_path = Path(args.store).expanduser().resolve()
+            if (store_path / "index.json").is_file():
+                entry = _lifecycle_manager(args.store).get(args.plugin_id)
+                if entry is not None and entry.get("state") == "dirty":
+                    _print_error(
+                        "PLUGIN_DIRTY",
+                        f"Plugin is quarantined and cannot run: {args.plugin_id} "
+                        f"({entry.get('stateReason')})",
+                    )
+                    return 2
             try:
                 scope = _load_scope(args.scope_json, args.scope_file)
                 result = PlatformRunner(
@@ -238,14 +256,23 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(result)
             return 0
         catalog = _plugin_catalog(_store_registry(args.store))
+        quarantined = [
+            entry for entry in _store_index_entries(args.store)
+            if entry.get("state") == "dirty"
+        ]
         if args.as_json:
-            _print_json({"plugins": catalog})
+            payload = {"plugins": catalog}
+            if quarantined:
+                payload["quarantined"] = quarantined
+            _print_json(payload)
         else:
             for plugin in catalog:
                 checks = ", ".join(
                     f"{item['checkId']}@{item['version']}" for item in plugin["checks"]
                 )
                 print(f"{plugin['pluginId']} {plugin['version']} [{checks}]")
+            for entry in quarantined:
+                print(f"{entry['pluginId']} (dirty: {entry.get('stateReason')})")
         return 0
     runtime = BrowserHostRuntime(args.url, Path(args.output_dir))
     try:

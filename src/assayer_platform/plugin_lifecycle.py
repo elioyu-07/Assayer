@@ -14,6 +14,7 @@ was validated.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 import re
@@ -68,17 +69,14 @@ def _descriptor(package_root: str | Path) -> dict:
     return value
 
 
-def _require_passed(report: Any, fallback_code: str) -> None:
-    if report.passed:
-        return
-    first = report.issues[0]
-    code = getattr(first, "code", None) or fallback_code
-    message = getattr(first, "message", "The plugin package failed validation.")
-    next_action = getattr(first, "next_action", None)
-    detail = f" {message}" if message else ""
-    if next_action:
-        detail += f" Next action: {next_action}"
-    raise PlatformContractError(code, detail)
+def _package_checksum(root: Path) -> str:
+    """Deterministic content hash over every file in a materialized package."""
+    digest = hashlib.sha256()
+    for path in sorted((item for item in root.rglob("*") if item.is_file())):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
 
 
 def _copy_installer(package_root: Path, target: Path) -> None:
@@ -156,8 +154,17 @@ class PluginLifecycleManager:
 
     def _stage(self, plugin_id: str, version: str, package_root: Path) -> dict:
         report = self._static_validator(package_root)
-        _require_passed(report, "PLUGIN_PACKAGE_INVALID")
         conformance = report.as_dict()
+        if not report.passed:
+            first = report.issues[0]
+            reason = getattr(first, "code", None) or "PLUGIN_PACKAGE_INVALID"
+            return {
+                "pluginId": plugin_id,
+                "version": version,
+                "passed": False,
+                "reason": reason,
+                "conformance": conformance,
+            }
         target = self._store.package_dir(plugin_id, version)
         if target.exists():
             shutil.rmtree(target)
@@ -175,7 +182,26 @@ class PluginLifecycleManager:
             "packageRoot": relative,
             "installedAt": installed_at,
             "conformance": conformance,
+            "checksum": _package_checksum(target),
+            "passed": True,
+            "reason": None,
         }
+
+    def _quarantine(self, index: dict, plugin_id: str, reason: str) -> None:
+        entry = index["plugins"].get(plugin_id)
+        if not isinstance(entry, dict):
+            entry = {
+                "activeVersion": None,
+                "history": [],
+                "versions": {},
+                "state": "dirty",
+                "stateReason": reason,
+            }
+            index["plugins"][plugin_id] = entry
+        else:
+            entry["state"] = "dirty"
+            entry["stateReason"] = reason
+        self._store.save(index)
 
     def _persist(self, index: dict, staged: dict, *, operation: str) -> dict:
         entry = self._store.upsert(
@@ -186,11 +212,30 @@ class PluginLifecycleManager:
             installed_at=staged["installedAt"],
             conformance=staged["conformance"],
         )
+        entry["versions"][staged["version"]]["checksum"] = staged["checksum"]
+        entry["state"] = "installed"
+        entry.pop("stateReason", None)
         self._store.save(index)
         return self._result(operation, staged["pluginId"], self._store.active_version(entry))
 
-    def install(self, package_root: str | Path) -> dict:
+    def _quarantined_result(self, operation: str, plugin_id: str, version: str, reason: str) -> dict:
+        result = self._result(operation, plugin_id, version)
+        result["status"] = "quarantined"
+        result["state"] = "dirty"
+        result["reason"] = reason
+        return result
+
+    def _source_root(self, package_root: str | Path) -> Path:
         root = Path(package_root).expanduser().resolve()
+        if not root.is_dir():
+            raise PlatformContractError(
+                "PLUGIN_SOURCE_UNREACHABLE",
+                f"The plugin source is unreachable or does not exist: {root}",
+            )
+        return root
+
+    def install(self, package_root: str | Path) -> dict:
+        root = self._source_root(package_root)
         descriptor = _descriptor(root)
         plugin_id, version = descriptor["pluginId"], descriptor["pluginVersion"]
         index = self._store.load()
@@ -200,10 +245,13 @@ class PluginLifecycleManager:
                 f"Plugin is already installed: {plugin_id}",
             )
         staged = self._stage(plugin_id, version, root)
+        if not staged["passed"]:
+            self._quarantine(index, plugin_id, staged["reason"])
+            return self._quarantined_result("install", plugin_id, version, staged["reason"])
         return self._persist(index, staged, operation="install")
 
     def upgrade(self, package_root: str | Path) -> dict:
-        root = Path(package_root).expanduser().resolve()
+        root = self._source_root(package_root)
         descriptor = _descriptor(root)
         plugin_id, version = descriptor["pluginId"], descriptor["pluginVersion"]
         index = self._store.load()
@@ -227,6 +275,9 @@ class PluginLifecycleManager:
             )
         previous = active
         staged = self._stage(plugin_id, version, root)
+        if not staged["passed"]:
+            self._quarantine(index, plugin_id, staged["reason"])
+            return self._quarantined_result("upgrade", plugin_id, version, staged["reason"])
         result = self._persist(index, staged, operation="upgrade")
         result["previousVersion"] = previous
         return result
@@ -293,29 +344,30 @@ class PluginLifecycleManager:
             shutil.rmtree(package_root)
         return self._result("uninstall", plugin_id, None)
 
+    def _entry_view(self, plugin_id: str, entry: dict) -> dict:
+        return {
+            "pluginId": plugin_id,
+            "activeVersion": self._store.active_version(entry),
+            "history": self._store.version_history(entry),
+            "state": entry.get("state", "installed"),
+            "stateReason": entry.get("stateReason"),
+        }
+
     def list(self) -> list[dict]:
         index = self._store.load()
-        entries = []
-        for plugin_id, entry in sorted(index["plugins"].items()):
-            active = self._store.active_version(entry)
-            entries.append({
-                "pluginId": plugin_id,
-                "activeVersion": active,
-                "history": self._store.version_history(entry),
-            })
-        return entries
+        return [
+            self._entry_view(plugin_id, entry)
+            for plugin_id, entry in sorted(index["plugins"].items())
+        ]
 
     def get(self, plugin_id: str) -> dict | None:
         index = self._store.load()
         entry = self._store.plugin(index, plugin_id)
         if entry is None:
             return None
-        return {
-            "pluginId": plugin_id,
-            "activeVersion": self._store.active_version(entry),
-            "history": self._store.version_history(entry),
-            "versions": dict(entry.get("versions", {})),
-        }
+        view = self._entry_view(plugin_id, entry)
+        view["versions"] = dict(entry.get("versions", {}))
+        return view
 
     @staticmethod
     def _result(operation: str, plugin_id: str, version: str | None) -> dict:
@@ -342,13 +394,22 @@ def discover_plugin_registry(
     registry = PluginRegistry(builtins)
     index = store.load()
     for plugin_id, entry in index["plugins"].items():
+        if entry.get("state") == "dirty":
+            continue
         active = store.active_version(entry)
         if active is None:
             continue
         record = store.record(entry, active)
         if record is None:
             continue
-        registration = loader(Path(store.root) / record["packageRoot"])
+        package_root = Path(store.root) / record["packageRoot"]
+        checksum = record.get("checksum")
+        if checksum and _package_checksum(package_root) != checksum:
+            entry["state"] = "dirty"
+            entry["stateReason"] = "PLUGIN_CHECKSUM_MISMATCH"
+            store.save(index)
+            continue
+        registration = loader(package_root)
         registry.register(registration)
     return registry
 

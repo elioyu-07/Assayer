@@ -143,7 +143,7 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             manager.install(package.root)
             _assert_error_code(self, "PLUGIN_CONFLICT", lambda: manager.install(package.root))
 
-    def test_install_invalid_package_fails_closed(self):
+    def test_install_invalid_package_quarantines(self):
         with tempfile.TemporaryDirectory() as directory:
             package = _FakePackage(Path(directory))
             manager = PluginLifecycleManager(
@@ -151,7 +151,22 @@ class PluginLifecycleManagerTest(unittest.TestCase):
                 static_validator=lambda package: _failed_report(),
                 installer=_mkdir_installer,
             )
-            _assert_error_code(self, "PLUGIN_PACKAGE_INVALID", lambda: manager.install(package.root))
+            result = manager.install(package.root)
+            self.assertEqual(result["status"], "quarantined")
+            self.assertEqual(result["state"], "dirty")
+            self.assertEqual(result["reason"], "PLUGIN_PACKAGE_INVALID")
+            installed = manager.get("fixture.lifecycle")
+            self.assertEqual(installed["state"], "dirty")
+            self.assertEqual(installed["stateReason"], "PLUGIN_PACKAGE_INVALID")
+            self.assertIsNone(installed["activeVersion"])
+
+    def test_install_unreachable_source_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            _assert_error_code(
+                self, "PLUGIN_SOURCE_UNREACHABLE",
+                lambda: manager.install(Path(directory) / "does-not-exist"),
+            )
 
     def test_upgrade_preserves_previous_and_flips_active(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -270,6 +285,8 @@ class PluginLifecycleManagerTest(unittest.TestCase):
                 "pluginId": "fixture.lifecycle",
                 "activeVersion": "1.0.0",
                 "history": ["1.0.0"],
+                "state": "installed",
+                "stateReason": None,
             }])
 
 
@@ -290,6 +307,41 @@ class DiscoveryTest(unittest.TestCase):
             )
             self.assertEqual(registry.select(plugin_id="fixture.lifecycle").manifest.plugin_id, "fixture.lifecycle")
             self.assertEqual(registry.select(plugin_id="assayer.config-quality").manifest.plugin_id, "assayer.config-quality")
+
+    def test_discover_skips_quarantined_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginLifecycleManager(
+                PluginInstallationStore(directory),
+                static_validator=lambda package: _failed_report(),
+                installer=_mkdir_installer,
+                clock=lambda: 1,
+            )
+            manager.install(_FakePackage(Path(directory)).root)
+            registry = discover_plugin_registry(
+                PluginInstallationStore(directory),
+                loader=lambda package: _registration(),
+            )
+            self.assertEqual(registry.list(), ())
+
+    def test_discover_quarantines_on_checksum_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = PluginLifecycleManager(
+                PluginInstallationStore(directory),
+                static_validator=lambda package: _passed_report(),
+                installer=_mkdir_installer,
+                clock=lambda: 1,
+            )
+            manager.install(_FakePackage(Path(directory)).root)
+            package_dir = Path(directory) / "packages" / "fixture.lifecycle" / "1.0.0"
+            (package_dir / "tampered.txt").write_text("x", encoding="utf-8")
+            registry = discover_plugin_registry(
+                PluginInstallationStore(directory),
+                loader=lambda package: _registration(),
+            )
+            self.assertEqual(registry.list(), ())
+            entry = manager.get("fixture.lifecycle")
+            self.assertEqual(entry["state"], "dirty")
+            self.assertEqual(entry["stateReason"], "PLUGIN_CHECKSUM_MISMATCH")
 
     def test_discover_duplicate_identity_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
