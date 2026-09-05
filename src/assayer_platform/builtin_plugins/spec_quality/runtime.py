@@ -6,7 +6,6 @@ and remain unresolved until an Agent/reviewer submits an explicit review.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections.abc import Mapping
@@ -19,12 +18,22 @@ from ...contract import (
     WorkItem,
 )
 from ...registry import load_plugin_manifest
+from ...actionable_result import build_actionable_result
 from ...navigation import MarkdownNavigationAdapter
 from ...review_protocol import validate_review_submission
 from ...evidence_graph import (
-    build_candidate_evidence_graph, render_candidate_evidence_graph,
+    build_candidate_evidence_graph, build_candidate_envelope,
+    canonicalize_candidate, render_candidate_evidence_graph,
     validate_candidate_evidence_graph_projection,
 )
+from ...identity import (
+    digest_bytes as _digest, document_state_digest as _document_state_digest,
+)
+from ...source_chunking import (
+    build_source_chunks as _source_chunks,
+    source_ref_for_line as _source_ref_for_line,
+)
+from ...source_fact_index import build_source_fact_index
 
 
 _ROOT = Path(__file__).parent
@@ -61,11 +70,14 @@ _VAGUE = re.compile(
     r"should be good|as soon as possible|approximately|might|reasonable|try to|basic implementation",
     re.I,
 )
+_ABSENCE_PATTERN = re.compile(
+    r"\b(?:no|not detected|missing|without|absent|lacks?)\b|不存在|缺失|未检测到|没有|缺少|无",
+    re.I,
+)
 _PLACEHOLDER = re.compile(r"(?i)\b(?:TODO|TBD|YYYY-MM-DD)\b|待填写|待补充|示例内容")
 _FR = re.compile(r"\bFR[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
 _AC = re.compile(r"\bAC[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
 _CASE = re.compile(r"\bCASE[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
-_SOURCE_CHUNK_LIMIT = 2400
 _DIMENSION_SIGNALS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
     "CHK-02": (("goal-and-context", re.compile(r"goal|objective|overview|actor|trigger|input|output|workflow|目标|参与者|触发|输入|输出", re.I)),),
     "CHK-03": (("terminology", re.compile(r"terms?|glossary|abbreviation|definition|alias|术语|缩写|定义|别名", re.I)),),
@@ -105,116 +117,23 @@ def _actionable_result_delivery(
     evidence_by_dimension = {
         item.name: list(item.evidence_refs) for item in packet.dimensions
     }
-    remediations: list[dict[str, Any]] = []
-    evidence_claims: list[dict[str, Any]] = []
     evidence_id = packet.evidence[0].evidence_id if packet.evidence else None
     evidence_payload = packet.evidence[0].payload if packet.evidence else {}
     source_chunks = evidence_payload.get("sourceChunks", ()) if isinstance(evidence_payload, Mapping) else ()
-    end_line = max(
-        [int(item.get("end_line", 1)) for item in source_chunks if isinstance(item, Mapping)] or [1],
+    return build_actionable_result(
+        decisions, checklist_status, evidence_by_dimension,
+        evidence_id=evidence_id,
+        source_chunks=source_chunks,
+        work_item_identity=str(packet.work_item.identity),
+        document_path=str(packet.metadata.get("path") or packet.work_item.identity),
+        confirmed_status="CONFIRMED",
+        actionable_statuses=frozenset({"REWORK", "ESCALATE"}),
+        absence_pattern=_ABSENCE_PATTERN,
     )
-    covered: set[str] = set()
-    for finding in decisions:
-        if finding.get("status") != "CONFIRMED":
-            continue
-        dimension = str(finding.get("dimension") or "")
-        if checklist_status.get(dimension) not in {"REWORK", "ESCALATE"}:
-            # evaluate_review rejects this mismatch before a Decision can be
-            # admitted; retaining the guard keeps this projection pure.
-            continue
-        affected = finding.get("affected_elements")
-        if not isinstance(affected, (tuple, list)) or not affected:
-            affected = [finding.get("object_id")]
-        affected = [str(item).strip() for item in affected if str(item or "").strip()]
-        owner = finding.get("resolution_owner")
-        owner_value = (
-            {"status": "assigned", "identity": str(owner).strip()}
-            if isinstance(owner, str) and owner.strip()
-            else {
-                "status": "unassigned",
-                "reason": "The reviewed evidence does not identify an accountable resolution owner.",
-            }
-        )
-        recommendation = str(finding.get("recommendation") or "").strip()
-        next_action = str(finding.get("next_action") or "").strip()
-        if not next_action:
-            next_action = f"Assign an accountable owner and implement this recommendation: {recommendation}"
-        gap = str(finding.get("gap") or "").strip()
-        finding_id = str(finding.get("finding_id") or "")
-        absence = bool(re.search(
-            r"\b(?:no|not detected|missing|without|absent|lacks?)\b|不存在|缺失|未检测到|没有|缺少|无",
-            gap,
-            re.I,
-        ))
-        claim_id = f"claim:{finding_id}"
-        claim: dict[str, Any] = {
-            "claimId": claim_id,
-            "kind": "absence" if absence else "direct",
-            "evidenceRefs": [evidence_id] if evidence_id else [],
-            "scope": {
-                "sourceRef": evidence_id or str(packet.work_item.identity),
-                "documentPath": str(packet.metadata.get("path") or packet.work_item.identity),
-                "startLine": max(1, int(finding.get("line") or 1)),
-                "endLine": end_line,
-            },
-            "observed": [str(finding.get("evidence") or gap)],
-            "conclusion": gap,
-        }
-        if absence:
-            claim["searchedFor"] = [
-                "The requirement or record described by this finding",
-                "A positive, directly observable specification statement in the declared scope",
-            ]
-        evidence_claims.append(claim)
-        remediations.append({
-            "remediationId": finding_id,
-            "title": gap,
-            "severity": str(finding.get("severity") or ""),
-            "dimensions": [dimension],
-            "affectedElements": affected,
-            "evidenceRefs": evidence_by_dimension.get(dimension, []),
-            "problem": gap,
-            "impact": str(finding.get("impact") or "").strip(),
-            "recommendation": recommendation,
-            "nextAction": next_action,
-            "closureEvidence": str(finding.get("closure_evidence") or "").strip(),
-            "owner": owner_value,
-            "claimRefs": [claim_id],
-        })
-        covered.add(dimension)
-    actionable_dimensions = {
-        check_id for check_id, status in checklist_status.items()
-        if status in {"REWORK", "ESCALATE"}
-    }
-    return {
-        "schemaVersion": "1.0.0",
-        "status": "complete" if covered == actionable_dimensions else "partial",
-        "remediations": remediations,
-        "evidenceClaims": evidence_claims,
-    }
-
-
-def _digest(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def _scope_error(message: str) -> None:
     raise PlatformContractError("INVALID_SPEC_SCOPE", message)
-
-
-def _document_state_digest(documents: Sequence[Mapping[str, Any]]) -> str:
-    projection = sorted((
-        {
-            "document_id": str(document["document_id"]),
-            "role": str(document["role"]),
-            "path": str(document["path"]),
-            "source_digest": str(document["source_digest"]),
-        }
-        for document in documents
-    ), key=lambda document: document["document_id"])
-    return _digest(json.dumps(
-        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8"))
 
 
 def _load_cross_document_scope(scope: Mapping[str, Any]) -> dict[str, Any]:
@@ -375,77 +294,6 @@ def _meaningful(value: str) -> bool:
     return bool(value) and value not in {"-", "N/A", "不适用", "无", "待定", "待澄清"} and not _PLACEHOLDER.search(value)
 
 
-def _source_chunks(
-    text: str, path: Path, source_digest: str, *,
-    document_id: str | None = None, document_role: str | None = None,
-) -> list[dict[str, Any]]:
-    """Split Markdown into bounded, stable, source-located reference chunks."""
-    lines = text.splitlines()
-    if not lines:
-        return []
-    headings: list[tuple[int, int, str]] = []
-    for line_no, line in enumerate(lines, 1):
-        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
-        if match:
-            headings.append((line_no, len(match.group(1)), match.group(2).strip()))
-    boundaries = sorted({1, *(line_no for line_no, _, _ in headings), len(lines) + 1})
-    heading_by_line = {line_no: (level, title) for line_no, level, title in headings}
-    heading_path: list[str] = []
-    chunks: list[dict[str, Any]] = []
-    for block_index, (start, end) in enumerate(zip(boundaries, boundaries[1:]), 1):
-        markdown_level = 0
-        if start in heading_by_line:
-            markdown_level, title = heading_by_line[start]
-            heading_path = heading_path[: markdown_level - 1]
-            heading_path.append(title)
-        block_lines = lines[start - 1:end - 1]
-        pending: list[tuple[int, str]] = []
-        pending_chars = 0
-
-        def flush() -> None:
-            nonlocal pending, pending_chars
-            if not pending:
-                return
-            excerpt = "\n".join(value for _, value in pending).strip()
-            if excerpt:
-                first_line, last_line = pending[0][0], pending[-1][0]
-                if document_id is None:
-                    # Preserve the historical single-document identity so
-                    # existing resumable Runs keep their checkpoint refs.
-                    chunk_id = f"source:{source_digest[:12]}:{block_index}:{len(chunks) + 1}"
-                else:
-                    document_token = re.sub(r"[^A-Za-z0-9_-]+", "-", str(document_id))[:24]
-                    chunk_id = f"source:{document_token}:{source_digest[:12]}:{block_index}:{len(chunks) + 1}"
-                chunks.append({
-                    "source_chunk_id": chunk_id,
-                    "document_id": document_id,
-                    "document_role": document_role,
-                    "document_path": str(path),
-                    "source_digest": source_digest,
-                    "heading_path": list(heading_path),
-                    "primary_heading": heading_path[-1] if heading_path else "Document preamble",
-                    "heading_level": markdown_level,
-                    "start_line": first_line,
-                    "end_line": last_line,
-                    "excerpt": excerpt,
-                })
-            pending, pending_chars = [], 0
-
-        for offset, line in enumerate(block_lines):
-            line_no = start + offset
-            parts = [line[index:index + _SOURCE_CHUNK_LIMIT] for index in range(0, len(line), _SOURCE_CHUNK_LIMIT)] or [""]
-            for part in parts:
-                added = len(part) + (1 if pending else 0)
-                if pending and pending_chars + added > _SOURCE_CHUNK_LIMIT:
-                    flush()
-                pending.append((line_no, part))
-                pending_chars += len(part) + (1 if len(pending) > 1 else 0)
-                if pending_chars >= _SOURCE_CHUNK_LIMIT:
-                    flush()
-        flush()
-    return chunks
-
-
 def _cross_document_evidence(
     document_scope: Mapping[str, Any], chunks: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -525,27 +373,6 @@ def _dimension_evidence(chunks: Sequence[Mapping[str, Any]]) -> list[dict[str, A
     return mappings
 
 
-def _source_ref_for_line(
-    chunks: Sequence[Mapping[str, Any]], line_no: int,
-) -> dict[str, Any] | None:
-    """Return the narrowest immutable source reference containing a line."""
-    matches = [
-        chunk for chunk in chunks
-        if int(chunk.get("start_line", 0)) <= line_no <= int(chunk.get("end_line", 0))
-    ]
-    if not matches:
-        return None
-    chunk = min(matches, key=lambda item: int(item.get("end_line", 0)) - int(item.get("start_line", 0)))
-    return {
-        "source_chunk_id": chunk["source_chunk_id"],
-        "document_path": chunk["document_path"],
-        "source_digest": chunk["source_digest"],
-        "start_line": line_no,
-        "end_line": line_no,
-        "excerpt": chunk.get("excerpt", ""),
-    }
-
-
 def _source_fact_index(
     text: str, chunks: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -554,7 +381,7 @@ def _source_fact_index(
     This index is deliberately descriptive.  It records identifiers and
     explicit statements but never decides whether the Spec satisfies a rule.
     """
-    patterns = {
+    identifier_patterns = {
         "functional_requirements": re.compile(r"\bFR[-_][A-Z0-9-]+\b", re.I),
         "acceptance_criteria": re.compile(r"\bAC[-_][A-Z0-9-]+\b", re.I),
         "test_cases": re.compile(r"\bCASE[-_][A-Z0-9-]+\b", re.I),
@@ -564,65 +391,24 @@ def _source_fact_index(
             re.I,
         ),
     }
-    identifiers: dict[str, list[dict[str, Any]]] = {}
-    lines = text.splitlines()
-    for kind, pattern in patterns.items():
-        seen: set[str] = set()
-        values: list[dict[str, Any]] = []
-        for line_no, line in enumerate(lines, 1):
-            for match in pattern.finditer(line):
-                identifier = match.group(0).upper().replace("_", "-")
-                if identifier in seen:
-                    continue
-                seen.add(identifier)
-                source_ref = _source_ref_for_line(chunks, line_no)
-                values.append({
-                    "id": identifier,
-                    "line": line_no,
-                    "text": line.strip(),
-                    "sourceRef": source_ref,
-                })
-        identifiers[kind] = values
-
     explicit_patterns = {
         "no_migration": re.compile(r"no (?:historical )?data migration|不存在历史数据迁移|系统从零开始", re.I),
         "not_applicable": re.compile(r"not applicable|不适用|不考虑|不做|out of scope|excluded", re.I),
         "delegation": re.compile(r"child spec|sub[- ]module.*spec|子模块.*spec|由各子模块|delegat", re.I),
         "authority": re.compile(r"conflict.*(?:favor|precedence)|冲突时.*以|authoritative|权威", re.I),
     }
-    explicit_statements: list[dict[str, Any]] = []
-    for line_no, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        kinds = [name for name, pattern in explicit_patterns.items() if pattern.search(stripped)]
-        if kinds:
-            explicit_statements.append({
-                "kinds": kinds,
-                "line": line_no,
-                "text": stripped,
-                "sourceRef": _source_ref_for_line(chunks, line_no),
-            })
-
-    headings = [
-        {
-            "title": str(unit.get("title") or ""),
-            "level": unit.get("level"),
-            "line": unit.get("startLine"),
-            "headingPath": list(unit.get("headingPath") or ()),
-            "sourceRef": _source_ref_for_line(chunks, int(unit["startLine"])),
-        }
-        for unit in _MARKDOWN_NAVIGATION.parse(
+    heading_units = [
+        unit for unit in _MARKDOWN_NAVIGATION.parse(
             {"raw": text.encode("utf-8"), "path": "<source-facts>"}
         ).get("units", ())
         if unit.get("kind") == "heading" and unit.get("startLine")
     ]
-    return {
-        "schemaVersion": "1.0.0",
-        "identifiers": identifiers,
-        "explicitStatements": explicit_statements,
-        "headings": headings,
-    }
+    return build_source_fact_index(
+        text, chunks,
+        identifier_patterns=identifier_patterns,
+        explicit_patterns=explicit_patterns,
+        heading_units=heading_units,
+    )
 
 
 def _document_context(
@@ -729,24 +515,13 @@ def _candidate(cid: str, rule: str, severity: str, object_id: str | None, line: 
               impact: str, recommendation: str) -> dict[str, Any]:
     # camelCase fields are retained only for the existing platform evidence
     # compatibility view; candidateFindings below is the canonical projection.
-    return {
-        "candidateId": cid, "ruleId": rule, "suggestedSeverity": severity,
-        "objectId": object_id, "line": line, "chapter": chapter,
-        "message": message, "evidence": evidence, "impact": impact,
-        "recommendation": recommendation, "policyId": _POLICY_ID,
-        "policyVersion": _POLICY_VERSION, "confidence": None,
-    }
+    return build_candidate_envelope(
+        cid, rule, severity, object_id, line, chapter, message, evidence,
+        impact, recommendation, policy_id=_POLICY_ID, policy_version=_POLICY_VERSION,
+    )
 
 
-def _canonical_candidate(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "candidate_id": item["candidateId"], "rule_id": item["ruleId"],
-        "suggested_severity": item["suggestedSeverity"], "object_id": item["objectId"],
-        "line": item["line"], "chapter": item["chapter"], "message": item["message"],
-        "evidence": item["evidence"], "impact": item["impact"],
-        "recommendation": item["recommendation"], "policy_id": item["policyId"],
-        "policy_version": item["policyVersion"], "confidence": item["confidence"],
-    }
+_canonical_candidate = canonicalize_candidate
 
 
 def _navigation_candidates(units: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

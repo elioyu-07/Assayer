@@ -309,10 +309,45 @@ def validate_candidate_evidence_graph_projection(value: Mapping[str, Any]) -> No
         raise PlatformContractError("INVALID_EVIDENCE_GRAPH", "Coverage flag does not match pending candidates")
 
 
+def build_candidate_envelope(
+    candidate_id: str, rule_id: str, severity: str, object_id: str | None,
+    line: int | None, chapter: str | None, message: str, evidence: str | None,
+    impact: str, recommendation: str, *, policy_id: str, policy_version: str,
+    confidence: Any = None,
+) -> dict[str, Any]:
+    """Build the platform candidate envelope from plugin-domain fields.
+
+    The camelCase fields are retained for the existing platform evidence
+    compatibility view; ``canonicalize_candidate`` projects them to the
+    canonical snake_case shape consumed by the evidence graph.
+    """
+    return {
+        "candidateId": candidate_id, "ruleId": rule_id,
+        "suggestedSeverity": severity, "objectId": object_id, "line": line,
+        "chapter": chapter, "message": message, "evidence": evidence,
+        "impact": impact, "recommendation": recommendation,
+        "policyId": policy_id, "policyVersion": policy_version,
+        "confidence": confidence,
+    }
+
+
+def canonicalize_candidate(item: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a candidate envelope to the canonical snake_case shape."""
+    return {
+        "candidate_id": item["candidateId"], "rule_id": item["ruleId"],
+        "suggested_severity": item["suggestedSeverity"], "object_id": item["objectId"],
+        "line": item["line"], "chapter": item["chapter"], "message": item["message"],
+        "evidence": item["evidence"], "impact": item["impact"],
+        "recommendation": item["recommendation"], "policy_id": item["policyId"],
+        "policy_version": item["policyVersion"], "confidence": item["confidence"],
+    }
+
+
 __all__ = [
     "CANDIDATE_DISPOSITIONS", "EvidenceCandidate", "EvidenceGraph",
     "FindingRecord", "RootCauseGroup", "conservative_root_cause_groups",
     "stable_candidate_fingerprint", "candidate_dispositions_from_decisions",
     "build_candidate_evidence_graph", "render_candidate_evidence_graph",
     "validate_candidate_evidence_graph_projection",
+    "build_candidate_envelope", "canonicalize_candidate",
 ]

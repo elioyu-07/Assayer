@@ -81,7 +81,10 @@ from .result_conformance import (
     inspect_result_conformance,
 )
 from .result_delivery import StagedResultDocument
-from .actionable_result import extract_result_delivery, extract_result_delivery_bundle, validate_result_delivery
+from .actionable_result import (
+    build_actionable_result, extract_result_delivery,
+    extract_result_delivery_bundle, validate_result_delivery,
+)
 from .evidence_claim import validate_evidence_claims
 from .conformance import (
     PluginConformanceIssue,
@@ -110,10 +113,14 @@ from .delivery_observer import PlatformDeliveryObserver
 from .evidence_graph import (
     CANDIDATE_DISPOSITIONS, EvidenceCandidate, EvidenceGraph, FindingRecord,
     RootCauseGroup, build_candidate_evidence_graph,
+    build_candidate_envelope, canonicalize_candidate,
     candidate_dispositions_from_decisions, conservative_root_cause_groups,
     render_candidate_evidence_graph, stable_candidate_fingerprint,
     validate_candidate_evidence_graph_projection,
 )
+from .identity import digest_bytes, document_state_digest
+from .source_chunking import SOURCE_CHUNK_LIMIT, build_source_chunks, source_ref_for_line
+from .source_fact_index import build_source_fact_index
 
 __all__ = [
     "Artifact",
@@ -201,6 +208,7 @@ __all__ = [
     "extract_result_delivery",
     "extract_result_delivery_bundle",
     "validate_result_delivery",
+    "build_actionable_result",
     "validate_evidence_claims",
     "PluginConformanceIssue",
     "PluginConformanceReport",
@@ -240,4 +248,12 @@ __all__ = [
     "render_candidate_evidence_graph",
     "stable_candidate_fingerprint",
     "validate_candidate_evidence_graph_projection",
+    "build_candidate_envelope",
+    "canonicalize_candidate",
+    "digest_bytes",
+    "document_state_digest",
+    "SOURCE_CHUNK_LIMIT",
+    "build_source_chunks",
+    "source_ref_for_line",
+    "build_source_fact_index",
 ]

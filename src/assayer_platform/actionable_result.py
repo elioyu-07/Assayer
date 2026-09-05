@@ -150,4 +150,110 @@ def extract_result_delivery_bundle(
     )
 
 
-__all__ = ["extract_result_delivery", "extract_result_delivery_bundle", "validate_result_delivery"]
+def build_actionable_result(
+    decisions: Sequence[Mapping[str, Any]],
+    checklist_status: Mapping[str, str],
+    evidence_by_dimension: Mapping[str, Sequence[str]],
+    *,
+    evidence_id: str | None,
+    source_chunks: Sequence[Mapping[str, Any]],
+    work_item_identity: str,
+    document_path: str,
+    confirmed_status: str,
+    actionable_statuses: frozenset[str] | set[str],
+    absence_pattern: Any = None,
+) -> dict[str, Any]:
+    """Project confirmed decisions into the remediation + claim envelope.
+
+    The platform assembles the shape from generic decision fields.  The plugin
+    supplies its domain vocabulary (confirmed status, actionable statuses, and
+    the absence-detection pattern); the platform never interprets those tokens.
+    """
+    remediations: list[dict[str, Any]] = []
+    evidence_claims: list[dict[str, Any]] = []
+    end_line = max(
+        [int(item.get("end_line", 1)) for item in source_chunks if isinstance(item, Mapping)] or [1],
+    )
+    covered: set[str] = set()
+    for finding in decisions:
+        if finding.get("status") != confirmed_status:
+            continue
+        dimension = str(finding.get("dimension") or "")
+        if checklist_status.get(dimension) not in actionable_statuses:
+            continue
+        affected = finding.get("affected_elements")
+        if not isinstance(affected, (tuple, list)) or not affected:
+            affected = [finding.get("object_id")]
+        affected = [str(item).strip() for item in affected if str(item or "").strip()]
+        owner = finding.get("resolution_owner")
+        owner_value = (
+            {"status": "assigned", "identity": str(owner).strip()}
+            if isinstance(owner, str) and owner.strip()
+            else {
+                "status": "unassigned",
+                "reason": "The reviewed evidence does not identify an accountable resolution owner.",
+            }
+        )
+        recommendation = str(finding.get("recommendation") or "").strip()
+        next_action = str(finding.get("next_action") or "").strip()
+        if not next_action:
+            next_action = f"Assign an accountable owner and implement this recommendation: {recommendation}"
+        gap = str(finding.get("gap") or "").strip()
+        finding_id = str(finding.get("finding_id") or "")
+        absence = bool(
+            absence_pattern.search(gap) if absence_pattern is not None else False
+        )
+        claim_id = f"claim:{finding_id}"
+        claim: dict[str, Any] = {
+            "claimId": claim_id,
+            "kind": "absence" if absence else "direct",
+            "evidenceRefs": [evidence_id] if evidence_id else [],
+            "scope": {
+                "sourceRef": evidence_id or work_item_identity,
+                "documentPath": document_path,
+                "startLine": max(1, int(finding.get("line") or 1)),
+                "endLine": end_line,
+            },
+            "observed": [str(finding.get("evidence") or gap)],
+            "conclusion": gap,
+        }
+        if absence:
+            claim["searchedFor"] = [
+                "The requirement or record described by this finding",
+                "A positive, directly observable specification statement in the declared scope",
+            ]
+        evidence_claims.append(claim)
+        remediations.append({
+            "remediationId": finding_id,
+            "title": gap,
+            "severity": str(finding.get("severity") or ""),
+            "dimensions": [dimension],
+            "affectedElements": affected,
+            "evidenceRefs": list(evidence_by_dimension.get(dimension, [])),
+            "problem": gap,
+            "impact": str(finding.get("impact") or "").strip(),
+            "recommendation": recommendation,
+            "nextAction": next_action,
+            "closureEvidence": str(finding.get("closure_evidence") or "").strip(),
+            "owner": owner_value,
+            "claimRefs": [claim_id],
+        })
+        covered.add(dimension)
+    actionable_dimensions = {
+        check_id for check_id, status in checklist_status.items()
+        if status in actionable_statuses
+    }
+    return {
+        "schemaVersion": "1.0.0",
+        "status": "complete" if covered == actionable_dimensions else "partial",
+        "remediations": remediations,
+        "evidenceClaims": evidence_claims,
+    }
+
+
+__all__ = [
+    "build_actionable_result",
+    "extract_result_delivery",
+    "extract_result_delivery_bundle",
+    "validate_result_delivery",
+]
