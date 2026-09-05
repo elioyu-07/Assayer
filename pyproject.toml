@@ -40,4 +40,3 @@ markdown = "assayer_document_navigation:markdown_registration"
 [tool.setuptools.package-data]
 "assayer_platform.builtin_plugins.config_quality" = ["manifest.json"]
 "assayer_platform.builtin_plugins.frontend_audit" = ["manifest.json"]
-"assayer_platform.builtin_plugins.spec_quality" = ["manifest.json", "recognition.json", "policy.json", "checklist.json", "authority.md", "self-check-checklist.md", "quality-standard.md", "spec-template.md", "nfr-catalog.md", "*.md", "*.schema.json", "evaluation/*.md", "evaluation/*.json"]

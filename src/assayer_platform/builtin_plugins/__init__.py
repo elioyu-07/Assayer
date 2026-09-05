@@ -1,13 +1,9 @@
-"""Built-in reference plugins shipped with the platform."""
 """Built-in plugin registrations shipped with the Assayer distribution."""
 
 from assayer_platform import PluginRegistration, PluginRegistry
 
 from .config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from .frontend_audit import FrontendAuditPlugin, FrontendDecisionCommitter
-from .spec_quality import (
-    SPEC_QUALITY_SCOPE_SCHEMA, SpecQualityDecisionCommitter, SpecQualityPlugin,
-)
 
 
 def builtin_plugin_registry() -> PluginRegistry:
@@ -15,7 +11,9 @@ def builtin_plugin_registry() -> PluginRegistry:
 
     A fresh registry prevents one Host or test from mutating another Host's
     plugin selection.  The registry contains manifests only; runtime objects
-    are still injected at the domain boundary.
+    are still injected at the domain boundary.  The Spec-quality plugin is no
+    longer a built-in; it is shipped as an independently installed
+    distribution and discovered through the ``assayer.plugins`` entry point.
     """
     return PluginRegistry((
         PluginRegistration(
@@ -58,15 +56,6 @@ def builtin_plugin_registry() -> PluginRegistry:
                 "required": ["url"],
                 "properties": {"url": {"type": "string", "format": "uri"}},
             },
-        ),
-        PluginRegistration(
-            SpecQualityPlugin.manifest,
-            plugin_factory=lambda _runtime=None: SpecQualityPlugin(),
-            committer_factory=lambda _runtime=None: SpecQualityDecisionCommitter(),
-            capabilities=frozenset({"structured_read"}),
-            result_features=frozenset({"evidence_graph"}),
-            execution_modes=frozenset({"interactive"}),
-            scope_schema=SPEC_QUALITY_SCOPE_SCHEMA,
         ),
     ))
 

@@ -7,16 +7,22 @@ from pathlib import Path
 from jsonschema import Draft202012Validator, RefResolver
 
 from assayer_host import InteractivePlatformMcpToolTransport
-from assayer_platform.builtin_plugins.spec_quality import evaluation as evaluation_module
-from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.builtin_plugins.spec_quality import (
+from assayer_platform import PluginRegistry
+from assayer_spec_quality import evaluation as evaluation_module
+from assayer_spec_quality import (
     evaluate_semantic_review_case,
     evaluate_semantic_review_corpus,
     inspect_evaluation_case,
     load_evaluation_corpus,
     load_semantic_review_from_ledger,
+    registration,
     validate_evaluation_corpus,
 )
+
+
+def spec_registry() -> PluginRegistry:
+    """Return a fresh registry containing the external Spec-quality plugin."""
+    return PluginRegistry((registration,))
 
 class SpecQualityEvaluationCorpusTest(unittest.TestCase):
     @staticmethod
@@ -317,7 +323,7 @@ class SpecQualityEvaluationCorpusTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality",

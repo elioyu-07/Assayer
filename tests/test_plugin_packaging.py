@@ -60,18 +60,25 @@ class PluginPackagingContractTests(unittest.TestCase):
         package_data = setuptools["package-data"]
         self.assertIn("manifest.json", package_data["assayer_platform.builtin_plugins.config_quality"])
         self.assertIn("manifest.json", package_data["assayer_platform.builtin_plugins.frontend_audit"])
-        self.assertIn("manifest.json", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("recognition.json", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("authority.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("self-check-checklist.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("quality-standard.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("spec-template.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("nfr-catalog.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("evaluation/*.md", package_data["assayer_platform.builtin_plugins.spec_quality"])
-        self.assertIn("evaluation/*.json", package_data["assayer_platform.builtin_plugins.spec_quality"])
+        self.assertNotIn("assayer_platform.builtin_plugins.spec_quality", package_data)
         self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "config_quality" / "manifest.json").is_file())
         self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "frontend_audit" / "manifest.json").is_file())
-        self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "spec_quality" / "manifest.json").is_file())
+        self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "spec_quality").exists())
+
+    def test_external_spec_plugin_distribution_includes_policy_resources(self):
+        external = tomllib.loads(
+            (ROOT / "plugins" / "spec-quality" / "pyproject.toml").read_text()
+        )["tool"]["setuptools"]
+        package_data = external["package-data"]["assayer_spec_quality"]
+        self.assertIn("*.json", package_data)
+        self.assertIn("*.md", package_data)
+        self.assertIn("evaluation/*", package_data)
+        package_root = ROOT / "plugins" / "spec-quality" / "src" / "assayer_spec_quality"
+        for name in ("manifest.json", "recognition.json", "policy.json", "checklist.json",
+                     "authority.md", "self-check-checklist.md", "quality-standard.md",
+                     "spec-template.md", "nfr-catalog.md", "scope.schema.json"):
+            self.assertTrue((package_root / name).is_file(), name)
+        self.assertTrue((package_root / "evaluation" / "corpus.json").is_file())
 
     def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
         source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()

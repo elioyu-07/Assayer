@@ -1,6 +1,6 @@
 # Spec Plugin Externalization (M4) — Design
 
-Status: in progress
+Status: implemented
 
 ## Purpose
 
@@ -92,9 +92,8 @@ plugins/spec-quality/
 | `from ...evaluation import` | `from assayer_platform.evaluation import` |
 | `from ... import ` | `from assayer_platform import ` |
 
-The build/migration helper is `scripts/build_spec_quality_plugin.py`; it is a
-one-time relocation aid, not a runtime dependency. After the relocation the
-committed files under `plugins/spec-quality/` are the source of truth.
+The relocation used a one-time helper that is removed once the committed files
+under `plugins/spec-quality/` became the single source of truth.
 
 ## Migration rules
 
@@ -105,8 +104,9 @@ committed files under `plugins/spec-quality/` are the source of truth.
   the entry point / `load_registration` after static validation.
 - The boundary checker scans only `src/`, so the external package introduces no
   new boundary violations.
-- The built-in `builtin_plugins/spec_quality` remains until the removal slice
-  (with its test migration) lands; the external package is additive first.
+- The built-in `builtin_plugins/spec_quality` was removed once the external
+  package and its test migration landed; `installed_plugin_registry` no longer
+  registers Spec-quality as a built-in.
 
 ## Acceptance
 
@@ -117,3 +117,6 @@ committed files under `plugins/spec-quality/` are the source of truth.
   uninstall the real package without touching platform source.
 - A real Spec business-input run produces a valid platform result with the
   structured review summary intact and no HTML output.
+- `scripts/spec_plugin_external_acceptance.py` records the full exit gate as one
+  reproducible journey: install → discover → run → result → upgrade →
+  rollback → uninstall.

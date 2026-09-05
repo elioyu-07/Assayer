@@ -269,12 +269,13 @@ new plugin. The product MCP also exposes the domain-neutral `list_plugins` and
 plugin/check identity and business scope while preserving the same ledger
 invariants.
 
-The built-in `assayer.spec-quality` plugin is the first cross-domain interactive
-reference for Markdown requirements. Its deterministic runtime owns only
-read-only Markdown parsing and bounded candidate excerpts; an Agent must review
-that evidence and submit the semantic decision. The platform still owns
-evidence closure, decision gates, receipts, and publication. Scanner hits are
-therefore never promoted into final Spec findings by the runtime alone.
+The `assayer.spec-quality` plugin (now an independently installed distribution
+rather than a built-in) is the first cross-domain interactive reference for
+Markdown requirements. Its deterministic runtime owns only read-only Markdown
+parsing and bounded candidate excerpts; an Agent must review that evidence and
+submit the semantic decision. The platform still owns evidence closure, decision
+gates, receipts, and publication. Scanner hits are therefore never promoted into
+final Spec findings by the runtime alone.
 
 ## Capability provider registration
 

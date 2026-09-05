@@ -57,14 +57,13 @@ class CliTest(unittest.TestCase):
         catalog = __import__("json").loads(output.getvalue())["plugins"]
         self.assertEqual(
             [item["pluginId"] for item in catalog],
-            ["assayer.config-quality", "assayer.frontend-audit", "assayer.spec-quality"],
+            ["assayer.config-quality", "assayer.frontend-audit"],
         )
         self.assertEqual(catalog[0]["checks"], [{"checkId": "CFG-001", "version": "1.0.0"}])
         self.assertEqual(catalog[0]["platformApiVersion"], "1.0.0")
         self.assertIn("structured_read", catalog[0]["capabilities"])
         self.assertEqual(catalog[0]["executionModes"], ["batch"])
         self.assertEqual(catalog[1]["executionModes"], ["interactive"])
-        self.assertEqual(catalog[2]["executionModes"], ["interactive"])
         self.assertEqual(catalog[0]["scopeSchema"]["required"], ["files"])
         self.assertFalse(catalog[0]["supportsCommit"])
         self.assertTrue(catalog[1]["supportsCommit"])

@@ -18,12 +18,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+SPEC_PLUGIN_SRC = ROOT / "plugins" / "spec-quality" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+if str(SPEC_PLUGIN_SRC) not in sys.path:
+    sys.path.insert(0, str(SPEC_PLUGIN_SRC))
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 existing_pythonpath = os.environ.get("PYTHONPATH")
-os.environ["PYTHONPATH"] = str(SRC) + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    part for part in (str(SRC), str(SPEC_PLUGIN_SRC), existing_pythonpath) if part
+)
 
 BROWSER_TEST_PREFIX = "test_browser_playwright."
 MCP_SDK_TEST_ID = "test_transport.TransportTest.test_optional_fastmcp_server_registers_single_argument_tools"

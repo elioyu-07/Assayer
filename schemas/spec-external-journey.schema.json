@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/spec-external-journey.schema.json",
+  "title": "AssayerSpecExternalJourney",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "mode", "publishable", "status"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "mode": { "const": "external_spec_package" },
+    "publishable": { "const": false },
+    "status": { "enum": ["passed", "failed"] },
+    "pluginId": { "const": "assayer.spec-quality" },
+    "steps": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation"],
+        "properties": {
+          "operation": { "enum": ["install", "discover", "run", "upgrade", "rollback", "uninstall"] },
+          "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+          "previousVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+          "status": { "type": "string", "minLength": 1 },
+          "plugins": { "type": "array", "items": { "type": "string" } },
+          "runId": { "type": "string", "minLength": 1 },
+          "terminalStatus": { "type": "string", "minLength": 1 },
+          "summaryPhase": { "type": "string", "minLength": 1 },
+          "readiness": { "type": "string", "minLength": 1 },
+          "candidateCount": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "assertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["structuredSummary", "htmlOutput", "ledgerPublished", "installedCount"],
+      "properties": {
+        "structuredSummary": { "const": true },
+        "htmlOutput": { "const": false },
+        "ledgerPublished": { "const": true },
+        "installedCount": { "const": 0 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "const": "SPEC_EXTERNAL_JOURNEY_FAILED" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "passed" } }, "required": ["status"] },
+      "then": {
+        "required": ["pluginId", "steps", "assertions"],
+        "not": { "required": ["result"] }
+      }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+      "then": {
+        "required": ["result"],
+        "not": { "anyOf": [{ "required": ["steps"] }, { "required": ["assertions"] }, { "required": ["pluginId"] }] }
+      }
+    }
+  ]
+}

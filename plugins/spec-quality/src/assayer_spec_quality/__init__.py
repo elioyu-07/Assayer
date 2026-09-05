@@ -6,7 +6,7 @@ platform (``assayer``) and exposes one ``assayer.plugins`` entry point,
 
 The module bodies in ``runtime.py``, ``review.py``, and ``evaluation.py`` are
 relocated from the platform source and use absolute ``assayer_platform``
-imports; see ``scripts/build_spec_quality_plugin.py`` for the migration.
+imports; this package is the single source of truth for the Spec domain.
 """
 
 from __future__ import annotations

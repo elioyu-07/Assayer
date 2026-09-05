@@ -185,7 +185,7 @@ registration = PluginRegistration(
         self.assertTrue(all(report.passed for report in reports))
         self.assertEqual(
             {report.plugin_id for report in reports},
-            {"assayer.config-quality", "assayer.frontend-audit", "assayer.spec-quality"},
+            {"assayer.config-quality", "assayer.frontend-audit"},
         )
 
     def test_missing_batch_decision_provider_is_rejected_before_registration(self):
@@ -299,7 +299,7 @@ registration = PluginRegistration(
         payload = json.loads(output.getvalue())
         self.assertEqual(status, 0)
         self.assertEqual(payload["status"], "passed")
-        self.assertEqual(len(payload["plugins"]), 3)
+        self.assertEqual(len(payload["plugins"]), 2)
 
     def test_independent_package_passes_without_importing_plugin_code(self):
         with tempfile.TemporaryDirectory() as directory:

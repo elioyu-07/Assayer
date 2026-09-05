@@ -25,8 +25,8 @@ package depends on `assayer>=0.1.0,<0.2.0`, exposes
 `assayer_spec_quality:registration`, and the platform loads it only through
 `load_registration` after static validation.
 
-The relocation helper is `scripts/build_spec_quality_plugin.py` (one-time
-migration aid; committed files under `plugins/spec-quality/` are the source of
-truth). Remaining M4 work: remove the built-in `builtin_plugins/spec_quality`
-(and migrate its test references), then record the real interactive CLI
-journey.
+The initial relocation used a one-time helper that was removed once the
+committed files under `plugins/spec-quality/` became the source of truth
+(see Slice 086). Remaining M4 work: remove the built-in
+`builtin_plugins/spec_quality` (and migrate its test references), then record
+the real interactive CLI journey.

@@ -22,7 +22,7 @@ from assayer_platform import (
     validate_review_submission,
 )
 from assayer_platform.builtin_plugins.config_quality.runtime import ConfigQualityPlugin
-from assayer_platform.builtin_plugins.spec_quality import SpecQualityPlugin
+from assayer_spec_quality import SpecQualityPlugin
 
 
 MIGRATION_SPEC = """# Product Spec: Migration Proof

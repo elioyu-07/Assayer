@@ -6,17 +6,28 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from assayer_host import HostCore, HostError, InteractivePlatformMcpToolTransport, ProductMcpToolTransport
-from assayer_platform import PlatformContext, PlatformContractError
-from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.builtin_plugins.spec_quality import (
-    SPEC_QUALITY_SCOPE_SCHEMA, SpecQualityDecisionCommitter, SpecQualityPlugin,
+from assayer_platform import PlatformContext, PlatformContractError, PluginRegistry
+from assayer_spec_quality import (
+    SPEC_QUALITY_SCOPE_SCHEMA, SpecQualityDecisionCommitter, SpecQualityPlugin, registration,
 )
-from assayer_platform.builtin_plugins.spec_quality.runtime import _actionable_result_delivery
-from assayer_platform.builtin_plugins.spec_quality.review import (
+from assayer_spec_quality.runtime import _actionable_result_delivery
+from assayer_spec_quality.review import (
     evaluate_review, validate_review_decisions,
 )
 from assayer_platform import DecisionProposal, Finding
 from jsonschema import Draft202012Validator
+
+
+def spec_registry() -> PluginRegistry:
+    """Return a fresh registry with the platform built-ins plus the external Spec plugin.
+
+    This mirrors the installed view: the platform ships config and frontend as
+    built-ins while Spec-quality is discovered as an independently installed
+    distribution.
+    """
+    from assayer_platform.builtin_plugins import builtin_plugin_registry
+
+    return PluginRegistry((*builtin_plugin_registry().list(), registration))
 
 
 COMPLETE_SPEC = """# Product Spec: Example
@@ -447,7 +458,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
 
             evidence_schema = json.loads(
                 Path(__file__).parents[1].joinpath(
-                    "src/assayer_platform/builtin_plugins/spec_quality/cross-document-evidence.schema.json"
+                    "plugins/spec-quality/src/assayer_spec_quality/cross-document-evidence.schema.json"
                 ).read_text(encoding="utf-8")
             )
             Draft202012Validator(evidence_schema).validate(plain(cross_packet))
@@ -528,7 +539,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 }],
             }
             transport = InteractivePlatformMcpToolTransport(
-                root / "output", plugin_registry=builtin_plugin_registry(),
+                root / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
@@ -580,7 +591,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
             }
             transport = ProductMcpToolTransport(
                 HostCore(), output_root=root / "output",
-                plugin_registry=builtin_plugin_registry(),
+                plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
@@ -650,7 +661,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
             }
             output = root / "output"
             first_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
@@ -680,7 +691,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
 
             first_transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             resumed = resumed_transport.call_tool("resume_plugin_run", {
                 "runId": started["runId"],
@@ -972,7 +983,7 @@ The ABC acronym is defined by context.
             path = Path(directory) / "spec.md"
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1007,7 +1018,8 @@ The ABC acronym is defined by context.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
-            transport = ProductMcpToolTransport(UnusedFrontendCore(), output_root=Path(directory) / "output")
+            transport = ProductMcpToolTransport(UnusedFrontendCore(), output_root=Path(directory) / "output",
+                                                plugin_registry=spec_registry())
             try:
                 names = {item["name"] for item in transport.list_tools()}
                 self.assertIn("start_plugin_run", names)
@@ -1029,7 +1041,7 @@ The ABC acronym is defined by context.
             path = Path(directory) / "spec.md"
             path.write_text("# Example\n\nThe system should be good.\n", encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1072,7 +1084,7 @@ The ABC acronym is defined by context.
             path = Path(directory) / "spec.md"
             path.write_text("# Example\n\nThe system should be good.\n", encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1120,7 +1132,7 @@ The ABC acronym is defined by context.
             path = Path(directory) / "navigation-spec.md"
             path.write_text("# Overview\n\nA requirement with an unclear target.\n\n## Fields\n\n| Field | Required |\n| --- | --- |\n| code | NOT NULL |\n", encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1273,7 +1285,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 encoding="utf-8",
             )
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1335,7 +1347,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path = Path(directory) / "spec.md"
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1506,7 +1518,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             output = Path(directory) / "output"
             first_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1560,7 +1572,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
 
             first_transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             resumed = resumed_transport.call_tool("resume_plugin_run", {
                 "runId": started["runId"],
@@ -1578,7 +1590,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             output = Path(directory) / "output"
             transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1676,7 +1688,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             output = Path(directory) / "output"
             transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1728,7 +1740,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             output = Path(directory) / "output"
             first_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1752,7 +1764,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
 
             first_transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             resumed = resumed_transport.call_tool("resume_plugin_run", {
                 "runId": started["runId"],
@@ -1775,7 +1787,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             output = Path(directory) / "output"
             transport = InteractivePlatformMcpToolTransport(
-                output, plugin_registry=builtin_plugin_registry(),
+                output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
@@ -1840,7 +1852,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
             path = Path(directory) / "spec.md"
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
             transport = InteractivePlatformMcpToolTransport(
-                Path(directory) / "output", plugin_registry=builtin_plugin_registry(),
+                Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
                 "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",

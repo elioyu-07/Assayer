@@ -253,6 +253,26 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
     return 0 if not issues else 1
 
 
+def _cleanup_build_artifacts(root: Path) -> None:
+    """Remove transient artifacts a local non-isolated install leaves behind.
+
+    ``pip install --no-build-isolation <package>`` builds the wheel in place,
+    leaving ``build/`` and ``*.egg-info`` inside the package source.  The
+    release gate must be side-effect-free, so remove them before returning.
+    """
+    build_dir = root / "build"
+    if build_dir.is_dir():
+        shutil.rmtree(build_dir, ignore_errors=True)
+    for parent in (root, root / "src"):
+        if not parent.is_dir():
+            continue
+        for entry in parent.glob("*.egg-info"):
+            if entry.is_dir():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+
+
 def inspect_plugin_installation(
     package_root: str | Path, *, python: str = sys.executable,
     install_timeout_seconds: int = 120,
@@ -260,6 +280,7 @@ def inspect_plugin_installation(
 ) -> PluginConformanceReport:
     """Install a statically valid package in a temporary target and run fixtures."""
     root = Path(package_root).expanduser().resolve()
+    _cleanup_build_artifacts(root)
     static_report = inspect_plugin_package(root)
     if not static_report.passed:
         return static_report
@@ -333,29 +354,32 @@ def inspect_plugin_installation(
                         "Provide pip for the selected Python or install the supported uv package installer.",
                     ),))
         try:
-            installed = subprocess.run(
-                command,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=isolated_env,
-                timeout=max(1, install_timeout_seconds),
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return PluginConformanceReport(static_report.plugin_id, (_package_issue(
-                "PLUGIN_ISOLATED_INSTALL_TIMEOUT",
-                "The local isolated package installation exceeded its release-gate budget.",
-                "Make package builds bounded or raise the explicit release validation budget.",
-            ),))
-        if installed.returncode != 0:
-            detail = installed.stdout.strip().splitlines()
-            tail = " | ".join(detail[-8:]) if detail else "installer returned no diagnostic output"
-            return PluginConformanceReport(static_report.plugin_id, (_package_issue(
-                "PLUGIN_ISOLATED_INSTALL_FAILED",
-                f"The plugin could not be installed into the isolated target: {tail}",
-                "Fix package build metadata and declared dependencies before publication.",
-            ),))
+            try:
+                installed = subprocess.run(
+                    command,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    env=isolated_env,
+                    timeout=max(1, install_timeout_seconds),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return PluginConformanceReport(static_report.plugin_id, (_package_issue(
+                    "PLUGIN_ISOLATED_INSTALL_TIMEOUT",
+                    "The local isolated package installation exceeded its release-gate budget.",
+                    "Make package builds bounded or raise the explicit release validation budget.",
+                ),))
+            if installed.returncode != 0:
+                detail = installed.stdout.strip().splitlines()
+                tail = " | ".join(detail[-8:]) if detail else "installer returned no diagnostic output"
+                return PluginConformanceReport(static_report.plugin_id, (_package_issue(
+                    "PLUGIN_ISOLATED_INSTALL_FAILED",
+                    f"The plugin could not be installed into the isolated target: {tail}",
+                    "Fix package build metadata and declared dependencies before publication.",
+                ),))
+        finally:
+            _cleanup_build_artifacts(root)
         try:
             worker = subprocess.run(
                 [
