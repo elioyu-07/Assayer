@@ -1,0 +1,145 @@
+"""CLI verbs for the durable plugin lifecycle (install/upgrade/downgrade/rollback/uninstall/info)."""
+
+from __future__ import annotations
+
+import io
+import json
+import shutil
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+
+from assayer_host import cli
+
+ROOT = Path(__file__).resolve().parents[1]
+PACKAGE = ROOT / "plugins" / "spec-quality"
+PLUGIN_ID = "assayer.spec-quality"
+
+
+def _run(argv: list[str]) -> tuple[int, dict]:
+    output = io.StringIO()
+    with redirect_stdout(output):
+        code = cli.main(argv)
+    return code, json.loads(output.getvalue())
+
+
+def _bumped_copy(version: str, directory: Path) -> Path:
+    destination = directory / f"spec-quality-{version}"
+    shutil.copytree(PACKAGE, destination)
+    descriptor = json.loads((destination / "assayer-plugin-release.json").read_text(encoding="utf-8"))
+    descriptor["pluginVersion"] = version
+    (destination / "assayer-plugin-release.json").write_text(json.dumps(descriptor), encoding="utf-8")
+    manifest_path = destination / "src" / "assayer_spec_quality" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["version"] = version
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    metadata = destination / "pyproject.toml"
+    metadata.write_text(metadata.read_text(encoding="utf-8").replace(
+        'version = "1.0.0"', f'version = "{version}"',
+    ))
+    return destination
+
+
+class CliPluginLifecycleTest(unittest.TestCase):
+    def test_install_info_uninstall_journey(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run(["plugins", "install", str(PACKAGE), "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["operation"], "install")
+            self.assertEqual(result["pluginId"], PLUGIN_ID)
+            self.assertEqual(result["version"], "1.0.0")
+
+            code, info = _run(["plugins", "info", PLUGIN_ID, "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(info["activeVersion"], "1.0.0")
+            self.assertEqual(info["history"], ["1.0.0"])
+
+            code, removed = _run(["plugins", "uninstall", PLUGIN_ID, "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(removed["status"], "completed")
+
+            code, missing = _run(["plugins", "info", PLUGIN_ID, "--store", str(store)])
+            self.assertEqual(code, 2)
+            self.assertEqual(missing["error"]["code"], "UNKNOWN_PLUGIN")
+
+    def test_install_conflict_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+            code, result = _run(["plugins", "install", str(PACKAGE), "--store", str(store)])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_CONFLICT")
+
+    def test_upgrade_downgrade_rollback_journey(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+
+            code, upgraded = _run([
+                "plugins", "upgrade", str(_bumped_copy("1.1.0", root)), "--store", str(store),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(upgraded["version"], "1.1.0")
+            self.assertEqual(upgraded["previousVersion"], "1.0.0")
+
+            code, downgraded = _run([
+                "plugins", "downgrade", PLUGIN_ID, "1.0.0", "--store", str(store),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(downgraded["version"], "1.0.0")
+            self.assertEqual(downgraded["previousVersion"], "1.1.0")
+
+            code, rolled = _run(["plugins", "rollback", PLUGIN_ID, "--store", str(store)])
+            self.assertEqual(code, 2)
+            self.assertEqual(rolled["error"]["code"], "ROLLBACK_UNAVAILABLE")
+
+    def test_upgrade_to_older_requires_downgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(_bumped_copy("2.0.0", root)), "--store", str(store)])[0], 0)
+            code, result = _run([
+                "plugins", "upgrade", str(PACKAGE), "--store", str(store),
+            ])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_DOWNGRADE_REQUIRED")
+
+    def test_downgrade_unavailable_version_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+            code, result = _run(["plugins", "downgrade", PLUGIN_ID, "9.9.9", "--store", str(store)])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_VERSION_UNAVAILABLE")
+
+    def test_run_accepts_scope_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "settings.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            scope_file = root / "scope.json"
+            scope_file.write_text(json.dumps({
+                "files": [{
+                    "path": str(source),
+                    "requiredKeys": ["enabled"],
+                    "expectedTypes": {"enabled": "boolean"},
+                }]
+            }), encoding="utf-8")
+            code, result = _run([
+                "plugins", "run", "--plugin", "assayer.config-quality",
+                "--check", "CFG-001", "--scope", str(scope_file),
+                "--output-root", str(root / "output"),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["decisions"], ["scanned_no_issue"])
+
+
+if __name__ == "__main__":
+    unittest.main()

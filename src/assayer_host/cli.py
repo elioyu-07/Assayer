@@ -11,6 +11,8 @@ from pathlib import Path
 
 from assayer_platform import PlatformContractError, PlatformRunner
 from assayer_platform.builtin_plugins import installed_plugin_registry
+from assayer_platform.plugin_installation import PluginInstallationStore
+from assayer_platform.plugin_lifecycle import PluginLifecycleManager
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
@@ -78,6 +80,34 @@ def _plugin_catalog() -> list[dict]:
     return sorted(catalog, key=lambda item: item["pluginId"])
 
 
+def _lifecycle_manager(store_root: str) -> PluginLifecycleManager:
+    return PluginLifecycleManager(PluginInstallationStore(store_root))
+
+
+def _print_json(value: dict) -> None:
+    print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _print_error(code: str, message: str) -> None:
+    _print_json(_error(code, message))
+
+
+def _load_scope(scope_json: str | None, scope_file: str | None):
+    if scope_file is not None:
+        try:
+            return json.loads(
+                Path(scope_file).expanduser().resolve().read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            raise PlatformContractError(
+                "INVALID_SCOPE", "Plugin scope file must contain valid JSON",
+            )
+    try:
+        return json.loads(scope_json)
+    except json.JSONDecodeError:
+        raise PlatformContractError("INVALID_SCOPE", "Plugin scope must be valid JSON")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="assayer", description="Run Assayer Agent audits and Host smoke checks")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -91,16 +121,42 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--output-root", default="./assayer-output")
     serve.add_argument("--max-runtimes", type=int, default=4)
     serve.add_argument("--lease-timeout", type=float, default=300.0)
-    plugins = subparsers.add_parser("plugins", help="Inspect platform plugins available to this installation")
+    plugins = subparsers.add_parser("plugins", help="Manage and inspect platform plugins")
+    plugin_common = argparse.ArgumentParser(add_help=False)
+    plugin_common.add_argument("--store", default="./.assayer/plugins",
+                               help="Plugin installation store directory")
     plugins_subparsers = plugins.add_subparsers(dest="plugin_command", required=True)
-    plugin_list = plugins_subparsers.add_parser("list", help="List registered plugins and checks")
+    plugin_list = plugins_subparsers.add_parser("list", parents=[plugin_common],
+                                                help="List registered plugins and checks")
     plugin_list.add_argument("--json", action="store_true", dest="as_json")
-    plugin_run = plugins_subparsers.add_parser("run", help="Run one registered plugin Check")
+    plugin_info = plugins_subparsers.add_parser("info", parents=[plugin_common],
+                                                help="Show one installed plugin's version and state")
+    plugin_info.add_argument("plugin_id")
+    plugin_run = plugins_subparsers.add_parser("run", parents=[plugin_common],
+                                               help="Run one registered plugin Check")
     plugin_run.add_argument("--plugin", required=True, dest="plugin_id")
     plugin_run.add_argument("--check", required=True, dest="check_id")
     plugin_run.add_argument("--check-version")
-    plugin_run.add_argument("--scope-json", required=True)
+    plugin_run.add_argument("--scope-json", dest="scope_json")
+    plugin_run.add_argument("--scope", dest="scope_file",
+                            help="Path to a JSON scope file (alternative to --scope-json)")
     plugin_run.add_argument("--output-root", default="./assayer-output")
+    plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common],
+                                                   help="Install a plugin package into the store")
+    plugin_install.add_argument("package")
+    plugin_upgrade = plugins_subparsers.add_parser("upgrade", parents=[plugin_common],
+                                                   help="Upgrade an installed plugin to a newer package")
+    plugin_upgrade.add_argument("package")
+    plugin_downgrade = plugins_subparsers.add_parser("downgrade", parents=[plugin_common],
+                                                     help="Downgrade an installed plugin to a previous version")
+    plugin_downgrade.add_argument("plugin_id")
+    plugin_downgrade.add_argument("version")
+    plugin_rollback = plugins_subparsers.add_parser("rollback", parents=[plugin_common],
+                                                    help="Roll back an installed plugin to its previous version")
+    plugin_rollback.add_argument("plugin_id")
+    plugin_uninstall = plugins_subparsers.add_parser("uninstall", parents=[plugin_common],
+                                                     help="Remove an installed plugin from the store")
+    plugin_uninstall.add_argument("plugin_id")
     args = parser.parse_args(argv)
     if args.command == "audit":
         return _run_agent_audit(args.url, Path(args.output_root))
@@ -115,12 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "plugins":
         if args.plugin_command == "run":
             try:
-                scope = json.loads(args.scope_json)
-            except json.JSONDecodeError:
-                print(json.dumps(_error("INVALID_SCOPE", "Plugin scope must be valid JSON"),
-                                 ensure_ascii=False, indent=2, sort_keys=True))
-                return 2
-            try:
+                scope = _load_scope(args.scope_json, args.scope_file)
                 result = PlatformRunner(
                     installed_plugin_registry(), args.output_root,
                 ).run(
@@ -128,8 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                     check_version=args.check_version, scope=scope,
                 )
             except PlatformContractError as error:
-                print(json.dumps(_error(error.code, error.message),
-                                 ensure_ascii=False, indent=2, sort_keys=True))
+                _print_error(error.code, error.message)
                 return 2
             payload = {
                 "runId": result.run_id,
@@ -144,11 +194,37 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 "outputDir": str((Path(args.output_root).expanduser().resolve() / result.run_id)),
             }
-            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+            _print_json(payload)
             return 0 if result.status in {"completed", "partial"} else 1
+        if args.plugin_command == "info":
+            manager = _lifecycle_manager(args.store)
+            entry = manager.get(args.plugin_id)
+            if entry is None:
+                _print_error("UNKNOWN_PLUGIN", f"Plugin is not installed: {args.plugin_id}")
+                return 2
+            _print_json(entry)
+            return 0
+        if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
+            manager = _lifecycle_manager(args.store)
+            try:
+                if args.plugin_command == "install":
+                    result = manager.install(args.package)
+                elif args.plugin_command == "upgrade":
+                    result = manager.upgrade(args.package)
+                elif args.plugin_command == "downgrade":
+                    result = manager.downgrade(args.plugin_id, args.version)
+                elif args.plugin_command == "rollback":
+                    result = manager.rollback(args.plugin_id)
+                else:
+                    result = manager.uninstall(args.plugin_id)
+            except PlatformContractError as error:
+                _print_error(error.code, error.message)
+                return 2
+            _print_json(result)
+            return 0
         catalog = _plugin_catalog()
         if args.as_json:
-            print(json.dumps({"plugins": catalog}, ensure_ascii=False, indent=2, sort_keys=True))
+            _print_json({"plugins": catalog})
         else:
             for plugin in catalog:
                 checks = ", ".join(

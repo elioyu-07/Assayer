@@ -175,6 +175,53 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             manager = self.manager(directory)
             _assert_error_code(self, "UNKNOWN_PLUGIN", lambda: manager.upgrade(_FakePackage(Path(directory)).root))
 
+    def test_upgrade_to_older_version_requires_downgrade(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="2.0.0").root)
+            _assert_error_code(
+                self, "PLUGIN_DOWNGRADE_REQUIRED",
+                lambda: manager.upgrade(_FakePackage(Path(directory), version="1.0.0").root),
+            )
+
+    def test_downgrade_restores_older_version_and_truncates_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            manager.upgrade(_FakePackage(Path(directory), version="2.0.0").root)
+            manager.upgrade(_FakePackage(Path(directory), version="3.0.0").root)
+            result = manager.downgrade("fixture.lifecycle", "1.0.0")
+            self.assertEqual(result["version"], "1.0.0")
+            self.assertEqual(result["previousVersion"], "3.0.0")
+            self.assertEqual(manager.get("fixture.lifecycle")["activeVersion"], "1.0.0")
+            self.assertEqual(manager.get("fixture.lifecycle")["history"], ["1.0.0"])
+
+    def test_downgrade_to_active_version_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            result = manager.downgrade("fixture.lifecycle", "1.0.0")
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["version"], "1.0.0")
+            self.assertEqual(result["previousVersion"], "1.0.0")
+
+    def test_downgrade_unavailable_version_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            _assert_error_code(
+                self, "PLUGIN_VERSION_UNAVAILABLE",
+                lambda: manager.downgrade("fixture.lifecycle", "9.9.9"),
+            )
+
+    def test_downgrade_unknown_plugin_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            _assert_error_code(
+                self, "UNKNOWN_PLUGIN",
+                lambda: manager.downgrade("fixture.lifecycle", "1.0.0"),
+            )
+
     def test_rollback_restores_previous_version(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)

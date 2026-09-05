@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 import shutil
 import sys
 import time
@@ -28,7 +29,21 @@ from .plugin_installation import PluginInstallationStore
 from .plugin_registry import PluginRegistration, PluginRegistry
 
 
-_OPERATIONS = {"install", "upgrade", "rollback", "uninstall"}
+_OPERATIONS = {"install", "upgrade", "downgrade", "rollback", "uninstall"}
+
+
+def _version_key(version: str) -> tuple:
+    """Comparable semantic-version key; a release sorts above its pre-releases."""
+    core = version.split("+", 1)[0]
+    main, separator, prerelease = core.partition("-")
+    try:
+        major, minor, patch = (int(part) for part in main.split("."))
+    except ValueError:
+        raise PlatformContractError(
+            "PLUGIN_VERSION_INVALID",
+            f"Plugin version must be a semantic version: {version}",
+        )
+    return (major, minor, patch, 1 if not separator else 0, prerelease)
 
 
 def _descriptor(package_root: str | Path) -> dict:
@@ -203,9 +218,42 @@ class PluginLifecycleManager:
                 "PLUGIN_VERSION_CONFLICT",
                 f"Plugin version is already installed: {plugin_id}@{version}",
             )
-        previous = self._store.active_version(entry)
+        active = self._store.active_version(entry)
+        if active is not None and _version_key(version) < _version_key(active):
+            raise PlatformContractError(
+                "PLUGIN_DOWNGRADE_REQUIRED",
+                f"Plugin target version {version} is older than the active version "
+                f"{active}; use downgrade to move back.",
+            )
+        previous = active
         staged = self._stage(plugin_id, version, root)
         result = self._persist(index, staged, operation="upgrade")
+        result["previousVersion"] = previous
+        return result
+
+    def downgrade(self, plugin_id: str, version: str) -> dict:
+        index = self._store.load()
+        entry = index["plugins"].get(plugin_id)
+        if not isinstance(entry, dict):
+            raise PlatformContractError(
+                "UNKNOWN_PLUGIN",
+                f"Plugin is not installed: {plugin_id}",
+            )
+        history = self._store.version_history(entry)
+        if version not in history:
+            raise PlatformContractError(
+                "PLUGIN_VERSION_UNAVAILABLE",
+                f"Plugin has no installed version to downgrade to: {plugin_id}@{version}",
+            )
+        previous = history[-1]
+        if previous == version:
+            result = self._result("downgrade", plugin_id, version)
+            result["previousVersion"] = previous
+            return result
+        entry["history"] = history[: history.index(version) + 1]
+        entry["activeVersion"] = version
+        self._store.save(index)
+        result = self._result("downgrade", plugin_id, version)
         result["previousVersion"] = previous
         return result
 
