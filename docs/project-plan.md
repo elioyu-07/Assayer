@@ -592,7 +592,7 @@ silently broaden the selected rule boundary.
 | M1 Vertical user journey | J04-J05 implementation and J06b recovery complete | J04-J05 owner acceptance, J07 clean CLI, and J08 lifecycle evidence |
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
 | M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted; multi-window ownership defect designed | Implement multi-window Run isolation, then collect measured owner workloads and remaining clean-CLI evidence |
-| M4 External Spec plugin | Queued | Starts only after the M3 reliability gate |
+| M4 External Spec plugin | Active; durable platform plugin lifecycle landed (install/upgrade/rollback/uninstall + fail-closed discovery) | Move Spec-quality into an independently buildable distribution and prove the CLI journey |
 | M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
 | M7 Ecosystem expansion | Deferred | Requires evidence from at least two real plugin use cases |

@@ -49,6 +49,12 @@ from .interactive import (
 from .registry import load_plugin_manifest, validate_plugin_manifest
 from .evaluation import load_evaluation_corpus, validate_evaluation_corpus
 from .plugin_registry import PluginRegistration, PluginRegistry
+from .plugin_installation import PluginInstallationStore
+from .plugin_lifecycle import (
+    PluginLifecycleManager,
+    discover_plugin_registry,
+    load_registration,
+)
 from .provider_registry import (
     ProviderRegistration,
     ProviderRegistry,
@@ -177,6 +183,10 @@ __all__ = [
     "validate_evaluation_corpus",
     "PluginRegistration",
     "PluginRegistry",
+    "PluginInstallationStore",
+    "PluginLifecycleManager",
+    "discover_plugin_registry",
+    "load_registration",
     "ProviderRegistration",
     "ProviderRegistry",
     "builtin_provider_registry",
