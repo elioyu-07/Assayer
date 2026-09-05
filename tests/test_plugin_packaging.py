@@ -9,6 +9,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "assayer"
 
+SPEC_PLUGIN = ROOT / "plugins" / "spec-quality" / "src" / "assayer_spec_quality"
+SPEC_REFERENCES = PLUGIN / "skills" / "assayer-spec-audit" / "references"
+
+SPEC_AUTHORITY_DOCUMENTS = (
+    "authority.md",
+    "quality-standard.md",
+    "spec-template.md",
+    "spec-driven-development.md",
+    "nfr-catalog.md",
+    "review-rubric.md",
+    "expert-judgment-governance.md",
+    "self-check-checklist.md",
+    "finding-review.schema.json",
+)
+
 
 class PluginPackagingContractTests(unittest.TestCase):
     def test_plugin_base_version_matches_python_distribution(self):
@@ -79,6 +94,19 @@ class PluginPackagingContractTests(unittest.TestCase):
                      "spec-template.md", "nfr-catalog.md", "scope.schema.json"):
             self.assertTrue((package_root / name).is_file(), name)
         self.assertTrue((package_root / "evaluation" / "corpus.json").is_file())
+
+    def test_spec_audit_skill_bundles_authority_documents(self):
+        # The skill's Authority boundaries promise a bundled authority.md; the
+        # documents it cites must ship in references/ and stay byte-identical
+        # to the plugin's single source of truth so the two never drift.
+        for name in SPEC_AUTHORITY_DOCUMENTS:
+            bundled = SPEC_REFERENCES / name
+            self.assertTrue(bundled.is_file(), f"missing bundled reference: {name}")
+            self.assertEqual(
+                bundled.read_text(encoding="utf-8"),
+                (SPEC_PLUGIN / name).read_text(encoding="utf-8"),
+                f"bundled reference drifted from plugin source: {name}",
+            )
 
     def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
         source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
