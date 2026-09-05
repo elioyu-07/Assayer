@@ -13,8 +13,8 @@ from pathlib import Path
 from assayer_host import cli
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "plugins" / "spec-quality"
-PLUGIN_ID = "assayer.spec-quality"
+PACKAGE = ROOT / "plugins" / "touchstone"
+PLUGIN_ID = "assayer.touchstone"
 
 
 def _run(argv: list[str], confirm=lambda plan: True) -> tuple[int, dict]:
@@ -32,12 +32,12 @@ def _run_raw(argv: list[str], confirm=lambda plan: True) -> tuple[int, str]:
 
 
 def _bumped_copy(version: str, directory: Path) -> Path:
-    destination = directory / f"spec-quality-{version}"
+    destination = directory / f"touchstone-{version}"
     shutil.copytree(PACKAGE, destination)
     descriptor = json.loads((destination / "assayer-plugin-release.json").read_text(encoding="utf-8"))
     descriptor["pluginVersion"] = version
     (destination / "assayer-plugin-release.json").write_text(json.dumps(descriptor), encoding="utf-8")
-    manifest_path = destination / "src" / "assayer_spec_quality" / "manifest.json"
+    manifest_path = destination / "src" / "assayer_touchstone" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = version
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -249,7 +249,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
                 [item["pluginId"] for item in listing["results"][0]["plugins"]],
             )
 
-            code, info = _run(["tell", "me", "about", "spec-quality", "--store", str(store)])
+            code, info = _run(["tell", "me", "about", "touchstone", "--store", str(store)])
             self.assertEqual(code, 0)
             self.assertEqual(info["results"][0]["activeVersion"], "1.0.0")
 
@@ -257,7 +257,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            code, result = _run(["install", "spec-quality", "--store", str(store), "--yes"])
+            code, result = _run(["install", "touchstone", "--store", str(store), "--yes"])
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "INTENT_PACKAGE_UNRESOLVED")
 
@@ -265,7 +265,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            code, result = _run(["review", "spec.md", "with", "spec-quality", "--store", str(store)])
+            code, result = _run(["review", "spec.md", "with", "touchstone", "--store", str(store)])
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "INTENT_NEEDS_DETAIL")
 

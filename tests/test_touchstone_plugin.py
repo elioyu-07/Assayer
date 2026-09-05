@@ -7,11 +7,11 @@ from pathlib import Path
 
 from assayer_host import HostCore, HostError, InteractivePlatformMcpToolTransport, ProductMcpToolTransport
 from assayer_platform import PlatformContext, PlatformContractError, PluginRegistry
-from assayer_spec_quality import (
-    SPEC_QUALITY_SCOPE_SCHEMA, SpecQualityDecisionCommitter, SpecQualityPlugin, registration,
+from assayer_touchstone import (
+    TOUCHSTONE_SCOPE_SCHEMA, TouchstoneDecisionCommitter, TouchstonePlugin, registration,
 )
-from assayer_spec_quality.runtime import _actionable_result_delivery
-from assayer_spec_quality.review import (
+from assayer_touchstone.runtime import _actionable_result_delivery
+from assayer_touchstone.review import (
     evaluate_review, validate_review_decisions,
 )
 from assayer_platform import DecisionProposal, Finding
@@ -22,7 +22,7 @@ def spec_registry() -> PluginRegistry:
     """Return a fresh registry with the platform built-ins plus the external Spec plugin.
 
     This mirrors the installed view: the platform ships config and frontend as
-    built-ins while Spec-quality is discovered as an independently installed
+    built-ins while Touchstone is discovered as an independently installed
     distribution.
     """
     from assayer_platform.builtin_plugins import builtin_plugin_registry
@@ -72,7 +72,7 @@ Version 1.0 was created for the initial review.
 """
 
 
-class SpecQualityPluginTest(unittest.TestCase):
+class TouchstonePluginTest(unittest.TestCase):
     def test_inspection_exposes_document_context_and_source_facts(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "shared.md"
@@ -91,7 +91,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
 """,
                 encoding="utf-8",
             )
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-context-facts", frozenset({"structured_read"}))
             item = plugin.discover(str(path), context)[0]
             packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -115,7 +115,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
         self.assertEqual(migration[0]["line"], 11)
 
     def _strict_review_fixture(self, path: Path):
-        plugin = SpecQualityPlugin()
+        plugin = TouchstonePlugin()
         context = PlatformContext("run-strict-review", frozenset({"structured_read"}))
         item = plugin.discover(str(path), context)[0]
         packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -271,7 +271,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "missing-case.md"
             path.write_text("# Example\n\nFR-001 is described.\nAC-001 is observable.\n", encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-absence-claim", frozenset({"structured_read"}))
             item = plugin.discover(str(path), context)[0]
             packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -324,7 +324,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 "resolutionOwner": "Compliance owner",
             }],
         }
-        plugin = SpecQualityPlugin()
+        plugin = TouchstonePlugin()
         context = PlatformContext("run-cross-review", frozenset({"structured_read"}))
         item = plugin.discover(scope, context)[0]
         packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -384,7 +384,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 "resolutionOwner": "Product owner",
             }],
         }
-        validator = Draft202012Validator(SPEC_QUALITY_SCOPE_SCHEMA)
+        validator = Draft202012Validator(TOUCHSTONE_SCOPE_SCHEMA)
 
         self.assertEqual(list(validator.iter_errors(scope)), [])
         self.assertTrue(list(validator.iter_errors({**scope, "files": ["/tmp/anchor.md"]})))
@@ -419,7 +419,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                     "resolutionOwner": "Compliance owner",
                 }],
             }
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-cross-document", frozenset({"structured_read"}))
 
             items = plugin.discover(scope, context)
@@ -458,7 +458,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
 
             evidence_schema = json.loads(
                 Path(__file__).parents[1].joinpath(
-                    "plugins/spec-quality/src/assayer_spec_quality/cross-document-evidence.schema.json"
+                    "plugins/touchstone/src/assayer_touchstone/cross-document-evidence.schema.json"
                 ).read_text(encoding="utf-8")
             )
             Draft202012Validator(evidence_schema).validate(plain(cross_packet))
@@ -470,7 +470,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
             related = root / "related.md"
             anchor.write_text("Anchor", encoding="utf-8")
             related.write_text("Related", encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-cross-invalid", frozenset({"structured_read"}))
             base = {
                 "anchor": {"documentId": "anchor", "path": str(anchor)},
@@ -513,7 +513,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                     "resolutionOwner": "Product owner",
                 }],
             }
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-cross-drift", frozenset({"structured_read"}))
             items = plugin.discover(scope, context)
             related.write_text("Related changed after discovery", encoding="utf-8")
@@ -542,7 +542,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 root / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001", "scope": scope,
             })
             discovered = transport.call_tool("discover_work_items", {})[
                 "structuredContent"
@@ -594,7 +594,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001", "scope": scope,
             })
             task = transport.call_tool("advance_plugin_run", {})[
                 "structuredContent"
@@ -664,7 +664,7 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001", "scope": scope,
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001", "scope": scope,
             })["structuredContent"]["result"]
             task = first_transport.call_tool("advance_plugin_run", {})[
                 "structuredContent"
@@ -851,11 +851,11 @@ AS-006: The system starts from zero; no historical data migration is needed.
                 }},
             )
             report = evaluate_review(proposal, packet)
-            receipt = SpecQualityDecisionCommitter().commit(
-                proposal, packet, SpecQualityPlugin.manifest.checks[0],
+            receipt = TouchstoneDecisionCommitter().commit(
+                proposal, packet, TouchstonePlugin.manifest.checks[0],
                 PlatformContext("run-cross-review", frozenset({"structured_read"})),
             )
-            summary = SpecQualityPlugin().summarize(
+            summary = TouchstonePlugin().summarize(
                 (packet.work_item,), (packet,), (proposal,), "completed",
             )
 
@@ -940,7 +940,7 @@ The ABC acronym is defined by context.
 """,
                 encoding="utf-8",
             )
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-spec-table-regression", frozenset({"structured_read"}))
             item = plugin.discover({"files": [{"path": str(path)}]}, context)[0]
 
@@ -953,7 +953,7 @@ The ABC acronym is defined by context.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
             path.write_text("# Example\n\nThe system should be good and respond as soon as possible.\n", encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-spec-inspect", frozenset({"structured_read"}))
             item = plugin.discover({"files": [{"path": str(path)}]}, context)[0]
             packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -968,7 +968,7 @@ The ABC acronym is defined by context.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
             path.write_text("# Example\n\nFR-001 returns an observable result.\n", encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-spec-strict-structure", frozenset({"structured_read"}))
             item = plugin.discover({"files": [{"path": str(path), "profile": "strict-12-chapter"}]}, context)[0]
 
@@ -986,7 +986,7 @@ The ABC acronym is defined by context.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             run_id = started["structuredContent"]["result"]["runId"]
@@ -1024,7 +1024,7 @@ The ABC acronym is defined by context.
                 names = {item["name"] for item in transport.list_tools()}
                 self.assertIn("start_plugin_run", names)
                 started = transport.call_tool("start_plugin_run", {
-                    "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                    "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                     "scope": {"files": [{"path": str(path)}]},
                 })
                 self.assertEqual(started["structuredContent"]["status"], "ok")
@@ -1044,7 +1044,7 @@ The ABC acronym is defined by context.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             run_id = started["structuredContent"]["result"]["runId"]
@@ -1087,7 +1087,7 @@ The ABC acronym is defined by context.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             transport.call_tool("discover_work_items", {})
@@ -1135,7 +1135,7 @@ The ABC acronym is defined by context.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path), "reviewStrategy": "navigation"}]},
             })
             transport.call_tool("discover_work_items", {})
@@ -1288,7 +1288,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             transport.call_tool("discover_work_items", {})
@@ -1350,7 +1350,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             transport.call_tool("discover_work_items", {})
@@ -1521,7 +1521,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })["structuredContent"]["result"]
             first_transport.call_tool("discover_work_items", {})
@@ -1593,7 +1593,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })["structuredContent"]["result"]
             run_id = started["runId"]
@@ -1691,7 +1691,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })["structuredContent"]["result"]
             run_id = started["runId"]
@@ -1743,7 +1743,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 output, plugin_registry=spec_registry(),
             )
             started = first_transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })["structuredContent"]["result"]
             task = first_transport.call_tool("advance_plugin_run", {})[
@@ -1790,7 +1790,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })["structuredContent"]["result"]
             task = transport.call_tool("advance_plugin_run", {})[
@@ -1838,7 +1838,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
             path.write_text(COMPLETE_SPEC, encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-spec-summary", frozenset({"structured_read"}))
             item = plugin.discover({"files": [{"path": str(path)}]}, context)[0]
             packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -1855,7 +1855,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 Path(directory) / "output", plugin_registry=spec_registry(),
             )
             transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality", "checkId": "SPEC-001",
+                "pluginId": "assayer.touchstone", "checkId": "SPEC-001",
                 "scope": {"files": [{"path": str(path)}]},
             })
             transport.call_tool("discover_work_items", {})
@@ -1908,7 +1908,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
             path.write_text("# Example\n", encoding="utf-8")
-            plugin = SpecQualityPlugin()
+            plugin = TouchstonePlugin()
             context = PlatformContext("run-spec-review", frozenset({"structured_read"}))
             item = plugin.discover({"files": [{"path": str(path)}]}, context)[0]
             packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
@@ -1918,7 +1918,7 @@ ASSUMPTION-01 remains OPEN until Finance Platform verifies API version 3.
                 "Issue found without review envelope.",
             )
             with self.assertRaisesRegex(Exception, "canonical review envelope"):
-                SpecQualityDecisionCommitter().commit(proposal, packet, plugin.manifest.checks[0], context)
+                TouchstoneDecisionCommitter().commit(proposal, packet, plugin.manifest.checks[0], context)
 
 
 if __name__ == "__main__":

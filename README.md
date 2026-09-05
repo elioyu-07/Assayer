@@ -43,7 +43,7 @@ lifecycle is not yet a delivered ecosystem feature.
 | Plugin | Status | What it does |
 |---|---|---|
 | `assayer.frontend-audit` | Usable Alpha | Audits anonymous test or staging web interfaces in Chromium with safe interactions and DOM/visual evidence; currently ships the FUA-10 filter-action check. |
-| `assayer.spec-quality` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point Spec-quality policy with Agent semantic judgment. |
+| `assayer.touchstone` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point Touchstone policy with Agent semantic judgment. |
 | `assayer.config-quality` | Reference | Demonstrates deterministic, batched auditing of structured configuration files through the generic platform kernel. |
 
 Every plugin publishes the same portable `canonical-result.json`. A plugin may
@@ -182,7 +182,7 @@ The ordered roadmap is:
 1. close the remaining clean-CLI and release-lifecycle evidence for the current
    user journey;
 2. complete measured platform-performance evidence;
-3. externalize the Spec-quality plugin without changing platform source;
+3. externalize the Touchstone plugin without changing platform source;
 4. build an Agent-first plugin workbench backed by inspectable packages and
    mandatory conformance gates;
 5. externalize frontend auditing and reusable capability providers;

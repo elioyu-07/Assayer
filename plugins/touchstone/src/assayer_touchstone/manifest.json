@@ -1,8 +1,8 @@
 {
-  "pluginId": "assayer.spec-quality",
+  "pluginId": "assayer.touchstone",
   "version": "1.0.0",
   "platformApiVersion": "1.0.0",
-  "domains": ["spec-quality"],
+  "domains": ["touchstone"],
   "subjectKinds": ["spec_document"],
   "checks": [
     {

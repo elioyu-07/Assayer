@@ -1,6 +1,6 @@
-# Spec-quality Evaluation Corpus
+# Touchstone Evaluation Corpus
 
-This directory is owned by the Spec-quality plugin. `corpus.json` records the
+This directory is owned by the Touchstone plugin. `corpus.json` records the
 expected deterministic candidates, semantic dispositions, findings, and final
 readiness for fixed Markdown inputs.
 
@@ -89,7 +89,7 @@ from being mistaken for semantic success.
 
 `load_semantic_review_from_ledger(path, work_item_id=...)` extracts this
 projection, including relationship reviews when present, from a completed or
-partial `assayer.spec-quality` platform ledger.
+partial `assayer.touchstone` platform ledger.
 The ledger is used because it retains the complete accepted review decisions
 and receipt readiness; the portable canonical result intentionally exposes a
 smaller cross-plugin projection. A multi-WorkItem ledger requires the caller

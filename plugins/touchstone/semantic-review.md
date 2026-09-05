@@ -1,6 +1,6 @@
 # Spec-Quality Semantic Review Contract
 
-The Spec-quality plugin discovers and inspects Markdown specification
+The Touchstone plugin discovers and inspects Markdown specification
 documents, then produces candidate findings for Agent review. The Agent is the
 semantic decision boundary: the deterministic scanner only marks candidates and
 never declares a formal pass or failure on its own.

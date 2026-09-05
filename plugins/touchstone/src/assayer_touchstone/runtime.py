@@ -1,4 +1,4 @@
-"""Canonical Spec-quality candidate scanner.
+"""Canonical Touchstone candidate scanner.
 
 The bundled ``authority.md`` is the normative entry point.  This module is an
 implementation projection only: all deterministic observations are candidates
@@ -551,7 +551,7 @@ def _navigation_candidates(units: Sequence[Mapping[str, Any]]) -> list[dict[str,
     return result
 
 
-class SpecQualityPlugin:
+class TouchstonePlugin:
     """Discover and inspect Markdown Specs under the canonical authority."""
 
     manifest: PluginManifest = load_plugin_manifest(_MANIFEST)

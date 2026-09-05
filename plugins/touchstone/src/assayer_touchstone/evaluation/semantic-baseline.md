@@ -4,7 +4,7 @@
 |---|---|
 | Document version | 1.0.0 |
 | Status | Minimum semantic oracle for the first fixed corpus |
-| Owner | `assayer.spec-quality` maintainers |
+| Owner | `assayer.touchstone` maintainers |
 
 This document defines the smallest semantic vocabulary needed to build and
 judge the first Spec evaluation corpus. It is a plugin policy asset, not a

@@ -1,8 +1,8 @@
 {
   "$schema": "../../../../../schemas/evaluation-corpus.schema.json",
   "schemaVersion": "1.0.0",
-  "corpusId": "spec-quality-baseline",
-  "pluginId": "assayer.spec-quality",
+  "corpusId": "touchstone-baseline",
+  "pluginId": "assayer.touchstone",
   "pluginVersion": "1.0.0",
   "policyRef": { "ruleId": "SPEC-001", "version": "1.0.0" },
   "cases": [

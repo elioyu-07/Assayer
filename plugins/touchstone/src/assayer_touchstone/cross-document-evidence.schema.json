@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://assayer.dev/plugins/spec-quality/cross-document-evidence.schema.json",
+  "$id": "https://assayer.dev/plugins/touchstone/cross-document-evidence.schema.json",
   "title": "Spec Cross-document Evidence Packet",
   "type": "object",
   "additionalProperties": false,

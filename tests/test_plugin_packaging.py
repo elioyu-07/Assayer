@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "assayer"
 
-SPEC_PLUGIN = ROOT / "plugins" / "spec-quality" / "src" / "assayer_spec_quality"
+TOUCHSTONE_PLUGIN = ROOT / "plugins" / "touchstone" / "src" / "assayer_touchstone"
 SPEC_REFERENCES = PLUGIN / "skills" / "assayer-spec-audit" / "references"
 
 SPEC_AUTHORITY_DOCUMENTS = (
@@ -82,13 +82,13 @@ class PluginPackagingContractTests(unittest.TestCase):
 
     def test_external_spec_plugin_distribution_includes_policy_resources(self):
         external = tomllib.loads(
-            (ROOT / "plugins" / "spec-quality" / "pyproject.toml").read_text()
+            (ROOT / "plugins" / "touchstone" / "pyproject.toml").read_text()
         )["tool"]["setuptools"]
-        package_data = external["package-data"]["assayer_spec_quality"]
+        package_data = external["package-data"]["assayer_touchstone"]
         self.assertIn("*.json", package_data)
         self.assertIn("*.md", package_data)
         self.assertIn("evaluation/*", package_data)
-        package_root = ROOT / "plugins" / "spec-quality" / "src" / "assayer_spec_quality"
+        package_root = ROOT / "plugins" / "touchstone" / "src" / "assayer_touchstone"
         for name in ("manifest.json", "recognition.json", "policy.json", "checklist.json",
                      "authority.md", "self-check-checklist.md", "quality-standard.md",
                      "spec-template.md", "nfr-catalog.md", "scope.schema.json"):
@@ -104,7 +104,7 @@ class PluginPackagingContractTests(unittest.TestCase):
             self.assertTrue(bundled.is_file(), f"missing bundled reference: {name}")
             self.assertEqual(
                 bundled.read_text(encoding="utf-8"),
-                (SPEC_PLUGIN / name).read_text(encoding="utf-8"),
+                (TOUCHSTONE_PLUGIN / name).read_text(encoding="utf-8"),
                 f"bundled reference drifted from plugin source: {name}",
             )
 

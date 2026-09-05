@@ -8,8 +8,8 @@ from jsonschema import Draft202012Validator, RefResolver
 
 from assayer_host import InteractivePlatformMcpToolTransport
 from assayer_platform import PluginRegistry
-from assayer_spec_quality import evaluation as evaluation_module
-from assayer_spec_quality import (
+from assayer_touchstone import evaluation as evaluation_module
+from assayer_touchstone import (
     evaluate_semantic_review_case,
     evaluate_semantic_review_corpus,
     inspect_evaluation_case,
@@ -21,10 +21,10 @@ from assayer_spec_quality import (
 
 
 def spec_registry() -> PluginRegistry:
-    """Return a fresh registry containing the external Spec-quality plugin."""
+    """Return a fresh registry containing the external Touchstone plugin."""
     return PluginRegistry((registration,))
 
-class SpecQualityEvaluationCorpusTest(unittest.TestCase):
+class TouchstoneEvaluationCorpusTest(unittest.TestCase):
     @staticmethod
     def _review_for(case):
         expected = case["expected"]
@@ -89,7 +89,7 @@ class SpecQualityEvaluationCorpusTest(unittest.TestCase):
 
     def test_packaged_corpus_is_valid_and_ids_are_closed(self):
         corpus = load_evaluation_corpus()
-        self.assertEqual(corpus["pluginId"], "assayer.spec-quality")
+        self.assertEqual(corpus["pluginId"], "assayer.touchstone")
         self.assertEqual(len(corpus["cases"]), 11)
 
     def test_single_document_cases_match_deterministic_candidate_ids(self):
@@ -292,7 +292,7 @@ class SpecQualityEvaluationCorpusTest(unittest.TestCase):
         case = next(item for item in corpus["cases"] if item["category"] == "ambiguity")
         actual = self._review_for(case)
         ledger = {
-            "run": {"plugin_id": "assayer.spec-quality"},
+            "run": {"plugin_id": "assayer.touchstone"},
             "status": "completed",
             "decisions": [{
                 "work_item_id": "spec:ambiguity",
@@ -326,7 +326,7 @@ class SpecQualityEvaluationCorpusTest(unittest.TestCase):
                 output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.spec-quality",
+                "pluginId": "assayer.touchstone",
                 "checkId": "SPEC-001",
                 "scope": {"files": [scope_document]},
             })["structuredContent"]["result"]

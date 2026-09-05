@@ -1,6 +1,6 @@
 ---
 name: assayer-spec-audit
-description: "Audit a Markdown product or software Spec through Assayer's canonical spec-quality policy, with candidate evidence, semantic review, readiness, and a structured result summary."
+description: "Audit a Markdown product or software Spec through Assayer's canonical touchstone policy, with candidate evidence, semantic review, readiness, and a structured result summary."
 ---
 
 # Assayer Spec Audit
@@ -11,7 +11,7 @@ contract. Use the Assayer MCP tools directly; do not start another Codex
 process, invoke a nested Agent, or silently replace this workflow with a local
 keyword script.
 
-The `assayer.spec-quality` plugin is an interactive plugin. Its scanner emits
+The `assayer.touchstone` plugin is an interactive plugin. Its scanner emits
 candidate evidence only. A candidate is not a finding, and scanner output
 cannot establish readiness without explicit semantic review.
 
@@ -25,7 +25,7 @@ cannot establish readiness without explicit semantic review.
    anchor. Build `anchor`, `relatedDocuments`, and directional `relationships`;
    never crawl the repository or infer a relationship from filenames alone.
 2. Start exactly one plugin Run with `start_plugin_run`:
-   `pluginId=assayer.spec-quality`, `checkId=SPEC-001`, and
+   `pluginId=assayer.touchstone`, `checkId=SPEC-001`, and
    `scope.files=[{"path":"<absolute-or-user-supplied-path>","reviewStrategy":"navigation"}]` for an
    independent review, or the explicit `anchor`, `relatedDocuments`, and
    `relationships` scope from step 1 for a cross-document review.

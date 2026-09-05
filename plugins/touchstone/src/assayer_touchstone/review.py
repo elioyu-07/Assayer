@@ -839,7 +839,7 @@ def evaluate_review(proposal: DecisionProposal, packet: InvestigationPacket) -> 
     }
 
 
-class SpecQualityDecisionCommitter:
+class TouchstoneDecisionCommitter:
     """Admit only authority-complete Spec review decisions."""
 
     def commit(self, proposal: DecisionProposal, packet: InvestigationPacket,
@@ -856,7 +856,7 @@ class SpecQualityDecisionCommitter:
             return CommitReceipt(
                 f"commit:{context.run_id}:{proposal.work_item_id}:candidate",
                 proposal.work_item_id, check.check_id, check.version, proposal.result, "memory",
-                {"reviewed": False, "candidateOnly": True, "decisionOwner": "assayer.spec-quality"},
+                {"reviewed": False, "candidateOnly": True, "decisionOwner": "assayer.touchstone"},
             )
         report = evaluate_review(proposal, packet)
         digest = hashlib.sha256(json.dumps(report, ensure_ascii=False, sort_keys=True, default=str).encode()).hexdigest()
@@ -869,7 +869,7 @@ class SpecQualityDecisionCommitter:
 
 
 __all__ = [
-    "SpecQualityDecisionCommitter", "evaluate_review",
+    "TouchstoneDecisionCommitter", "evaluate_review",
     "validate_checklist_reviews", "validate_cross_document_reviews",
     "validate_review_decisions",
 ]

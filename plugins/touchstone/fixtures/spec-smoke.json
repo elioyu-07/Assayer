@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.0.0",
-  "fixtureId": "spec-quality.smoke",
+  "fixtureId": "touchstone.smoke",
   "checkId": "SPEC-001",
   "description": "A complete 12-chapter Spec produces a deterministic platform result.",
   "scope": { "files": [{"path": "fixtures/spec-smoke.md"}] },

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://assayer.dev/plugins/spec-quality/semantic-evaluation-corpus-result.schema.json",
+  "$id": "https://assayer.dev/plugins/touchstone/semantic-evaluation-corpus-result.schema.json",
   "title": "Spec Quality Semantic Corpus Evaluation Result",
   "type": "object",
   "additionalProperties": false,
@@ -8,7 +8,7 @@
   "properties": {
     "schemaVersion": { "const": "1.0.0" },
     "corpusId": { "type": "string", "minLength": 1 },
-    "pluginId": { "const": "assayer.spec-quality" },
+    "pluginId": { "const": "assayer.touchstone" },
     "passed": { "type": "boolean" },
     "metrics": {
       "type": "object",

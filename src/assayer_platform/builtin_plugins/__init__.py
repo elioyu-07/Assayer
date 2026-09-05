@@ -11,7 +11,7 @@ def builtin_plugin_registry() -> PluginRegistry:
 
     A fresh registry prevents one Host or test from mutating another Host's
     plugin selection.  The registry contains manifests only; runtime objects
-    are still injected at the domain boundary.  The Spec-quality plugin is no
+    are still injected at the domain boundary.  The Touchstone plugin is no
     longer a built-in; it is shipped as an independently installed
     distribution and discovered through the ``assayer.plugins`` entry point.
     """
