@@ -13,6 +13,8 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `audit-object.schema.json`: audit objects discovered on real runtime pages.
 - `operation.schema.json`: idempotent Host request execution and result-known state.
 - `dimension-finding.schema.json`: immutable five-state Findings for object, frozen rule, and coverage dimension, including Evidence/Case references and supersession chain.
+- `actionable-result.schema.json`: platform-owned remediation envelope for root-cause results that must be directly actionable, distinct from dimension-level Findings.
+- `evidence-claim.schema.json`: portable direct, absence, derived, and external-unverified Evidence Claim contract used by actionable results.
 - `rule-assessment.schema.json`: fixed five-state decision for one object and one rule.
 - `reverse-case.schema.json`: Agent-planned, Host-safely-executed reverse Case, including pre-action baseline, reverse actions, targeted recovery, verification, and refresh fallback.
 - `action-attempt.schema.json`: Host safety decision, target, and request-observation references for one Case action.
@@ -62,9 +64,14 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
   findings, review items, failures, performance, and exact ledger trace
   references. Generic batch and interactive platform Runs emit and validate
   this artifact at terminal persistence.
+- `evidence-graph.schema.json`: portable candidate coverage, pending-member,
+  root-cause-group, and per-WorkItem evidence-graph projection.
 - `frontend-canonical-extension.schema.json`: privacy-safe frontend page,
   object, entrypoint, issue, and diagnostic counts attached to the common
   result without changing its domain-neutral vocabulary.
+- `evaluation-corpus.schema.json`: generic plugin-owned fixed evaluation
+  corpus envelope. Domain semantics and expected outcomes remain in the
+  owning plugin's packaged evaluation assets.
 
 The product runtime also exports the validated platform ledger as
 `platform-ledger.json`, `platform-events.jsonl`, `platform-run.log`, and the

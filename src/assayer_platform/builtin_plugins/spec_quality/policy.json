@@ -2,10 +2,10 @@
   "$schema": "./policy.schema.json",
   "schema_version": "1.0.0",
   "policy_id": "spec-quality-audit/default",
-  "policy_version": "1.2.0",
+  "policy_version": "1.3.0",
   "authority": {
     "path": "authority.md",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "relationship": "implementation_projection",
     "normative": false
   },
@@ -14,6 +14,11 @@
     "product-spec": {
       "kind": "base",
       "activation": "default",
+      "reference": "spec-template.md"
+    },
+    "strict-12-chapter": {
+      "kind": "base",
+      "activation": "explicit",
       "reference": "spec-template.md"
     },
     "speckit": {

@@ -34,6 +34,24 @@ def validator(filename: str) -> Draft202012Validator:
 
 
 class PlatformV1ContractTests(unittest.TestCase):
+    def test_evidence_graph_schema_accepts_complete_and_pending_projection(self):
+        check = validator("evidence-graph.schema.json")
+        check.validate({
+            "candidateCount": 2,
+            "coveredCandidateCount": 1,
+            "pendingCandidateIds": ["candidate:2"],
+            "coverageComplete": False,
+            "rootCauseGroups": [{
+                "groupId": "group:1", "candidateIds": ["candidate:1"],
+                "evidenceRefs": ["evidence:1"], "affectedDimensions": ["CHK-01"],
+            }],
+            "workItems": [{
+                "workItemId": "work-001", "candidateCount": 2,
+                "coveredCandidateCount": 1, "pendingCandidateIds": ["candidate:2"],
+                "coverageComplete": False,
+            }],
+        })
+
     def test_frozen_contracts_share_v1_and_have_valid_local_links(self):
         for path in CONTRACTS:
             text = path.read_text(encoding="utf-8")

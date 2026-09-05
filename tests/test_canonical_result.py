@@ -1,4 +1,5 @@
 import hashlib
+import dataclasses
 import json
 import tempfile
 import unittest
@@ -75,6 +76,9 @@ class CanonicalResultTest(unittest.TestCase):
             "note": "Non-applicable WorkItem kinds are counted as skipped; failures remain processed but incomplete.",
         })
         self.assertEqual(value["outcomes"][0]["result"], "scanned_no_issue")
+        self.assertEqual(len(value["evidenceGraph"]), 1)
+        self.assertEqual(value["evidenceGraph"][0]["candidateCount"], 3)
+        self.assertTrue(value["evidenceGraph"][0]["coverageComplete"])
         self.assertEqual(
             value["trace"]["ledgerDigest"],
             ledger_digest,
@@ -94,6 +98,56 @@ class CanonicalResultTest(unittest.TestCase):
         self.assertEqual(value["outcomes"][0]["result"], "issue_found")
         self.assertTrue(all(item["evidenceRefs"] for item in value["findings"]))
         self.assertEqual(value["needsReview"], [])
+
+    def test_actionable_remediations_are_validated_and_published_separately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "broken.json"
+            source.write_text("not-json", encoding="utf-8")
+            result = PlatformKernel().run(
+                ConfigQualityPlugin(), str(source), "CFG-001",
+                ConfigurationDecisionProvider(),
+                PlatformContext("run-canonical-actionable", frozenset({"structured_read"})),
+            )
+        decision = result.ledger.decisions[0]
+        packet = result.ledger.investigations[0]
+        violated = [item.dimension for item in decision.findings if item.status == "violated"]
+        delivery = {
+            "schemaVersion": "1.0.0", "status": "complete",
+            "evidenceClaims": [{
+                "claimId": "claim-config-invalid", "kind": "direct",
+                "evidenceRefs": [packet.evidence[0].evidence_id],
+                "observed": ["The source is not valid JSON."],
+                "conclusion": "The source cannot be parsed as JSON.",
+            }],
+            "remediations": [{
+                "remediationId": "config-invalid-json", "title": "Configuration is not valid JSON",
+                "severity": "P1", "dimensions": violated,
+                "affectedElements": ["configuration-document"],
+                "evidenceRefs": [packet.evidence[0].evidence_id],
+                "claimRefs": ["claim-config-invalid"],
+                "problem": "The document cannot be parsed as JSON.",
+                "impact": "The configuration cannot be loaded.",
+                "recommendation": "Correct /private/tmp/settings.json with token=private-value.",
+                "nextAction": "Fix the source and rerun CFG-001.",
+                "closureEvidence": "A successful structured-read result.",
+                "owner": {"status": "unassigned", "reason": "The source does not name an owner."},
+            }],
+        }
+        reviewed = dataclasses.replace(decision, details={"result_delivery": delivery})
+        ledger = dataclasses.replace(result.ledger, decisions=(reviewed,))
+
+        value = build_canonical_result(ledger)
+
+        self.validator().validate(value)
+        self.assertEqual(value["actionability"], "complete")
+        self.assertEqual(value["remediations"][0]["dimensions"], violated)
+        self.assertEqual(value["remediations"][0]["workItemId"], decision.work_item_id)
+        self.assertEqual(value["remediations"][0]["sourceRemediationId"], "config-invalid-json")
+        self.assertEqual(value["remediations"][0]["claimRefs"], [value["evidenceClaims"][0]["claimId"]])
+        self.assertEqual(value["evidenceClaims"][0]["sourceClaimId"], "claim-config-invalid")
+        self.assertNotIn("private-value", json.dumps(value["remediations"]))
+        self.assertNotIn("/private/tmp/settings.json", json.dumps(value["remediations"]))
+        self.assertEqual(value["findings"][0]["dimension"], decision.findings[0].dimension)
 
     def test_needs_review_and_unverified_scope_have_distinct_public_meanings(self):
         class ReviewProvider:

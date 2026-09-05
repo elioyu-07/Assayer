@@ -82,7 +82,17 @@
     "status": {"enum": ["READY", "REWORK", "ESCALATE", "UNVERIFIED"]},
     "spec": {"type": "string"},
     "run": {"type": "object"},
-    "evidence_manifest": {"$ref": "evidence-manifest.schema.json"}
+    "evidence_manifest": {"$ref": "evidence-manifest.schema.json"},
+    "cross_document_scope": {
+      "oneOf": [
+        {"$ref": "cross-document-evidence.schema.json#/$defs/scope"},
+        {"type": "null"}
+      ]
+    },
+    "cross_document_review": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/crossDocumentReview"}
+    }
   },
   "allOf": [
     {
@@ -108,7 +118,25 @@
         "status": {"enum": ["PASS", "FINDING", "UNVERIFIED", "NOT_APPLICABLE"]},
         "candidate_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
-        "review_note": {"type": ["string", "null"]}
+        "review_note": {"type": ["string", "null"]},
+        "semantic_type": {
+          "enum": ["ambiguity", "conflict", "contradiction", "drift", "unverified_dependency", null]
+        },
+        "relationship_id": {"type": ["string", "null"], "minLength": 1},
+        "document_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "affected_elements": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "resolution_owner": {"type": ["string", "null"], "minLength": 1},
+        "next_action": {"type": ["string", "null"], "minLength": 1},
+        "evidence_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/crossDocumentEvidenceRef"}
+        }
       }
     },
     "checklistReview": {
@@ -117,7 +145,31 @@
       "properties": {
         "check_id": {"pattern": "^CHK-(0[1-9]|1[0-8])$"},
         "status": {"enum": ["PASS", "REWORK", "ESCALATE", "UNVERIFIED"]},
-        "note": {"type": "string", "minLength": 1}
+        "note": {"type": "string", "minLength": 1},
+        "applicability": {"enum": ["APPLICABLE", "NOT_APPLICABLE", "CONDITIONAL", "UNVERIFIED"]},
+        "observation": {"type": "string", "minLength": 1},
+        "gap": {"type": "string", "minLength": 1},
+        "impact": {"type": "string", "minLength": 1},
+        "recommendation": {"type": "string", "minLength": 1},
+        "finding_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "owner": {"type": "string", "minLength": 1},
+        "next_action": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "evidence_refs": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/evidenceRef"}
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_chunk_id", "document_path", "source_digest", "start_line", "end_line"],
+      "properties": {
+        "source_chunk_id": {"type": "string", "minLength": 1},
+        "document_path": {"type": "string", "minLength": 1},
+        "source_digest": {"type": "string", "minLength": 1},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1}
       }
     },
     "candidate": {
@@ -151,13 +203,28 @@
         "object_id": {"type": ["string", "null"]},
         "dimension": {"type": ["string", "null"]},
         "gap": {"type": "string"},
+        "observed_fact": {"type": "string", "minLength": 1},
         "impact": {"type": "string"},
         "recommendation": {"type": "string"},
         "closure_evidence": {"type": ["string", "null"]},
         "candidate_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "merged_into": {"type": ["string", "null"]},
         "evidence": {"type": "array", "items": {"type": "string"}},
-        "review_note": {"type": ["string", "null"]}
+        "review_note": {"type": ["string", "null"]},
+        "affected_elements": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "owner": {"type": "string", "minLength": 1},
+        "next_action": {"type": "string", "minLength": 1},
+        "confidence": {"enum": ["high", "medium", "low"]},
+        "evidence_refs": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/evidenceRef"}
+        },
+        "semantic_type": {
+          "enum": ["ambiguity", "conflict", "contradiction", "drift", "unverified_dependency", null]
+        },
+        "relationship_id": {"type": ["string", "null"], "minLength": 1},
+        "document_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "resolution_owner": {"type": ["string", "null"], "minLength": 1}
       },
       "allOf": [
         {
@@ -188,7 +255,78 @@
         },
         {
           "if": {"properties": {"status": {"not": {"const": "CONFIRMED"}}}},
-          "then": {"properties": {"severity": {"type": "null"}, "candidate_ids": {"minItems": 1}}}
+          "then": {"properties": {"severity": {"type": "null"}}}
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {"not": {"const": "CONFIRMED"}},
+              "semantic_type": {"not": {"const": "unverified_dependency"}}
+            }
+          },
+          "then": {"properties": {"candidate_ids": {"minItems": 1}}}
+        },
+        {
+          "if": {
+            "required": ["semantic_type"],
+            "properties": {
+              "semantic_type": {
+                "enum": ["ambiguity", "conflict", "contradiction", "drift", "unverified_dependency"]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "relationship_id", "document_ids", "affected_elements",
+              "resolution_owner", "next_action", "evidence_refs"
+            ],
+            "properties": {
+              "relationship_id": {"type": "string", "minLength": 1},
+              "document_ids": {"minItems": 2, "maxItems": 2},
+              "affected_elements": {"minItems": 1},
+              "resolution_owner": {"type": "string", "minLength": 1},
+              "next_action": {"type": "string", "minLength": 1},
+              "evidence_refs": {"minItems": 2}
+            }
+          }
+        }
+      ]
+    },
+    "crossDocumentEvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_id", "source_chunk_id", "document_path", "source_digest",
+        "start_line", "end_line", "excerpt"
+      ],
+      "properties": {
+        "document_id": {"type": "string", "minLength": 1},
+        "source_chunk_id": {"type": "string", "minLength": 1},
+        "document_path": {"type": "string", "minLength": 1},
+        "source_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "excerpt": {"type": "string", "minLength": 1}
+      }
+    },
+    "crossDocumentReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relationship_id", "outcome", "note", "decisions"],
+      "properties": {
+        "relationship_id": {"type": "string", "minLength": 1},
+        "outcome": {"enum": ["COMPATIBLE", "FINDING", "UNVERIFIED"]},
+        "note": {"type": "string", "minLength": 1},
+        "decisions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/reviewed"}
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"outcome": {"const": "COMPATIBLE"}}},
+          "then": {"properties": {"decisions": {"maxItems": 0}}},
+          "else": {"properties": {"decisions": {"minItems": 1}}}
         }
       ]
     },
@@ -206,6 +344,37 @@
         "impact": {"type": ["string", "null"]},
         "recommendation": {"type": ["string", "null"]},
         "review_status": {"enum": ["CONFIRMED", "SUPPRESSED", "MERGED", "UNVERIFIED"]}
+      }
+    },
+    "documentContext": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "document_type", "scope_statement", "responsibility_boundaries",
+        "selected_profile", "classification_evidence", "classification_confidence",
+        "unresolved_classification_questions"
+      ],
+      "properties": {
+        "document_type": {
+          "enum": ["feature_spec", "shared_contract", "data_model", "interface_contract", "rfc_prd", "other"]
+        },
+        "scope_statement": {"type": "string", "minLength": 1},
+        "responsibility_boundaries": {
+          "type": "object", "additionalProperties": false,
+          "required": ["owned", "delegated", "excluded"],
+          "properties": {
+            "owned": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "delegated": {"type": "array", "items": {"type": "string", "minLength": 1}},
+            "excluded": {"type": "array", "items": {"type": "string", "minLength": 1}}
+          }
+        },
+        "related_documents": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "selected_profile": {"type": "string", "minLength": 1},
+        "classification_evidence": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/evidenceRef"}
+        },
+        "classification_confidence": {"enum": ["high", "medium", "low"]},
+        "unresolved_classification_questions": {"type": "array", "items": {"type": "string", "minLength": 1}}
       }
     }
   }

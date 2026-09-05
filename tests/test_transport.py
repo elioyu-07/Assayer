@@ -391,7 +391,7 @@ class TransportTest(unittest.TestCase):
     def test_product_mcp_exposes_only_business_inputs(self):
         adapter = ProductMcpToolTransport(ProductRecordingCore())
         tools = adapter.list_tools()
-        self.assertEqual(len(tools), 24)
+        self.assertEqual(len(tools), 26)
         forbidden = {
             "protocolVersion", "requestId", "agentTurnId", "idempotencyKey",
             "scanId", "runId", "expectedRunRevision", "ruleRegistryVersion",
@@ -400,7 +400,8 @@ class TransportTest(unittest.TestCase):
         for tool in tools:
             serialized = json.dumps(tool["inputSchema"])
             properties = json.loads(serialized).get("properties", {})
-            self.assertTrue(forbidden.isdisjoint(properties))
+            allowed = {"runId"} if tool["name"] == "resume_plugin_run" else set()
+            self.assertTrue(forbidden.difference(allowed).isdisjoint(properties))
             self.assertNotIn('"request"', serialized)
         start = next(tool for tool in tools if tool["name"] == "start_audit")
         self.assertEqual(set(start["inputSchema"]["properties"]), {"url", "decisionReason"})
@@ -413,16 +414,17 @@ class TransportTest(unittest.TestCase):
         self.assertIn("investigate_object", {tool["name"] for tool in tools})
         self.assertIn("discover_scope", {tool["name"] for tool in tools})
         self.assertIn("start_plugin_run", {tool["name"] for tool in tools})
+        self.assertIn("resume_plugin_run", {tool["name"] for tool in tools})
         self.assertIn("advance_plugin_run", {tool["name"] for tool in tools})
         self.assertIn("get_plugin_result", {tool["name"] for tool in tools})
+        self.assertIn("expand_evidence_collection", {tool["name"] for tool in tools})
         self.assertIn("recover_work_item", {tool["name"] for tool in tools})
         self.assertIn("get_plugin_progress", {tool["name"] for tool in tools})
         installation = next(tool for tool in tools if tool["name"] == "get_installation_status")
         self.assertEqual(set(installation["inputSchema"]["properties"]), {"maxRecentRuns"})
         for diagnostic_name in {
             "discover_work_items", "inspect_work_items", "expand_investigation",
-            "expand_evidence_collection", "checkpoint_review", "submit_decisions",
-            "finish_plugin_run",
+            "checkpoint_review", "submit_decisions", "finish_plugin_run",
         }:
             self.assertNotIn(diagnostic_name, {tool["name"] for tool in tools})
             with self.assertRaises(HostError) as hidden:
@@ -458,7 +460,7 @@ class TransportTest(unittest.TestCase):
             ProductRecordingCore(), lifecycle_controller=controller,
         )
         tools = {item["name"]: item for item in adapter.list_tools()}
-        self.assertEqual(len(tools), 26)
+        self.assertEqual(len(tools), 28)
         self.assertIn("plan_plugin_change", tools)
         self.assertIn("execute_plugin_change", tools)
         self.assertFalse(tools["plan_plugin_change"]["annotations"]["destructiveHint"])

@@ -49,8 +49,8 @@ _PUBLIC_TOOLS = tuple(
 # compatibility, and diagnostics, while normal Codex sessions get the
 # Host-driven path that cannot strand a Run between bookkeeping operations.
 _PRODUCT_INTERACTIVE_TOOLS = (
-    "start_plugin_run", "advance_plugin_run", "get_plugin_result",
-    "recover_work_item", "get_plugin_progress",
+    "start_plugin_run", "resume_plugin_run", "advance_plugin_run", "get_plugin_result",
+    "expand_evidence_collection", "recover_work_item", "get_plugin_progress",
 )
 _INSTALLATION_STATUS_TOOL = "get_installation_status"
 _LOG = logging.getLogger(__name__)
@@ -455,6 +455,13 @@ class InteractivePlatformMcpToolTransport:
                 "scope": {},
             },
         },
+        "resume_plugin_run": {
+            "type": "object", "additionalProperties": False,
+            "required": ["runId"],
+            "properties": {
+                "runId": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$"},
+            },
+        },
         "advance_plugin_run": {
             "type": "object", "additionalProperties": False,
             "properties": {
@@ -655,12 +662,13 @@ class InteractivePlatformMcpToolTransport:
     def list_tools(self) -> list[dict]:
         descriptions = {
             "start_plugin_run": "Start a domain-neutral interactive plugin Run using only plugin, Check, and business scope.",
+            "resume_plugin_run": "Explicitly resume one durable plugin Run by the Run ID returned when it started; Host startup never resumes a Run implicitly.",
             "advance_plugin_run": "Drive Host-owned discovery, inspection, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal.",
             "get_plugin_result": "Read one bounded page from a terminal result; the complete result remains durably stored.",
             "discover_work_items": "Discover logical WorkItems for an active plugin Run.",
             "inspect_work_items": "Inspect selected WorkItems and return summary-first InvestigationPackets; set includeEvidence=true only when full payloads are required.",
             "expand_investigation": "Expand selected immutable Evidence for an inspected WorkItem when the indexed payload is required in full.",
-            "expand_evidence_collection": "Page through a plugin-declared Evidence collection, with stable item IDs and optional mechanical groups.",
+            "expand_evidence_collection": "Read one bounded page from a plugin-declared immutable Evidence collection, with stable item IDs and optional mechanical groups; this never advances or mutates the Run.",
             "checkpoint_review": "Durably checkpoint semantic-review progress for stable items in a declared Evidence collection.",
             "submit_decisions": "Submit semantic DecisionProposals; the platform validates and commits them.",
             "recover_work_item": "Record plugin/runtime recovery for one WorkItem.",
@@ -690,6 +698,15 @@ class InteractivePlatformMcpToolTransport:
                 )
                 self._active_run_id = result["runId"]
                 self._terminal_run_id = None
+            elif name == "resume_plugin_run":
+                if self._active_run_id is not None:
+                    raise PlatformContractError("RUN_CONFLICT", "An interactive plugin Run is already active")
+                result = self._controller.resume(arguments["runId"])
+                if result.get("status") in {"completed", "partial", "failed"}:
+                    self._terminal_run_id = result["runId"]
+                else:
+                    self._active_run_id = result["runId"]
+                    self._terminal_run_id = None
             elif name == "get_plugin_result":
                 result = self._controller.get_result(
                     self._terminal_run(), arguments["sectionId"],
@@ -746,6 +763,18 @@ class InteractivePlatformMcpToolTransport:
                 self._terminal_run_id = result["runId"]
                 self._active_run_id = None
         except PlatformContractError as exc:
+            # Keep rejected requests visible in the same durable platform
+            # diary. A telemetry write can never replace the original error.
+            if self._active_run_id is not None:
+                try:
+                    self._controller.record_rejection(
+                        self._active_run_id, exc.code, message=exc.message,
+                    )
+                except Exception as telemetry_error:
+                    # Rejection telemetry is best-effort and must not mask
+                    # the original protocol error, but the failure remains
+                    # observable for host diagnostics and resilience scans.
+                    _LOG.debug("Unable to persist host rejection telemetry: %s", telemetry_error)
             raise HostError(exc.code, exc.message) from exc
         failed = result.get("status") == "failed"
         return {
@@ -753,6 +782,10 @@ class InteractivePlatformMcpToolTransport:
             "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)}],
             "isError": failed,
         }
+
+    def close(self) -> None:
+        self._controller.close()
+        self._active_run_id = None
 
     def _active_run(self) -> str:
         if self._active_run_id is None:
@@ -887,6 +920,10 @@ class FrontendProductMcpToolTransport(McpToolTransport):
         self._public_progress_seen = {
             "pages": set(), "candidates": set(), "objects": set(), "assessments": set(),
         }
+
+    def close(self) -> None:
+        self._interactive_tools.close()
+        super().close()
 
     def _retire_public_run_state(self) -> None:
         """Release per-Run semantic caches before the next Scan starts."""

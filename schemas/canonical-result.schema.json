@@ -34,6 +34,32 @@
     },
     "outcomes": { "type": "array", "items": { "$ref": "#/$defs/outcome" } },
     "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "actionability": { "enum": ["complete", "partial", "not_declared"] },
+    "remediations": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          { "$ref": "https://assayer.dev/schemas/actionable-result.schema.json#/$defs/remediation" },
+          {
+            "type": "object",
+            "required": ["workItemId", "checkId", "checkVersion"],
+            "properties": {
+              "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
+              "checkId": { "$ref": "common.schema.json#/$defs/ruleId" },
+              "checkVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" }
+            }
+          }
+        ]
+      }
+    },
+    "evidenceClaims": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceClaim" }
+    },
+    "evidenceGraph": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/evidenceGraphItem" }
+    },
     "needsReview": { "type": "array", "items": { "$ref": "#/$defs/reviewItem" } },
     "unverified": { "type": "array", "items": { "$ref": "#/$defs/unverifiedItem" } },
     "failures": { "type": "array", "items": { "$ref": "#/$defs/failure" } },
@@ -70,6 +96,42 @@
     }
   },
   "$defs": {
+    "evidenceClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimId", "sourceClaimId", "workItemId", "kind", "evidenceRefs", "conclusion"],
+      "properties": {
+        "claimId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "sourceClaimId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "kind": { "enum": ["direct", "absence", "derived", "external_unverified"] },
+        "evidenceRefs": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "scope": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sourceRef", "startLine", "endLine"],
+          "properties": {
+            "sourceRef": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+            "documentPath": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+            "sourceDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+            "startLine": { "type": "integer", "minimum": 1 },
+            "endLine": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "searchedFor": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+        "observed": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+        "derivation": { "type": "array", "minItems": 1, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+        "unavailableReason": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "conclusion": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "absence" } } }, "then": { "required": ["scope", "searchedFor"], "properties": { "searchedFor": { "minItems": 1 } } } },
+        { "if": { "properties": { "kind": { "const": "derived" } } }, "then": { "required": ["derivation"] } },
+        { "if": { "properties": { "kind": { "const": "external_unverified" } } }, "then": { "required": ["unavailableReason"] } }
+      ]
+    },
     "timing": {
       "oneOf": [
         {
@@ -113,7 +175,30 @@
         "dimension": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "status": { "enum": ["satisfied", "violated", "unresolved", "blocked", "conflicted"] },
         "reason": { "type": "string" },
-        "evidenceRefs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/entityId" }, "uniqueItems": true }
+        "evidenceRefs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/entityId" }, "uniqueItems": true },
+        "sourceEvidence": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["sourceChunkId", "startLine", "endLine"],
+            "properties": {
+              "sourceChunkId": { "$ref": "common.schema.json#/$defs/entityId" },
+              "documentPath": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+              "sourceDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+              "startLine": { "type": "integer", "minimum": 1 },
+              "endLine": { "type": "integer", "minimum": 1 },
+              "excerpt": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "sourceFindingId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "gap": { "type": "string" },
+        "impact": { "type": "string" },
+        "recommendation": { "type": "string" },
+        "affectedElements": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+        "owner": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "nextAction": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "confidence": { "enum": ["high", "medium", "low"] }
       }
     },
     "reviewItem": {
@@ -134,6 +219,29 @@
         "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
         "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
         "missingEvidence": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
+      }
+    },
+    "evidenceGraphItem": {
+      "type": "object", "additionalProperties": false,
+      "required": ["workItemId", "candidateCount", "coveredCandidateCount", "pendingCandidateIds", "coverageComplete", "rootCauseGroups"],
+      "properties": {
+        "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "candidateCount": { "type": "integer", "minimum": 0 },
+        "coveredCandidateCount": { "type": "integer", "minimum": 0 },
+        "pendingCandidateIds": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+        "coverageComplete": { "type": "boolean" },
+        "rootCauseGroups": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["groupId", "candidateIds", "evidenceRefs", "affectedDimensions"],
+            "properties": {
+              "groupId": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+              "candidateIds": { "type": "array", "minItems": 1, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+              "evidenceRefs": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true },
+              "affectedDimensions": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }, "uniqueItems": true }
+            }
+          }
+        }
       }
     },
     "failure": {

@@ -1,6 +1,8 @@
 import json
+import multiprocessing
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from assayer_host import HostError, InteractivePlatformMcpToolTransport
@@ -100,6 +102,22 @@ class ManyFixturePlugin(FixturePlugin):
         return tuple(FixturePlugin.inspect(self, (item,), check, context)[0] for item in work_items)
 
 
+class ReferenceCollectionFixturePlugin(FixturePlugin):
+    def inspect(self, work_items, check, context):
+        packet = super().inspect(work_items, check, context)[0]
+        descriptors = list(packet.metadata["evidenceCollections"])
+        descriptors[0] = {**descriptors[0], "reviewRequired": False}
+        descriptors.append({
+            "collectionId": "signal-reference",
+            "evidenceId": packet.evidence[0].evidence_id,
+            "jsonPointer": "/signals",
+            "itemIdField": "signal_id",
+            "groupBy": ["category"],
+            "reviewRequired": False,
+        })
+        return (replace(packet, metadata={"evidenceCollections": descriptors}),)
+
+
 class FixtureProvider:
     def decide(self, packets, check, context):
         del context
@@ -112,10 +130,61 @@ class FixtureProvider:
         ),)
 
 
+class ReferenceCollectionContractTest(unittest.TestCase):
+    def test_reference_collection_is_pageable_but_does_not_block_review(self):
+        registry = PluginRegistry((reference_collection_registration(),))
+        with tempfile.TemporaryDirectory() as directory:
+            transport = InteractivePlatformMcpToolTransport(
+                Path(directory) / "output", plugin_registry=registry,
+            )
+            transport.call_tool("start_plugin_run", {
+                "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+            })
+            transport.call_tool("discover_work_items", {})
+            inspected = transport.call_tool("inspect_work_items", {})
+            result = inspected["structuredContent"]["result"]["result"]
+            work_item_id = result["investigations"][0]["workItem"]["workItemId"]
+            index = result["evidenceCollectionIndex"][work_item_id]
+            self.assertEqual({item["collectionId"] for item in index}, {"signals", "signal-reference"})
+            self.assertTrue(all(item["reviewRequired"] is False for item in index))
+            advanced = transport.call_tool("advance_plugin_run", {})
+            boundary = advanced["structuredContent"]["result"]["result"]
+            self.assertEqual(boundary["semanticTask"]["kind"], "decide_work_item")
+            self.assertEqual(boundary["semanticTask"]["investigation"]["evidence"], [])
+            self.assertEqual(
+                {item["collectionId"] for item in boundary["semanticTask"]["referenceCollectionIndex"]},
+                {"signals", "signal-reference"},
+            )
+            with self.assertRaises(HostError) as error:
+                transport.call_tool("checkpoint_review", {
+                    "workItemId": work_item_id, "collectionId": "signals",
+                    "itemIds": ["signal:1"], "payload": {"summary": "Not reviewable."},
+                })
+            self.assertEqual(error.exception.code, "EVIDENCE_COLLECTION_NOT_REVIEWABLE")
+            transport.call_tool("submit_decisions", {"decisions": [{
+                "workItemId": work_item_id, "result": "scanned_no_issue",
+                "findings": [{"dimension": "present", "status": "satisfied", "reason": "Reviewed."}],
+                "reason": "Reference context was not a review queue.",
+            }]})
+            finished = transport.call_tool("finish_plugin_run", {"status": "completed"})
+            self.assertEqual(finished["structuredContent"]["result"]["status"], "completed")
+
+
 def registration():
     return PluginRegistration(
         MANIFEST,
         plugin_factory=lambda runtime=None: FixturePlugin(),
+        decision_provider_factory=lambda runtime=None: FixtureProvider(),
+        capabilities=frozenset({"fixture_read"}),
+        execution_modes=frozenset({"interactive"}),
+        scope_schema={"type": "object"},
+    )
+
+
+def reference_collection_registration():
+    return PluginRegistration(
+        MANIFEST,
+        plugin_factory=lambda runtime=None: ReferenceCollectionFixturePlugin(),
         decision_provider_factory=lambda runtime=None: FixtureProvider(),
         capabilities=frozenset({"fixture_read"}),
         execution_modes=frozenset({"interactive"}),
@@ -195,6 +264,21 @@ def adaptive_registration(*, failure_splitting="allowed"):
     return registration, plugin
 
 
+def _resume_in_child(output_root, run_id, start_event, release_event, results):
+    transport = InteractivePlatformMcpToolTransport(
+        output_root, plugin_registry=PluginRegistry((registration(),)),
+    )
+    start_event.wait(5)
+    try:
+        response = transport.call_tool("resume_plugin_run", {"runId": run_id})
+        results.put(("ok", response["structuredContent"]["result"]["runId"]))
+        release_event.wait(5)
+    except HostError as error:
+        results.put(("error", error.code))
+    finally:
+        transport.close()
+
+
 class InteractiveProtocolTest(unittest.TestCase):
     def test_result_pages_require_a_terminal_run(self):
         transport = InteractivePlatformMcpToolTransport(
@@ -203,6 +287,37 @@ class InteractiveProtocolTest(unittest.TestCase):
         with self.assertRaises(HostError) as unavailable:
             transport.call_tool("get_plugin_result", {"sectionId": "result:missing:0001"})
         self.assertEqual(unavailable.exception.code, "RESULT_NOT_AVAILABLE")
+
+    def test_two_processes_cannot_resume_the_same_run_concurrently(self):
+        registry = PluginRegistry((registration(),))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            original = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
+            started = original.call_tool("start_plugin_run", {
+                "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+            })["structuredContent"]["result"]
+            original.call_tool("advance_plugin_run", {})
+            original.close()
+
+            context = multiprocessing.get_context("fork")
+            start_event = context.Event()
+            release_event = context.Event()
+            results = context.Queue()
+            processes = [context.Process(
+                target=_resume_in_child,
+                args=(str(output), started["runId"], start_event, release_event, results),
+            ) for _ in range(2)]
+            for process in processes:
+                process.start()
+            start_event.set()
+            outcomes = [results.get(timeout=5) for _ in processes]
+            release_event.set()
+            for process in processes:
+                process.join(timeout=5)
+                self.assertEqual(process.exitcode, 0)
+            self.assertEqual(sorted(outcomes), [
+                ("error", "RUN_ALREADY_ACTIVE"), ("ok", started["runId"]),
+            ])
 
     def test_controller_runs_domain_neutral_lifecycle(self):
         registry = PluginRegistry((registration(),))
@@ -875,8 +990,11 @@ class InteractiveProtocolTest(unittest.TestCase):
                 "supersedesCheckpointId": original["operationId"],
             }})["structuredContent"]["result"]
 
+            first_transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
-            synchronized = resumed_transport.call_tool("advance_plugin_run", {})[
+            synchronized = resumed_transport.call_tool("resume_plugin_run", {
+                "runId": corrected["runId"],
+            })[
                 "structuredContent"
             ]["result"]
             self.assertEqual(
@@ -979,11 +1097,14 @@ class InteractiveProtocolTest(unittest.TestCase):
             self.assertEqual(failed.exception.code, "RESULT_PUBLICATION_FAILED")
             ledger_path = output / started["runId"] / f"{started['runId']}.platform-ledger.json"
             self.assertEqual(json.loads(ledger_path.read_text(encoding="utf-8"))["status"], "running")
-            self.assertTrue((output / ".active-plugin-run.json").is_file())
+            self.assertTrue((output / started["runId"] / "platform-resume.json").is_file())
 
             blocked_result_path.rmdir()
+            transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
-            terminal = resumed_transport.call_tool("advance_plugin_run", {})[
+            terminal = resumed_transport.call_tool("resume_plugin_run", {
+                "runId": started["runId"],
+            })[
                 "structuredContent"
             ]["result"]
             self.assertEqual(terminal["status"], "completed")
@@ -1072,7 +1193,7 @@ class InteractiveProtocolTest(unittest.TestCase):
             ledger_path = output / run_id / f"{run_id}.platform-ledger.json"
             self.assertEqual(json.loads(ledger_path.read_text(encoding="utf-8"))["status"], "completed")
             self.assertTrue(pending_path.is_file())
-            self.assertTrue((output / ".active-plugin-run.json").is_file())
+            self.assertTrue((output / run_id / "platform-owner.json").is_file())
 
             result_path.rmdir()
             recovered = transport.call_tool("advance_plugin_run", {})[
@@ -1084,7 +1205,7 @@ class InteractiveProtocolTest(unittest.TestCase):
             self.assertFalse(pending_path.exists())
             self.assertFalse((output / ".active-plugin-run.json").exists())
 
-    def test_orphaned_resume_descriptor_repairs_missing_active_pointer(self):
+    def test_new_transport_does_not_claim_existing_run_and_can_start_an_independent_run(self):
         registry = PluginRegistry((registration(),))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
@@ -1095,19 +1216,28 @@ class InteractiveProtocolTest(unittest.TestCase):
             boundary = first_transport.call_tool("advance_plugin_run", {})[
                 "structuredContent"
             ]["result"]
-            (output / ".active-plugin-run.json").unlink()
 
-            resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
-            synchronized = resumed_transport.call_tool("advance_plugin_run", {})[
+            second_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
+            second_transport.list_tools()
+            self.assertIsNone(second_transport._active_run_id)
+            owner_before = json.loads(
+                (output / started["runId"] / "platform-owner.json").read_text(encoding="utf-8")
+            )
+            second_started = second_transport.call_tool("start_plugin_run", {
+                "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+            })[
                 "structuredContent"
             ]["result"]
-            self.assertEqual(synchronized["runId"], started["runId"])
-            self.assertEqual(synchronized["runRevision"], boundary["runRevision"])
-            self.assertEqual(
-                synchronized["result"]["semanticTask"]["itemIds"],
-                boundary["result"]["semanticTask"]["itemIds"],
+            self.assertNotEqual(second_started["runId"], started["runId"])
+            continued = first_transport.call_tool("advance_plugin_run", {})[
+                "structuredContent"
+            ]["result"]
+            self.assertEqual(continued["runId"], started["runId"])
+            self.assertEqual(continued["runRevision"], boundary["runRevision"])
+            owner_after = json.loads(
+                (output / started["runId"] / "platform-owner.json").read_text(encoding="utf-8")
             )
-            self.assertTrue((output / ".active-plugin-run.json").is_file())
+            self.assertEqual(owner_after, owner_before)
 
     def test_corrupt_resume_descriptor_fails_closed_without_ledger_mutation(self):
         registry = PluginRegistry((registration(),))
@@ -1122,9 +1252,10 @@ class InteractiveProtocolTest(unittest.TestCase):
             before = ledger_path.read_bytes()
             (output / run_id / "platform-resume.json").write_text("{invalid", encoding="utf-8")
 
+            first_transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
             with self.assertRaises(HostError) as failed:
-                resumed_transport.call_tool("advance_plugin_run", {})
+                resumed_transport.call_tool("resume_plugin_run", {"runId": run_id})
             self.assertEqual(failed.exception.code, "RUN_RESUME_FAILED")
             self.assertEqual(ledger_path.read_bytes(), before)
 
@@ -1152,11 +1283,12 @@ class InteractiveProtocolTest(unittest.TestCase):
             self.assertEqual(interrupted.exception.code, "RESULT_PUBLICATION_FAILED")
             transport._controller._write_terminal_pointer = original_writer
             self.assertFalse((output / ".latest-plugin-run.json").exists())
-            self.assertTrue((output / ".active-plugin-run.json").is_file())
+            self.assertTrue((output / run_id / "platform-owner.json").is_file())
             self.assertTrue(descriptor_path.is_file())
 
+            transport.close()
             resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
-            replay = resumed_transport.call_tool("advance_plugin_run", {})[
+            replay = resumed_transport.call_tool("resume_plugin_run", {"runId": run_id})[
                 "structuredContent"
             ]["result"]
             self.assertEqual(replay["status"], "partial")
@@ -1190,7 +1322,7 @@ class InteractiveProtocolTest(unittest.TestCase):
             self.assertEqual(ledger_path.read_bytes(), ledger_before)
             self.assertEqual(result_path.read_bytes(), corrupt_before)
 
-    def test_new_transport_resumes_the_unique_durable_semantic_boundary(self):
+    def test_explicit_resume_restores_the_unique_durable_semantic_boundary(self):
         registry = PluginRegistry((registration(),))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
@@ -1215,10 +1347,13 @@ class InteractiveProtocolTest(unittest.TestCase):
             expected_next_ids = accepted["result"]["semanticTask"]["itemIds"]
 
             resumed_transport = InteractivePlatformMcpToolTransport(output, plugin_registry=registry)
-            with self.assertRaises(HostError) as stale_owner:
-                first_transport.call_tool("advance_plugin_run", {})
-            self.assertEqual(stale_owner.exception.code, "STALE_RUN_OWNER")
-            synchronized = resumed_transport.call_tool("advance_plugin_run", {})[
+            with self.assertRaises(HostError) as active_owner:
+                resumed_transport.call_tool("resume_plugin_run", {"runId": started["runId"]})
+            self.assertEqual(active_owner.exception.code, "RUN_ALREADY_ACTIVE")
+            first_transport.close()
+            synchronized = resumed_transport.call_tool("resume_plugin_run", {
+                "runId": started["runId"],
+            })[
                 "structuredContent"
             ]["result"]
             self.assertEqual(synchronized["runId"], started["runId"])
@@ -1460,12 +1595,13 @@ class InteractiveProtocolTest(unittest.TestCase):
         tools = transport.list_tools()
         self.assertEqual(
             [item["name"] for item in tools],
-            ["start_plugin_run", "advance_plugin_run", "get_plugin_result", "discover_work_items", "inspect_work_items", "expand_investigation",
+            ["start_plugin_run", "resume_plugin_run", "advance_plugin_run", "get_plugin_result", "discover_work_items", "inspect_work_items", "expand_investigation",
              "expand_evidence_collection", "checkpoint_review", "submit_decisions", "recover_work_item",
              "get_plugin_progress", "finish_plugin_run"],
         )
         for item in tools:
-            self.assertNotIn("runId", item["inputSchema"].get("properties", {}))
+            if item["name"] != "resume_plugin_run":
+                self.assertNotIn("runId", item["inputSchema"].get("properties", {}))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/evaluation-corpus.schema.json",
+  "title": "Assayer Evaluation Corpus",
+  "description": "Generic contract for a plugin-owned fixed semantic evaluation corpus.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "corpusId", "pluginId", "policyRef", "cases"],
+  "properties": {
+    "$schema": { "type": "string", "format": "uri-reference" },
+    "schemaVersion": { "const": "1.0.0" },
+    "corpusId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pluginId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "pluginVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "policyRef": { "$ref": "common.schema.json#/$defs/ruleRef" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "category", "description", "documents", "expected"],
+        "properties": {
+          "caseId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "category": {
+            "enum": ["strong", "weak", "contradiction", "ambiguity", "duplicate", "false_positive", "large", "interrupted", "cross_document", "shared_contract", "applicability"]
+          },
+          "description": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+          "documents": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["documentId", "role"],
+              "properties": {
+                "documentId": { "$ref": "common.schema.json#/$defs/entityId" },
+                "role": { "enum": ["anchor", "related", "input"] },
+                "profile": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+                "contentDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+                "content": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+\\.md$"
+                }
+              },
+              "oneOf": [
+                { "required": ["content"], "not": { "required": ["path"] } },
+                { "required": ["path"], "not": { "required": ["content"] } }
+              ]
+            }
+          },
+          "anchorDocumentId": { "$ref": "common.schema.json#/$defs/entityId" },
+          "relationships": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/relationship" }
+          },
+          "recovery": { "$ref": "#/$defs/recovery" },
+          "expected": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidates", "suppressions", "merges", "unverified", "findings", "readiness"],
+            "properties": {
+              "candidates": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
+              "suppressions": { "type": "array", "items": { "$ref": "#/$defs/disposition" } },
+              "merges": { "type": "array", "items": { "$ref": "#/$defs/merge" } },
+              "unverified": { "type": "array", "items": { "$ref": "#/$defs/disposition" } },
+              "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+              "relationshipReviews": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/relationshipReview" }
+              },
+              "contextAssertions": { "$ref": "#/$defs/contextAssertions" },
+              "readiness": { "enum": ["READY", "REWORK", "ESCALATE", "UNVERIFIED"] },
+              "notes": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "category": { "const": "cross_document" } } },
+            "then": { "required": ["anchorDocumentId", "relationships"] }
+          },
+          {
+            "if": { "properties": { "category": { "const": "interrupted" } } },
+            "then": { "required": ["recovery"] }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "ruleId"],
+            "properties": {
+              "candidateId": { "$ref": "common.schema.json#/$defs/entityId" },
+              "ruleId": { "$ref": "common.schema.json#/$defs/ruleId" },
+        "semanticType": { "enum": ["missing", "ambiguity", "conflict", "contradiction", "duplicate", "drift", "unverified_dependency", "noise"] },
+        "documentIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } }
+      }
+    },
+    "disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "reason"],
+      "properties": {
+        "candidateId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "merge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateIds", "findingId", "reason"],
+      "properties": {
+        "candidateIds": { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+        "findingId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findingId", "semanticType", "severity", "candidateIds", "reason"],
+      "properties": {
+        "findingId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "semanticType": { "enum": ["missing", "ambiguity", "conflict", "contradiction", "duplicate", "drift", "unverified_dependency", "noise"] },
+        "severity": {
+          "oneOf": [
+            { "enum": ["P1", "P2", "P3"] },
+            { "type": "null" }
+          ]
+        },
+        "candidateIds": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+        "reason": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "documentIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/entityId" } },
+        "impact": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "resolutionOwner": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relationshipId", "fromDocumentId", "toDocumentId", "kind", "evidence", "resolutionOwner"],
+      "properties": {
+        "relationshipId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "fromDocumentId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "toDocumentId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "kind": { "enum": ["authoritative_for", "implements", "depends_on", "supersedes", "compares_with"] },
+        "evidence": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "resolutionOwner": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+      }
+    },
+    "relationshipReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relationshipId", "outcome", "findingIds"],
+      "properties": {
+        "relationshipId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "outcome": { "enum": ["COMPATIBLE", "FINDING", "UNVERIFIED"] },
+        "findingIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        }
+      }
+    },
+    "contextAssertions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["documentType", "requiredIdentifiers", "requiredStatementKinds", "checklistResults"],
+      "properties": {
+        "documentType": {
+          "enum": ["feature_spec", "shared_contract", "data_model", "interface_contract", "rfc_prd", "other"]
+        },
+        "requiredIdentifiers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/entityId" }
+        },
+        "requiredStatementKinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["no_migration", "not_applicable", "delegation", "authority"] }
+        },
+        "checklistResults": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["checkId", "applicability", "status"],
+            "properties": {
+              "checkId": { "pattern": "^CHK-(0[1-9]|1[0-8])$" },
+              "applicability": { "enum": ["APPLICABLE", "NOT_APPLICABLE", "CONDITIONAL", "UNVERIFIED"] },
+              "status": { "enum": ["PASS", "REWORK", "ESCALATE", "UNVERIFIED"] }
+            }
+          }
+        }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interruptionId", "phase", "resumeAction", "expectedOutcome"],
+      "properties": {
+        "interruptionId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "phase": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "resumeAction": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "expectedOutcome": { "enum": ["resumed", "replayed_idempotently", "failed_safely"] }
+      }
+    }
+  }
+}

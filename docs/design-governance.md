@@ -2,8 +2,8 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.1.0-draft |
-| Date | 2026-08-31 |
+| Document version | 1.2.0-draft |
+| Date | 2026-09-04 |
 | Status | Design converging |
 | Owner | Product Owner / Assayer Maintainers |
 | Baseline | Current design on `main` |
@@ -59,7 +59,7 @@ When downstream material discovers an upstream contradiction, stop the affected 
 | Term | Definition |
 |---|---|
 | Scan | One audit task from start to terminal state, with unique `scanId`. |
-| Run | One actual Scan execution; first version has one Run because resume is unsupported. |
+| Run | One actual plugin execution with isolated durable state; each Run has one live writer and explicit resume after interruption. |
 | `runRevision` | Global, monotonically increasing concurrency version maintained by Host. |
 | PageState | Replayable snapshot of a page, route, overlay, tab, or detail state. |
 | Entrypoint | Navigable, expandable, or otherwise safe entry found in PageState; its status enters Coverage Proof. |
@@ -121,3 +121,54 @@ Design becomes `implementation-ready` only when:
 5. Credential, write-request, sanitization, and invalidation strategies are explicit;
 6. Example ledgers cover pass, issue, partial, and failed;
 7. No safety or formal-conclusion-integrity blocker remains open.
+
+## 8. Design-First Gate for Large Changes
+
+A large change must have a dedicated design document before production code is
+modified. Discussion notes, an implementation checklist, or tests written after
+the code do not satisfy this gate.
+
+A change is large when any of the following is true:
+
+- it changes a public protocol, schema, plugin/provider contract, canonical
+  result, or user-visible lifecycle;
+- it changes persistence, transaction boundaries, ownership, leases,
+  idempotency, recovery, concurrency, or resource scheduling;
+- it spans more than one logical platform layer or requires a data/artifact
+  migration;
+- it changes a safety, evidence, coverage, privacy, or conclusion-validity
+  invariant;
+- it creates a new extension mechanism, runtime capability, or independently
+  deployed component;
+- failure could corrupt or strand a Run, publish an invalid conclusion, expose
+  protected data, or prevent clean install/upgrade/uninstall;
+- it materially changes the end-to-end user journey or requires staged rollout
+  and backward compatibility.
+
+The design document must include, as applicable:
+
+1. problem statement and evidence from the current implementation;
+2. decision summary, goals, non-goals, and ownership boundaries;
+3. normative invariants and trust boundaries;
+4. target architecture and lifecycle/state transitions;
+5. protocol, persistence, identity, and transaction changes;
+6. failure, race, recovery, compatibility, and migration behavior;
+7. security, privacy, observability, and performance requirements;
+8. implementation slices with an independently verifiable exit gate for each;
+9. deterministic, integration, fault-injection, and real user-journey acceptance;
+10. open decisions, rejected alternatives, and explicit deferrals.
+
+The document starts as `design proposal; implementation not started`. It becomes
+`implementation-ready` only after its open safety, conclusion-integrity,
+compatibility, persistence, and migration decisions are resolved and its
+acceptance matrix is reviewable. Coding may then proceed one documented slice at
+a time. Material discoveries during implementation must update the design before
+the affected behavior is merged.
+
+An urgent containment fix may precede the full design only when it reduces an
+active safety, corruption, or availability risk without expanding product
+behavior. It must be explicitly labeled temporary, preserve recoverability, and
+create the design follow-up before broader implementation continues.
+
+The first application of this gate is
+[Multi-Window Run Isolation and Host Lifecycle](multi-window-run-isolation-and-host-lifecycle-design.md).

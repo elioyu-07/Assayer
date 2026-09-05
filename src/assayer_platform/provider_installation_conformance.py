@@ -290,6 +290,9 @@ def inspect_provider_installation(
         environment = os.environ.copy()
         environment.pop("ASSAYER_RESOURCE_ROOT", None)
         environment.pop("PYTHONPATH", None)
+        # Keep the provider target isolated while making the Assayer platform
+        # worker importable from the distribution executing this gate.
+        environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         environment.update({
             "PYTHONNOUSERSITE": "1",
             "UV_CACHE_DIR": str(temporary / "uv-cache"),

@@ -15,6 +15,7 @@ from .contract import (
 )
 from .decision import validate_decision_shape
 from .ledger import PlatformLedgerStore
+from .state_machine import validate_terminal_transition, validate_workflow, validate_workflow_transition
 
 
 def _now() -> str:
@@ -121,6 +122,7 @@ class InteractivePlatformRun:
                 "failures": 0,
             },
         }
+        validate_workflow(self.workflow)
         self._emit("platform.run.started", "start", "started")
         self._save()
 
@@ -249,6 +251,7 @@ class InteractivePlatformRun:
             "requiredNextStep": "discover_work_items",
             "remaining": {"workItemsToInspect": 0, "workItemsToDecide": 0, "reviewItems": 0, "failures": 0},
         }
+        validate_workflow(restored.workflow)
         return restored
 
     def record_workflow(self, workflow: Mapping[str, object]) -> None:
@@ -257,6 +260,7 @@ class InteractivePlatformRun:
         normalized = dict(workflow)
         if normalized == self.workflow:
             return
+        validate_workflow_transition(self.workflow, normalized)
         previous_state = self.workflow.get("state")
         previous_phase = self.workflow.get("phase")
         self.workflow = normalized
@@ -356,6 +360,21 @@ class InteractivePlatformRun:
                 "failures": failures,
                 "effectiveBatchSize": effective_batch_size,
             },
+        )
+        self._save()
+
+    def record_host_rejection(
+        self, error_code: str, *, work_item_id: str | None = None,
+        operation_id: str | None = None, message: str | None = None,
+    ) -> None:
+        """Record a rejected request without changing semantic conclusions."""
+        self._require_running()
+        if not isinstance(error_code, str) or not error_code:
+            raise PlatformContractError("INVALID_OBSERVABILITY", "A Host rejection requires an error code")
+        self._emit(
+            "host.request.rejected", "finish", "rejected",
+            operation_id=operation_id, work_item_id=work_item_id,
+            details={"errorCode": error_code, **({"message": message} if message else {})},
         )
         self._save()
 
@@ -616,6 +635,32 @@ class InteractivePlatformRun:
 
     def finish(self, status: str, failures: Sequence[WorkFailure] = ()) -> PlatformRunResult:
         self.validate_finish(status, failures)
+        current_state = str(self.workflow.get("state", "running"))
+        # Direct diagnostic closeout may arrive before the derived workflow
+        # response was persisted.  The data gates above prove readiness; make
+        # that implicit boundary explicit before publishing the terminal state.
+        if status == "completed" and current_state != "ready_to_finish":
+            ready_workflow = {
+                "state": "ready_to_finish", "phase": "closeout", "canFinish": True,
+                "requiredNextStep": "finish_plugin_run",
+                "remaining": {
+                    "workItemsToInspect": 0, "workItemsToDecide": 0,
+                    "reviewItems": 0, "failures": len(self.failures),
+                },
+            }
+            validate_workflow_transition(self.workflow, ready_workflow)
+            previous_state = self.workflow.get("state")
+            previous_phase = self.workflow.get("phase")
+            self.workflow = ready_workflow
+            self._emit(
+                "platform.workflow.transition", "instant", "ready_to_finish",
+                details={
+                    "previousState": previous_state, "previousPhase": previous_phase,
+                    "phase": "closeout", "canFinish": True,
+                    "requiredNextStep": "finish_plugin_run",
+                },
+            )
+        validate_terminal_transition(str(self.workflow.get("state", "running")), status)
         previous_failures = list(self.failures)
         previous_status = self.status
         previous_workflow = self.workflow

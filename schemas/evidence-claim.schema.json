@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/evidence-claim.schema.json",
+  "title": "AssayerEvidenceClaim",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["claimId", "kind", "evidenceRefs", "conclusion"],
+  "properties": {
+    "claimId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "sourceClaimId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "workItemId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "kind": { "enum": ["direct", "absence", "derived", "external_unverified"] },
+    "evidenceRefs": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/entityId" }
+    },
+    "scope": { "$ref": "#/$defs/scope" },
+    "searchedFor": {
+      "type": "array", "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    },
+    "observed": {
+      "type": "array", "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    },
+    "derivation": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+    },
+    "unavailableReason": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+    "conclusion": { "$ref": "common.schema.json#/$defs/nonEmptyString" }
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceRef", "startLine", "endLine"],
+      "properties": {
+        "sourceRef": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "documentPath": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
+        "sourceDigest": { "$ref": "common.schema.json#/$defs/sha256" },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "absence" } } },
+      "then": {
+        "required": ["scope", "searchedFor"],
+        "properties": { "searchedFor": { "minItems": 1 } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "derived" } } },
+      "then": { "required": ["derivation"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "external_unverified" } } },
+      "then": { "required": ["unavailableReason"] }
+    }
+  ]
+}

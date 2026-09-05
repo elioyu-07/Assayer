@@ -295,6 +295,8 @@ scripts/                Test, release, resilience, and language-governance tooli
 
 - [Project plan](docs/project-plan.md) — authoritative priorities, stage gates,
   progress, and deferrals
+- [Platform foundation and user-journey plan](docs/platform-foundation-and-user-journey-plan.md)
+  — the minimum shared capabilities required before expanding the plugin ecosystem
 - [User journey and Definition of Done](docs/user-journey-and-definition-of-done.md)
   — the release acceptance boundary
 - [Platform Constitution v1](docs/platform-constitution-v1.md) — frozen platform

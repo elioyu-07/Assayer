@@ -19,6 +19,10 @@ from ...contract import (
     WorkItem,
 )
 from ...registry import load_plugin_manifest
+from ...evidence_graph import (
+    build_candidate_evidence_graph, render_candidate_evidence_graph,
+    validate_candidate_evidence_graph_projection,
+)
 
 
 _MANIFEST = Path(__file__).with_name("manifest.json")
@@ -46,6 +50,7 @@ class ConfigQualityPlugin:
     """Discover and inspect JSON files without exposing configuration values."""
 
     manifest: PluginManifest = load_plugin_manifest(_MANIFEST)
+    evidence_graph_enabled = True
 
     def discover(self, scope: Any, context: PlatformContext) -> Sequence[WorkItem]:
         del context
@@ -97,13 +102,6 @@ class ConfigQualityPlugin:
                 document = None
                 parse_status = "violated"
                 parse_observation = f"The file is not valid JSON ({type(exc).__name__})."
-            evidence = EvidenceRecord(
-                evidence_id, item.work_item_id, check.check_id, check.version, "structured",
-                item.identity,
-                {"sourceDigest": current_digest, "parseable": document is not None,
-                 "topLevelKeys": sorted(document) if isinstance(document, dict) else [],
-                 "valueTypes": {key: _type_name(value) for key, value in document.items()} if isinstance(document, dict) else {}},
-            )
             required = tuple(item.metadata.get("requiredKeys", ()))
             expected = dict(item.metadata.get("expectedTypes", {}))
             keys_ok = document is not None and (not required or isinstance(document, dict) and all(key in document for key in required))
@@ -112,6 +110,31 @@ class ConfigQualityPlugin:
                 DimensionObservation("parseable", (parse_observation,), (evidence_id,), parse_status),
                 DimensionObservation("required_keys", ("All required keys are present." if keys_ok else "One or more required keys are missing.",), (evidence_id,), "satisfied" if keys_ok else ("unresolved" if document is None else "violated")),
                 DimensionObservation("value_types", ("All configured value types match." if types_ok else "One or more configured value types do not match.",), (evidence_id,), "satisfied" if types_ok else ("unresolved" if document is None else "violated")),
+            )
+            evidence_payload = {"sourceDigest": current_digest, "parseable": document is not None,
+                 "topLevelKeys": sorted(document) if isinstance(document, dict) else [],
+                 "valueTypes": {key: _type_name(value) for key, value in document.items()} if isinstance(document, dict) else {}}
+            graph_candidates = [
+                {
+                    "candidate_id": f"{item.work_item_id}:{dimension.name}",
+                    "rule_id": check.check_id,
+                    "object_id": dimension.name,
+                    "message": dimension.observations[0],
+                    "evidence": evidence_id,
+                    "disposition": "needs_review" if dimension.candidate_status == "unresolved" else "confirmed",
+                }
+                for dimension in dimensions
+            ]
+            graph = build_candidate_evidence_graph(
+                graph_candidates, work_item_id=item.work_item_id,
+                check_id=check.check_id, check_version=check.version,
+            )
+            evidence_payload["candidateGraph"] = render_candidate_evidence_graph(graph)
+            validate_candidate_evidence_graph_projection(evidence_payload["candidateGraph"])
+            evidence = EvidenceRecord(
+                evidence_id, item.work_item_id, check.check_id, check.version, "structured",
+                item.identity,
+                evidence_payload,
             )
             packets.append(InvestigationPacket(item, check.check_id, check.version, dimensions, (evidence,), "not_required"))
         return packets

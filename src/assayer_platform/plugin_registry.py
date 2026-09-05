@@ -32,6 +32,7 @@ class PluginRegistration:
     decision_provider_factory: Callable[..., Any] | None = None
     committer_factory: Callable[..., Any] | None = None
     capabilities: frozenset[str] = frozenset()
+    result_features: frozenset[str] = frozenset()
     execution_modes: frozenset[str] = frozenset({"batch"})
     scope_schema: Mapping[str, Any] = field(default_factory=dict)
 
@@ -43,6 +44,12 @@ class PluginRegistration:
                 "INVALID_PLUGIN_REGISTRATION", "Plugin execution modes are invalid",
             )
         object.__setattr__(self, "execution_modes", modes)
+        result_features = frozenset(self.result_features)
+        if not result_features.issubset({"evidence_graph"}):
+            raise PlatformContractError(
+                "INVALID_PLUGIN_REGISTRATION", "Plugin result features are invalid",
+            )
+        object.__setattr__(self, "result_features", result_features)
         if not isinstance(self.scope_schema, Mapping):
             raise PlatformContractError(
                 "INVALID_PLUGIN_REGISTRATION", "Plugin scope schema must be an object",

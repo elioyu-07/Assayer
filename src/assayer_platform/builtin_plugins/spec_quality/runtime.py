@@ -19,6 +19,12 @@ from ...contract import (
     WorkItem,
 )
 from ...registry import load_plugin_manifest
+from ...navigation import MarkdownNavigationAdapter
+from ...review_protocol import validate_review_submission
+from ...evidence_graph import (
+    build_candidate_evidence_graph, render_candidate_evidence_graph,
+    validate_candidate_evidence_graph_projection,
+)
 
 
 _ROOT = Path(__file__).parent
@@ -28,6 +34,9 @@ _CHECKLIST = json.loads((_ROOT / "checklist.json").read_text(encoding="utf-8"))
 _POLICY_ID = str(_POLICY["policy_id"])
 _POLICY_VERSION = str(_POLICY["policy_version"])
 _AUTHORITY_VERSION = str(_POLICY["authority"]["version"])
+_AVAILABLE_PROFILES = tuple(_POLICY["profiles"])
+_STRICT_STRUCTURE_PROFILE = "strict-12-chapter"
+_MARKDOWN_NAVIGATION = MarkdownNavigationAdapter()
 _REQUIRED_CHAPTERS = (
     "模块定义", "状态模型", "功能需求清单", "关键实体", "数据字段定义",
     "非功能性需求选择", "成功标准", "参考资料与合规依据", "关键决策记录",
@@ -53,13 +62,254 @@ _VAGUE = re.compile(
     re.I,
 )
 _PLACEHOLDER = re.compile(r"(?i)\b(?:TODO|TBD|YYYY-MM-DD)\b|待填写|待补充|示例内容")
-_FR = re.compile(r"\bFR[-_]\d{3}[A-Za-z]?\b", re.I)
-_AC = re.compile(r"\bAC[-_]?[A-Z0-9-]+\b", re.I)
-_CASE = re.compile(r"\bCASE[-_]?[A-Z0-9-]+\b", re.I)
+_FR = re.compile(r"\bFR[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
+_AC = re.compile(r"\bAC[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
+_CASE = re.compile(r"\bCASE[-_][A-Z0-9][A-Z0-9-]*\b", re.I)
+_SOURCE_CHUNK_LIMIT = 2400
+_DIMENSION_SIGNALS: dict[str, tuple[tuple[str, re.Pattern[str]], ...]] = {
+    "CHK-02": (("goal-and-context", re.compile(r"goal|objective|overview|actor|trigger|input|output|workflow|目标|参与者|触发|输入|输出", re.I)),),
+    "CHK-03": (("terminology", re.compile(r"terms?|glossary|abbreviation|definition|alias|术语|缩写|定义|别名", re.I)),),
+    "CHK-04": (("scope-and-boundary", re.compile(r"scope|boundary|included|excluded|out of scope|responsibilit|范围|边界|包含|不包含|责任", re.I)),),
+    "CHK-05": (("consistency-reference", re.compile(r"consisten|contradict|conflict|duplicate|drift|related document|一致|矛盾|冲突|重复|漂移|关联文档", re.I)),),
+    "CHK-06": (("baseline-and-revision", re.compile(r"version|revision|change log|baseline|owner|status|版本|修订|变更记录|基线|负责人|状态", re.I)),),
+    "CHK-07": (("decidable-language", re.compile(r"within|at least|at most|exactly|condition|threshold|不得|必须|至少|至多|条件|阈值", re.I)),),
+    "CHK-08": (("risk-scenario", re.compile(r"boundary|invalid|error|failure|timeout|retry|permission|concurren|idempoten|recover|partial|边界|非法|异常|失败|超时|重试|权限|并发|幂等|恢复|部分成功", re.I)),),
+    "CHK-09": (("data-contract", re.compile(r"field|data|entity|type|null|default|precision|round|unit|formula|字段|数据|实体|类型|默认|精度|舍入|单位|公式", re.I)),),
+    "CHK-10": (("state-and-lifecycle", re.compile(r"state|status|transition|lifecycle|invariant|terminal|状态|流转|生命周期|不变量|终态", re.I)),),
+    "CHK-11": (("compatibility", re.compile(r"compatib|backward|existing system|legacy|migration|switch|rollback|兼容|现有系统|存量|迁移|切换|回滚", re.I)),),
+    "CHK-12": (("acceptance", re.compile(r"acceptance|expected result|given.+when.+then|\bAC[-_]|\bCASE[-_]|验收|预期结果", re.I | re.S)),),
+    "CHK-13": (("non-functional", re.compile(r"non-functional|\bNFR[-_]|performance|capacity|availability|reliability|resilien|recovery|observability|非功能|性能|容量|可用性|可靠性|韧性|恢复|可观测", re.I)),),
+    "CHK-14": (("authorization", re.compile(r"permission|authorization|role|deny|forbidden|tenant|data scope|权限|授权|角色|拒绝|租户|数据范围|数据隔离", re.I)),),
+    "CHK-15": (("traceability", re.compile(r"trace|matrix|source|objective|\bFR[-_]|\bAC[-_]|\bCASE[-_]|\bSC[-_]|追溯|矩阵|来源|目标", re.I)),),
+    "CHK-16": (("decision", re.compile(r"decision|rationale|trade-off|approved|rejected|superseded|决策|理由|取舍|批准|拒绝|取代", re.I)),),
+    "CHK-17": (("dependency-or-assumption", re.compile(r"dependenc|assumption|prerequisite|fallback|degrad|upstream|downstream|依赖|假设|前置|降级|上游|下游", re.I)),),
+    "CHK-18": (("open-governance", re.compile(r"open question|blocker|exception|exemption|waiver|unresolved|未决|阻塞|例外|豁免|待解决", re.I)),),
+}
+
+
+def _actionable_result_delivery(
+    decisions: Sequence[Mapping[str, Any]],
+    checklist_review: Sequence[Mapping[str, Any]],
+    packet: InvestigationPacket,
+) -> dict[str, Any]:
+    """Project confirmed domain root causes into the shared remediation shape.
+
+    The current Spec review model assigns one primary dimension to a confirmed
+    root cause.  Until the Agent contract supplies an explicit multi-dimension
+    mapping, uncovered REWORK dimensions keep this envelope honestly partial.
+    """
+    checklist_status = {
+        str(item.get("check_id")): str(item.get("status"))
+        for item in checklist_review
+    }
+    evidence_by_dimension = {
+        item.name: list(item.evidence_refs) for item in packet.dimensions
+    }
+    remediations: list[dict[str, Any]] = []
+    evidence_claims: list[dict[str, Any]] = []
+    evidence_id = packet.evidence[0].evidence_id if packet.evidence else None
+    evidence_payload = packet.evidence[0].payload if packet.evidence else {}
+    source_chunks = evidence_payload.get("sourceChunks", ()) if isinstance(evidence_payload, Mapping) else ()
+    end_line = max(
+        [int(item.get("end_line", 1)) for item in source_chunks if isinstance(item, Mapping)] or [1],
+    )
+    covered: set[str] = set()
+    for finding in decisions:
+        if finding.get("status") != "CONFIRMED":
+            continue
+        dimension = str(finding.get("dimension") or "")
+        if checklist_status.get(dimension) not in {"REWORK", "ESCALATE"}:
+            # evaluate_review rejects this mismatch before a Decision can be
+            # admitted; retaining the guard keeps this projection pure.
+            continue
+        affected = finding.get("affected_elements")
+        if not isinstance(affected, (tuple, list)) or not affected:
+            affected = [finding.get("object_id")]
+        affected = [str(item).strip() for item in affected if str(item or "").strip()]
+        owner = finding.get("resolution_owner")
+        owner_value = (
+            {"status": "assigned", "identity": str(owner).strip()}
+            if isinstance(owner, str) and owner.strip()
+            else {
+                "status": "unassigned",
+                "reason": "The reviewed evidence does not identify an accountable resolution owner.",
+            }
+        )
+        recommendation = str(finding.get("recommendation") or "").strip()
+        next_action = str(finding.get("next_action") or "").strip()
+        if not next_action:
+            next_action = f"Assign an accountable owner and implement this recommendation: {recommendation}"
+        gap = str(finding.get("gap") or "").strip()
+        finding_id = str(finding.get("finding_id") or "")
+        absence = bool(re.search(
+            r"\b(?:no|not detected|missing|without|absent|lacks?)\b|不存在|缺失|未检测到|没有|缺少|无",
+            gap,
+            re.I,
+        ))
+        claim_id = f"claim:{finding_id}"
+        claim: dict[str, Any] = {
+            "claimId": claim_id,
+            "kind": "absence" if absence else "direct",
+            "evidenceRefs": [evidence_id] if evidence_id else [],
+            "scope": {
+                "sourceRef": evidence_id or str(packet.work_item.identity),
+                "documentPath": str(packet.metadata.get("path") or packet.work_item.identity),
+                "startLine": max(1, int(finding.get("line") or 1)),
+                "endLine": end_line,
+            },
+            "observed": [str(finding.get("evidence") or gap)],
+            "conclusion": gap,
+        }
+        if absence:
+            claim["searchedFor"] = [
+                "The requirement or record described by this finding",
+                "A positive, directly observable specification statement in the declared scope",
+            ]
+        evidence_claims.append(claim)
+        remediations.append({
+            "remediationId": finding_id,
+            "title": gap,
+            "severity": str(finding.get("severity") or ""),
+            "dimensions": [dimension],
+            "affectedElements": affected,
+            "evidenceRefs": evidence_by_dimension.get(dimension, []),
+            "problem": gap,
+            "impact": str(finding.get("impact") or "").strip(),
+            "recommendation": recommendation,
+            "nextAction": next_action,
+            "closureEvidence": str(finding.get("closure_evidence") or "").strip(),
+            "owner": owner_value,
+            "claimRefs": [claim_id],
+        })
+        covered.add(dimension)
+    actionable_dimensions = {
+        check_id for check_id, status in checklist_status.items()
+        if status in {"REWORK", "ESCALATE"}
+    }
+    return {
+        "schemaVersion": "1.0.0",
+        "status": "complete" if covered == actionable_dimensions else "partial",
+        "remediations": remediations,
+        "evidenceClaims": evidence_claims,
+    }
 
 
 def _digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _scope_error(message: str) -> None:
+    raise PlatformContractError("INVALID_SPEC_SCOPE", message)
+
+
+def _document_state_digest(documents: Sequence[Mapping[str, Any]]) -> str:
+    projection = sorted((
+        {
+            "document_id": str(document["document_id"]),
+            "role": str(document["role"]),
+            "path": str(document["path"]),
+            "source_digest": str(document["source_digest"]),
+        }
+        for document in documents
+    ), key=lambda document: document["document_id"])
+    return _digest(json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8"))
+
+
+def _load_cross_document_scope(scope: Mapping[str, Any]) -> dict[str, Any]:
+    """Resolve and validate one explicitly bounded anchor comparison scope."""
+    raw_anchor = scope.get("anchor")
+    raw_related = scope.get("relatedDocuments")
+    raw_relationships = scope.get("relationships")
+    if not isinstance(raw_anchor, Mapping):
+        _scope_error("Cross-document scope requires one anchor document")
+    if not isinstance(raw_related, (tuple, list)) or not raw_related:
+        _scope_error("Cross-document scope requires at least one related document")
+    if not isinstance(raw_relationships, (tuple, list)) or not raw_relationships:
+        _scope_error("Cross-document scope requires at least one relationship")
+
+    document_configs = [(raw_anchor, "anchor"), *((item, "related") for item in raw_related)]
+    documents: list[dict[str, Any]] = []
+    document_ids: set[str] = set()
+    document_paths: set[str] = set()
+    for index, (raw_document, role) in enumerate(document_configs):
+        if not isinstance(raw_document, Mapping):
+            _scope_error(f"Cross-document {role} entry {index} must be an object")
+        document_id = raw_document.get("documentId")
+        raw_path = raw_document.get("path")
+        if not isinstance(document_id, str) or not document_id.strip():
+            _scope_error(f"Cross-document {role} entry {index} requires documentId")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            _scope_error(f"Cross-document {role} entry {index} requires path")
+        if document_id in document_ids:
+            _scope_error(f"Duplicate cross-document documentId: {document_id}")
+        path = Path(raw_path).expanduser().resolve()
+        normalized_path = str(path)
+        if normalized_path in document_paths:
+            _scope_error(f"A cross-document file cannot have multiple identities: {normalized_path}")
+        raw = path.read_bytes()
+        document_ids.add(document_id)
+        document_paths.add(normalized_path)
+        documents.append({
+            "document_id": document_id,
+            "role": role,
+            "path": normalized_path,
+            "source_digest": _digest(raw),
+            "profile": raw_document.get("profile") if role == "anchor" else None,
+            "selection_reason": raw_document.get("selectionReason"),
+        })
+
+    anchor_id = str(documents[0]["document_id"])
+    related_ids = {str(document["document_id"]) for document in documents[1:]}
+    relationships: list[dict[str, Any]] = []
+    relationship_ids: set[str] = set()
+    related_with_relationship: set[str] = set()
+    for index, raw_relationship in enumerate(raw_relationships):
+        if not isinstance(raw_relationship, Mapping):
+            _scope_error(f"Cross-document relationship {index} must be an object")
+        relationship_id = raw_relationship.get("relationshipId")
+        source_id = raw_relationship.get("fromDocumentId")
+        target_id = raw_relationship.get("toDocumentId")
+        kind = raw_relationship.get("kind")
+        evidence = raw_relationship.get("evidence")
+        owner = raw_relationship.get("resolutionOwner")
+        if not isinstance(relationship_id, str) or not relationship_id.strip():
+            _scope_error(f"Cross-document relationship {index} requires relationshipId")
+        if relationship_id in relationship_ids:
+            _scope_error(f"Duplicate cross-document relationshipId: {relationship_id}")
+        if source_id != anchor_id:
+            _scope_error(f"Relationship {relationship_id} must originate from the anchor document")
+        if target_id not in related_ids:
+            _scope_error(f"Relationship {relationship_id} references an unknown related document")
+        if kind not in {"authoritative_for", "implements", "depends_on", "supersedes", "compares_with"}:
+            _scope_error(f"Relationship {relationship_id} has an unsupported kind")
+        if not isinstance(evidence, str) or not evidence.strip():
+            _scope_error(f"Relationship {relationship_id} requires relationship evidence")
+        if not isinstance(owner, str) or not owner.strip():
+            _scope_error(f"Relationship {relationship_id} requires a resolution owner")
+        relationship_ids.add(relationship_id)
+        related_with_relationship.add(str(target_id))
+        relationships.append({
+            "relationship_id": relationship_id,
+            "from_document_id": source_id,
+            "to_document_id": target_id,
+            "kind": kind,
+            "evidence": evidence,
+            "resolution_owner": owner,
+            "selection_reason": raw_relationship.get("selectionReason"),
+        })
+    uncovered = sorted(related_ids - related_with_relationship)
+    if uncovered:
+        _scope_error(
+            "Every related document requires an anchor relationship: " + ", ".join(uncovered),
+        )
+    return {
+        "kind": "cross-spec",
+        "anchor_document_id": anchor_id,
+        "documents": documents,
+        "relationships": relationships,
+    }
 
 
 def _key(title: str) -> str:
@@ -125,6 +375,355 @@ def _meaningful(value: str) -> bool:
     return bool(value) and value not in {"-", "N/A", "不适用", "无", "待定", "待澄清"} and not _PLACEHOLDER.search(value)
 
 
+def _source_chunks(
+    text: str, path: Path, source_digest: str, *,
+    document_id: str | None = None, document_role: str | None = None,
+) -> list[dict[str, Any]]:
+    """Split Markdown into bounded, stable, source-located reference chunks."""
+    lines = text.splitlines()
+    if not lines:
+        return []
+    headings: list[tuple[int, int, str]] = []
+    for line_no, line in enumerate(lines, 1):
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", line)
+        if match:
+            headings.append((line_no, len(match.group(1)), match.group(2).strip()))
+    boundaries = sorted({1, *(line_no for line_no, _, _ in headings), len(lines) + 1})
+    heading_by_line = {line_no: (level, title) for line_no, level, title in headings}
+    heading_path: list[str] = []
+    chunks: list[dict[str, Any]] = []
+    for block_index, (start, end) in enumerate(zip(boundaries, boundaries[1:]), 1):
+        markdown_level = 0
+        if start in heading_by_line:
+            markdown_level, title = heading_by_line[start]
+            heading_path = heading_path[: markdown_level - 1]
+            heading_path.append(title)
+        block_lines = lines[start - 1:end - 1]
+        pending: list[tuple[int, str]] = []
+        pending_chars = 0
+
+        def flush() -> None:
+            nonlocal pending, pending_chars
+            if not pending:
+                return
+            excerpt = "\n".join(value for _, value in pending).strip()
+            if excerpt:
+                first_line, last_line = pending[0][0], pending[-1][0]
+                if document_id is None:
+                    # Preserve the historical single-document identity so
+                    # existing resumable Runs keep their checkpoint refs.
+                    chunk_id = f"source:{source_digest[:12]}:{block_index}:{len(chunks) + 1}"
+                else:
+                    document_token = re.sub(r"[^A-Za-z0-9_-]+", "-", str(document_id))[:24]
+                    chunk_id = f"source:{document_token}:{source_digest[:12]}:{block_index}:{len(chunks) + 1}"
+                chunks.append({
+                    "source_chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "document_role": document_role,
+                    "document_path": str(path),
+                    "source_digest": source_digest,
+                    "heading_path": list(heading_path),
+                    "primary_heading": heading_path[-1] if heading_path else "Document preamble",
+                    "heading_level": markdown_level,
+                    "start_line": first_line,
+                    "end_line": last_line,
+                    "excerpt": excerpt,
+                })
+            pending, pending_chars = [], 0
+
+        for offset, line in enumerate(block_lines):
+            line_no = start + offset
+            parts = [line[index:index + _SOURCE_CHUNK_LIMIT] for index in range(0, len(line), _SOURCE_CHUNK_LIMIT)] or [""]
+            for part in parts:
+                added = len(part) + (1 if pending else 0)
+                if pending and pending_chars + added > _SOURCE_CHUNK_LIMIT:
+                    flush()
+                pending.append((line_no, part))
+                pending_chars += len(part) + (1 if len(pending) > 1 else 0)
+                if pending_chars >= _SOURCE_CHUNK_LIMIT:
+                    flush()
+        flush()
+    return chunks
+
+
+def _cross_document_evidence(
+    document_scope: Mapping[str, Any], chunks: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    chunks_by_document: dict[str, list[Mapping[str, Any]]] = {}
+    for chunk in chunks:
+        chunks_by_document.setdefault(str(chunk.get("document_id")), []).append(chunk)
+    evidence: list[dict[str, Any]] = []
+    for relationship in document_scope.get("relationships", ()):
+        relationship_id = str(relationship["relationship_id"])
+        for role_key in ("from_document_id", "to_document_id"):
+            document_id = str(relationship[role_key])
+            for chunk in chunks_by_document.get(document_id, ()):
+                source_chunk_id = str(chunk["source_chunk_id"])
+                evidence.append({
+                    "evidence_item_id": f"cross-source:{relationship_id}:{source_chunk_id}",
+                    "relationship_id": relationship_id,
+                    "relationship_kind": relationship["kind"],
+                    "relationship_evidence": relationship["evidence"],
+                    "resolution_owner": relationship["resolution_owner"],
+                    "selection_reason": relationship.get("selection_reason"),
+                    "document_id": document_id,
+                    "document_role": chunk.get("document_role"),
+                    "document_path": chunk["document_path"],
+                    "source_digest": chunk["source_digest"],
+                    "source_chunk_id": source_chunk_id,
+                    "start_line": chunk["start_line"],
+                    "end_line": chunk["end_line"],
+                    "excerpt": chunk["excerpt"],
+                })
+    return evidence
+
+
+def _dimension_evidence(chunks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Build heuristic CHK-to-source mappings without claiming semantic proof."""
+    mappings: list[dict[str, Any]] = []
+    for item_def in _CHECKLIST:
+        check_id = str(item_def["id"])
+        signals = _DIMENSION_SIGNALS.get(check_id, ())
+        matched = 0
+        for chunk in chunks:
+            searchable = "\n".join((
+                " / ".join(str(value) for value in chunk.get("heading_path", ())),
+                str(chunk.get("excerpt", "")),
+            ))
+            bases = [label for label, pattern in signals if pattern.search(searchable)]
+            if not bases:
+                continue
+            matched += 1
+            source_chunk_id = str(chunk["source_chunk_id"])
+            mappings.append({
+                "mapping_id": f"mapping:{check_id}:{source_chunk_id}",
+                "check_id": check_id,
+                "mapping_status": "candidate",
+                "match_basis": bases,
+                "source_chunk_id": source_chunk_id,
+                "document_path": chunk["document_path"],
+                "source_digest": chunk["source_digest"],
+                "heading_path": chunk["heading_path"],
+                "start_line": chunk["start_line"],
+                "end_line": chunk["end_line"],
+                "excerpt": chunk["excerpt"],
+            })
+        if not matched:
+            mappings.append({
+                "mapping_id": f"mapping:{check_id}:unmapped",
+                "check_id": check_id,
+                "mapping_status": "unmapped",
+                "match_basis": [],
+                "source_chunk_id": None,
+                "document_path": None,
+                "source_digest": None,
+                "heading_path": [],
+                "start_line": None,
+                "end_line": None,
+                "excerpt": None,
+            })
+    return mappings
+
+
+def _source_ref_for_line(
+    chunks: Sequence[Mapping[str, Any]], line_no: int,
+) -> dict[str, Any] | None:
+    """Return the narrowest immutable source reference containing a line."""
+    matches = [
+        chunk for chunk in chunks
+        if int(chunk.get("start_line", 0)) <= line_no <= int(chunk.get("end_line", 0))
+    ]
+    if not matches:
+        return None
+    chunk = min(matches, key=lambda item: int(item.get("end_line", 0)) - int(item.get("start_line", 0)))
+    return {
+        "source_chunk_id": chunk["source_chunk_id"],
+        "document_path": chunk["document_path"],
+        "source_digest": chunk["source_digest"],
+        "start_line": line_no,
+        "end_line": line_no,
+        "excerpt": chunk.get("excerpt", ""),
+    }
+
+
+def _source_fact_index(
+    text: str, chunks: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Extract objective Markdown facts for semantic review and contradiction checks.
+
+    This index is deliberately descriptive.  It records identifiers and
+    explicit statements but never decides whether the Spec satisfies a rule.
+    """
+    patterns = {
+        "functional_requirements": re.compile(r"\bFR[-_][A-Z0-9-]+\b", re.I),
+        "acceptance_criteria": re.compile(r"\bAC[-_][A-Z0-9-]+\b", re.I),
+        "test_cases": re.compile(r"\bCASE[-_][A-Z0-9-]+\b", re.I),
+        "assumptions": re.compile(r"\bAS[-_][A-Z0-9][A-Z0-9-]*\b", re.I),
+        "decisions": re.compile(
+            r"\b(?:(?:ADR|DECISION)[-_][A-Z0-9][A-Z0-9-]*|D[-_][A-Z0-9][A-Z0-9-]*)\b",
+            re.I,
+        ),
+    }
+    identifiers: dict[str, list[dict[str, Any]]] = {}
+    lines = text.splitlines()
+    for kind, pattern in patterns.items():
+        seen: set[str] = set()
+        values: list[dict[str, Any]] = []
+        for line_no, line in enumerate(lines, 1):
+            for match in pattern.finditer(line):
+                identifier = match.group(0).upper().replace("_", "-")
+                if identifier in seen:
+                    continue
+                seen.add(identifier)
+                source_ref = _source_ref_for_line(chunks, line_no)
+                values.append({
+                    "id": identifier,
+                    "line": line_no,
+                    "text": line.strip(),
+                    "sourceRef": source_ref,
+                })
+        identifiers[kind] = values
+
+    explicit_patterns = {
+        "no_migration": re.compile(r"no (?:historical )?data migration|不存在历史数据迁移|系统从零开始", re.I),
+        "not_applicable": re.compile(r"not applicable|不适用|不考虑|不做|out of scope|excluded", re.I),
+        "delegation": re.compile(r"child spec|sub[- ]module.*spec|子模块.*spec|由各子模块|delegat", re.I),
+        "authority": re.compile(r"conflict.*(?:favor|precedence)|冲突时.*以|authoritative|权威", re.I),
+    }
+    explicit_statements: list[dict[str, Any]] = []
+    for line_no, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        kinds = [name for name, pattern in explicit_patterns.items() if pattern.search(stripped)]
+        if kinds:
+            explicit_statements.append({
+                "kinds": kinds,
+                "line": line_no,
+                "text": stripped,
+                "sourceRef": _source_ref_for_line(chunks, line_no),
+            })
+
+    headings = [
+        {
+            "title": str(unit.get("title") or ""),
+            "level": unit.get("level"),
+            "line": unit.get("startLine"),
+            "headingPath": list(unit.get("headingPath") or ()),
+            "sourceRef": _source_ref_for_line(chunks, int(unit["startLine"])),
+        }
+        for unit in _MARKDOWN_NAVIGATION.parse(
+            {"raw": text.encode("utf-8"), "path": "<source-facts>"}
+        ).get("units", ())
+        if unit.get("kind") == "heading" and unit.get("startLine")
+    ]
+    return {
+        "schemaVersion": "1.0.0",
+        "identifiers": identifiers,
+        "explicitStatements": explicit_statements,
+        "headings": headings,
+    }
+
+
+def _document_context(
+    text: str, chunks: Sequence[Mapping[str, Any]], profile: str,
+    cross_scope: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a source-backed classification proposal for Agent review."""
+    lines = text.splitlines()
+    preamble_lines: list[tuple[int, str]] = []
+    for line_no, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if line_no > 1 and re.match(r"^#{1,2}\s+", stripped):
+            break
+        if stripped and not stripped.startswith("#"):
+            preamble_lines.append((line_no, stripped.lstrip("> ")))
+    scope_line = next(
+        (item for item in preamble_lines if re.search(
+            r"document positioning|document purpose|scope|responsibilit|文档定位|文档目的|范围|职责",
+            item[1], re.I,
+        )),
+        preamble_lines[0] if preamble_lines else (1, "The document scope is not stated in the preamble."),
+    )
+    lower = text.casefold()
+    if re.search(r"global|shared contract|shared model|全局规约|共享.*(?:概念|规则|模型)|子模块.*spec", lower, re.I):
+        document_type, confidence = "shared_contract", "high"
+    elif re.search(r"data model|schema|数据模型|字段定义", lower, re.I) and not re.search(r"functional requirement|功能需求", lower, re.I):
+        document_type, confidence = "data_model", "medium"
+    elif re.search(r"interface contract|api contract|接口契约", lower, re.I):
+        document_type, confidence = "interface_contract", "medium"
+    elif re.search(r"rfc|prd|product requirement", lower, re.I):
+        document_type, confidence = "rfc_prd", "medium"
+    else:
+        document_type, confidence = "feature_spec", "low"
+    classification_ref = _source_ref_for_line(chunks, scope_line[0])
+    delegated = [
+        line for line in lines
+        if re.search(r"child spec|sub[- ]module.*spec|子模块.*spec|由各子模块|delegat", line, re.I)
+    ]
+    excluded = [
+        line for line in lines
+        if re.search(r"out of scope|not included|excluded|范围外|不包含|不做|不考虑", line, re.I)
+    ]
+    related = []
+    if isinstance(cross_scope, Mapping):
+        related = [
+            str(document.get("document_id"))
+            for document in cross_scope.get("documents", ())
+            if isinstance(document, Mapping) and document.get("document_id")
+        ]
+    return {
+        "schemaVersion": "1.0.0",
+        "documentType": document_type,
+        "scopeStatement": scope_line[1],
+        "responsibilityBoundaries": {
+            "owned": [],
+            "delegated": delegated[:8],
+            "excluded": excluded[:8],
+        },
+        "relatedDocuments": related,
+        "selectedProfile": profile,
+        "classificationEvidence": [classification_ref] if classification_ref else [],
+        "classificationConfidence": confidence,
+        "unresolvedClassificationQuestions": [] if confidence == "high" else [
+            "Confirm the document type and responsibility boundary before applying feature-level checks."
+        ],
+        "isProposal": True,
+    }
+
+
+def _review_document_context(raw_context: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert the packet's camelCase context into the review contract shape."""
+    boundaries = raw_context.get("responsibilityBoundaries", {})
+    if not isinstance(boundaries, Mapping):
+        boundaries = {}
+    references = []
+    for raw_ref in raw_context.get("classificationEvidence", ()):
+        if not isinstance(raw_ref, Mapping):
+            continue
+        references.append({
+            key: raw_ref[key]
+            for key in ("source_chunk_id", "document_path", "source_digest", "start_line", "end_line")
+            if key in raw_ref
+        })
+    return {
+        "document_type": raw_context.get("documentType"),
+        "scope_statement": raw_context.get("scopeStatement"),
+        "responsibility_boundaries": {
+            "owned": list(boundaries.get("owned", ())),
+            "delegated": list(boundaries.get("delegated", ())),
+            "excluded": list(boundaries.get("excluded", ())),
+        },
+        "related_documents": list(raw_context.get("relatedDocuments", ())),
+        "selected_profile": raw_context.get("selectedProfile"),
+        "classification_evidence": references,
+        "classification_confidence": raw_context.get("classificationConfidence"),
+        "unresolved_classification_questions": list(
+            raw_context.get("unresolvedClassificationQuestions", ())
+        ),
+    }
+
+
 def _candidate(cid: str, rule: str, severity: str, object_id: str | None, line: int | None,
               chapter: str | None, message: str, evidence: str | None,
               impact: str, recommendation: str) -> dict[str, Any]:
@@ -150,10 +749,38 @@ def _canonical_candidate(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _navigation_candidates(units: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Turn every parsed Markdown unit into a review pointer, never a finding."""
+    result: list[dict[str, Any]] = []
+    for unit in units:
+        unit_id = str(unit.get("unitId") or "").strip()
+        if not unit_id:
+            continue
+        excerpt = str(unit.get("excerpt") or "").strip()
+        heading_path = unit.get("headingPath")
+        result.append(_canonical_candidate({
+            "candidateId": unit_id,
+            "ruleId": "NAV-UNIT",
+            "suggestedSeverity": "P3",
+            "objectId": unit_id,
+            "line": unit.get("startLine"),
+            "chapter": heading_path[-1] if isinstance(heading_path, (tuple, list)) and heading_path else None,
+            "message": "Review this Markdown unit for Spec quality; navigation is not a semantic decision.",
+            "evidence": excerpt,
+            "impact": "A semantic conclusion cannot be made until this source unit is reviewed in context.",
+            "recommendation": "Assess the unit against the applicable Spec dimensions and cite the precise source.",
+            "policyId": _POLICY_ID,
+            "policyVersion": _POLICY_VERSION,
+            "confidence": None,
+        }))
+    return result
+
+
 class SpecQualityPlugin:
     """Discover and inspect Markdown Specs under the canonical authority."""
 
     manifest: PluginManifest = load_plugin_manifest(_MANIFEST)
+    evidence_graph_enabled = True
 
     def validate_review_checkpoint(
         self, checkpoint: ReviewCheckpoint, collection_items: Sequence[Mapping[str, Any]],
@@ -162,28 +789,110 @@ class SpecQualityPlugin:
     ) -> None:
         """Reject malformed or untraceable semantic findings before persistence."""
         del collection_items, check, context
-        from .review import validate_review_decisions
+        from .review import (
+            validate_checklist_reviews, validate_cross_document_reviews,
+            validate_review_decisions,
+        )
 
-        raw_decisions = checkpoint.payload.get("decisions")
-        if not isinstance(raw_decisions, (tuple, list)) or not raw_decisions:
-            raise PlatformContractError(
-                "SPEC_REVIEW_INVALID", "Each Spec review checkpoint requires decisions",
+        if checkpoint.collection_id == "checklist-dimensions":
+            raw_checklist = checkpoint.payload.get("checklist_review")
+            if not isinstance(raw_checklist, (tuple, list)) or not raw_checklist:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID",
+                    "Each Spec checklist checkpoint requires checklist_review",
+                )
+            validate_checklist_reviews(
+                raw_checklist, packet, expected_check_ids=checkpoint.item_ids,
             )
-        prior_decisions: list[Mapping[str, Any]] = []
-        for prior in prior_checkpoints:
-            if prior.checkpoint_id == checkpoint.checkpoint_id:
-                continue
-            values = prior.payload.get("decisions")
-            if isinstance(values, (tuple, list)):
-                prior_decisions.extend(item for item in values if isinstance(item, Mapping))
-        validate_review_decisions(
-            raw_decisions, packet,
-            expected_candidate_ids=checkpoint.item_ids,
-            prior_decisions=prior_decisions,
+            if any(
+                isinstance(item, Mapping) and "applicability" in item
+                for item in raw_checklist
+            ):
+                from .review import _validate_strict_checklist_items
+                _validate_strict_checklist_items(raw_checklist)
+            return
+        if checkpoint.collection_id in {"candidate-findings", "document-navigation"}:
+            raw_decisions = checkpoint.payload.get("decisions")
+            if not isinstance(raw_decisions, (tuple, list)) or not raw_decisions:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID", "Each Spec finding checkpoint requires decisions",
+                )
+            prior_decisions: list[Mapping[str, Any]] = []
+            for prior in prior_checkpoints:
+                if prior.checkpoint_id == checkpoint.checkpoint_id:
+                    continue
+                values = prior.payload.get("decisions")
+                if isinstance(values, (tuple, list)):
+                    prior_decisions.extend(item for item in values if isinstance(item, Mapping))
+            validate_review_decisions(
+                raw_decisions, packet,
+                expected_candidate_ids=checkpoint.item_ids,
+                prior_decisions=prior_decisions,
+            )
+            # The generic protocol owns candidate coverage; Spec retains the
+            # richer domain validation above.
+            status_map = {
+                "CONFIRMED": "confirmed", "SUPPRESSED": "suppressed",
+                "MERGED": "merged", "UNVERIFIED": "needs_review",
+            }
+            validate_review_submission(
+                {"decisions": [
+                    {"candidate_ids": item.get("candidate_ids", ()),
+                     "disposition": status_map.get(str(item.get("status")), "")}
+                    for item in raw_decisions if isinstance(item, Mapping)
+                ]},
+                expected_item_ids=checkpoint.item_ids,
+            )
+            return
+        if checkpoint.collection_id == "cross-document-relationships":
+            raw_reviews = checkpoint.payload.get("cross_document_review")
+            if not isinstance(raw_reviews, (tuple, list)) or not raw_reviews:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID",
+                    "Each cross-document checkpoint requires cross_document_review",
+                )
+            prior_decisions: list[Mapping[str, Any]] = []
+            for prior in prior_checkpoints:
+                if prior.checkpoint_id == checkpoint.checkpoint_id:
+                    continue
+                prior_reviews = prior.payload.get("cross_document_review")
+                if not isinstance(prior_reviews, (tuple, list)):
+                    continue
+                for prior_review in prior_reviews:
+                    if isinstance(prior_review, Mapping):
+                        decisions = prior_review.get("decisions")
+                        if isinstance(decisions, (tuple, list)):
+                            prior_decisions.extend(
+                                item for item in decisions if isinstance(item, Mapping)
+                            )
+            validate_cross_document_reviews(
+                raw_reviews, packet,
+                expected_relationship_ids=checkpoint.item_ids,
+                prior_decisions=prior_decisions,
+            )
+            return
+        raise PlatformContractError(
+            "SPEC_REVIEW_INVALID", "Spec review checkpoint uses an unsupported collection",
         )
 
     def discover(self, scope: Any, context: PlatformContext) -> Sequence[WorkItem]:
         del context
+        if isinstance(scope, Mapping) and "anchor" in scope:
+            cross_scope = _load_cross_document_scope(scope)
+            anchor = cross_scope["documents"][0]
+            anchor_path = Path(anchor["path"])
+            state_digest = _document_state_digest(cross_scope["documents"])
+            anchor_identity = _digest(str(anchor_path).encode())
+            return (WorkItem(
+                f"spec:{anchor_identity[:16]}", "spec_document", f"sha256:{anchor_identity}", state_digest,
+                {
+                    "path": str(anchor_path),
+                    "profile": anchor.get("profile") or _POLICY["default_profile"],
+                    "sourceDigest": anchor["source_digest"],
+                    "scopeKind": "cross-spec",
+                    "crossDocumentScope": cross_scope,
+                },
+            ),)
         entries = scope.get("files", []) if isinstance(scope, dict) else scope
         if isinstance(entries, (str, Path)):
             entries = [entries]
@@ -196,23 +905,64 @@ class SpecQualityPlugin:
             items.append(WorkItem(
                 f"spec:{path_identity[:16]}", "spec_document", f"sha256:{path_identity}", _digest(raw),
                 {"path": str(path), "profile": config.get("profile", _POLICY["default_profile"]),
-                 "sourceDigest": _digest(raw)},
+                 "sourceDigest": _digest(raw),
+                 "reviewStrategy": config.get("reviewStrategy", "candidate")},
             ))
         return tuple(items)
 
     def inspect(self, work_items: Sequence[WorkItem], check: CheckContract,
                 context: PlatformContext) -> Sequence[InvestigationPacket]:
-        del context
+        navigation_context = context
         packets: list[InvestigationPacket] = []
         for item in work_items:
             path = Path(item.metadata["path"])
             raw = path.read_bytes()
             source_digest = _digest(raw)
-            if source_digest != item.state_digest:
+            cross_scope = item.metadata.get("crossDocumentScope")
+            if isinstance(cross_scope, Mapping):
+                current_documents: list[dict[str, Any]] = []
+                for document in cross_scope.get("documents", ()):
+                    if not isinstance(document, Mapping):
+                        raise ValueError("Cross-document scope metadata is malformed")
+                    document_path = Path(str(document.get("path")))
+                    current_documents.append({
+                        "document_id": str(document.get("document_id")),
+                        "role": str(document.get("role")),
+                        "path": str(document_path),
+                        "source_digest": _digest(document_path.read_bytes()),
+                    })
+                if _document_state_digest(current_documents) != item.state_digest:
+                    raise ValueError("A cross-document Spec changed after discovery")
+            elif source_digest != item.state_digest:
                 raise ValueError("Spec changed after discovery")
             text = raw.decode("utf-8-sig")
             profile = str(item.metadata.get("profile") or _POLICY["default_profile"])
+            # The generic Markdown navigator supplies a complete, immutable
+            # structure map for consumers. Domain rules below remain owned by
+            # this plugin; navigation is only a reading aid and evidence map.
+            navigation = _MARKDOWN_NAVIGATION.read_document(
+                {"raw": raw, "path": str(path)}, navigation_context,
+            )
             chapters, bodies = _chapters(text), _chapter_bodies(text)
+            source_chunks = _source_chunks(
+                text, path, source_digest,
+                document_id=(cross_scope.get("anchor_document_id") if isinstance(cross_scope, Mapping) else None),
+                document_role="anchor" if isinstance(cross_scope, Mapping) else None,
+            )
+            cross_document_evidence: list[dict[str, Any]] = []
+            if isinstance(cross_scope, Mapping):
+                for document in cross_scope.get("documents", ())[1:]:
+                    document_path = Path(str(document["path"]))
+                    related_raw = document_path.read_bytes()
+                    source_chunks.extend(_source_chunks(
+                        related_raw.decode("utf-8-sig"), document_path,
+                        _digest(related_raw), document_id=str(document["document_id"]),
+                        document_role="related",
+                    ))
+                cross_document_evidence = _cross_document_evidence(cross_scope, source_chunks)
+            dimension_evidence = _dimension_evidence(source_chunks)
+            document_context = _document_context(text, source_chunks, profile, cross_scope)
+            source_facts = _source_fact_index(text, source_chunks)
             recognized_structure = "\n".join(
                 f"{line_no}: {line.strip()}" for line_no, line in enumerate(text.splitlines(), 1)
                 if re.match(r"^#{1,6}\s+", line)
@@ -229,11 +979,11 @@ class SpecQualityPlugin:
                     suffix += 1
                 candidates.append(_candidate(stable_id, rule, sev, obj, line, chapter, message, evidence, impact, recommendation))
 
-            if profile not in {"product-spec", "speckit", "adversarial"}:
+            if profile not in _AVAILABLE_PROFILES:
                 add("profile-unknown", "PROFILE-001", "P1", None, 1, None,
-                    f"Unknown profile: {profile}.", None, "The selected structural authority cannot be established.", "Select product-spec, speckit, or adversarial explicitly.")
+                    f"Unknown profile: {profile}.", None, "The selected audit authority cannot be established.", f"Select one available profile: {', '.join(_AVAILABLE_PROFILES)}.")
                 profile = "product-spec"
-            if profile != "speckit":
+            if profile == _STRICT_STRUCTURE_PROFILE:
                 for number, chapter in enumerate(_REQUIRED_CHAPTERS, 1):
                     locations = chapters.get(chapter, [])
                     if not locations:
@@ -283,26 +1033,27 @@ class SpecQualityPlugin:
                     "Reviewers cannot establish which behavioral baseline was assessed.", "Record version, date, author, and a revision summary.")
 
             tables = _tables(text)
-            # Structure-specific checks delegated by authority.md to the
-            # bundled product template. These are still candidate evidence,
-            # never final findings.
+            # Content signals apply to layout-neutral product Specs. Exact
+            # table and diagram expectations apply only to the explicit
+            # strict structure profile. All scanner output remains candidate
+            # evidence and never constitutes a final finding.
             preamble = text[: min((text.find("## ") if "## " in text else len(text)), len(text))]
             if profile != "speckit":
-                if not any("元信息" in " ".join(headers) or "metadata" in " ".join(headers).lower() for _, headers, _ in tables) and not re.search(r"版本|业务 Owner|创建日期", preamble, re.I):
+                if not any("元信息" in " ".join(headers) or "metadata" in " ".join(headers).lower() for _, headers, _ in tables) and not re.search(r"版本|业务 Owner|创建日期|version|owner|created date", preamble, re.I):
                     add("metadata-table-missing", "META-001", "P1", None, 1, None,
-                        "The Spec has no structured metadata record.", _line_excerpt(text, 1, 8),
-                        "Version, ownership, baseline, and blocker status cannot be traced.", "Add the template metadata table and fill every required field.")
+                        "The Spec has no identifiable baseline metadata.", _line_excerpt(text, 1, 8),
+                        "Version, ownership, baseline, and blocker status cannot be traced.", "Record the current version, status, owner, baseline, and unresolved blockers in a uniquely locatable form.")
                 state_body = bodies.get("状态模型", (None, ""))[1]
-                if state_body and "stateDiagram-v2" not in state_body:
+                if profile == _STRICT_STRUCTURE_PROFILE and state_body and "stateDiagram-v2" not in state_body:
                     add("state-diagram-missing", "STATE-001", "P2", "状态模型", bodies["状态模型"][0], "状态模型",
                         "The state model has no Mermaid stateDiagram-v2 definition.", _line_excerpt(text, bodies["状态模型"][0], 5),
                         "Allowed transitions and terminal behavior cannot be reviewed consistently.", "Add a complete stateDiagram-v2 with guards and outcomes.")
-                if state_body and not any(any("状态" in header for header in headers) and rows for _, headers, rows in tables):
+                if profile == _STRICT_STRUCTURE_PROFILE and state_body and not any(any("状态" in header or "state" in header.lower() for header in headers) and rows for _, headers, rows in tables):
                     add("state-definition-missing", "STATE-002", "P1", "状态模型", bodies["状态模型"][0], "状态模型",
                         "The state model has no structured state definition table.", _line_excerpt(text, bodies["状态模型"][0], 5),
                         "Implementers cannot determine state meaning, entry conditions, or legal operations.", "Add a state definition table with meaning, entry conditions, and operations.")
                 dep_body = bodies.get("依赖与假设", (None, ""))[1]
-                if dep_body and not any(any(token in header for token in ("系统/模块", "依赖内容", "降级策略", "dependency") for header in headers) for _, headers, _ in tables):
+                if profile == _STRICT_STRUCTURE_PROFILE and dep_body and not any(any(token in header.lower() for token in ("系统/模块", "依赖内容", "降级策略", "dependency") for header in headers) for _, headers, _ in tables):
                     add("dependency-table-missing", "DEP-001", "P2", "依赖与假设", bodies["依赖与假设"][0], "依赖与假设",
                         "The dependency chapter has no structured dependency table.", _line_excerpt(text, bodies["依赖与假设"][0], 5),
                         "External failure behavior and assumptions remain implicit.", "List each dependency, prerequisite, and unavailable-service fallback.")
@@ -311,15 +1062,18 @@ class SpecQualityPlugin:
                         "The success criteria chapter has no stable SC identifier.", _line_excerpt(text, bodies["成功标准"][0], 5),
                         "Release outcomes cannot be measured or traced to evidence.", "Add measurable SC-NN criteria and their measurement method.")
                 decision_body = bodies.get("关键决策记录", (None, ""))[1]
-                if decision_body and not any(any("决策ID" in header or "decision" in header.lower() for header in headers) for _, headers, _ in tables):
+                if profile == _STRICT_STRUCTURE_PROFILE and decision_body and not any(any("决策ID" in header or "decision" in header.lower() for header in headers) for _, headers, _ in tables):
                     add("decision-table-missing", "DECISION-001", "P2", "关键决策记录", bodies["关键决策记录"][0], "关键决策记录",
                         "The decision chapter has no structured decision record table.", _line_excerpt(text, bodies["关键决策记录"][0], 5),
                         "Important choices and their ownership cannot be reconstructed.", "Record decision ID, question, conclusion, rationale/trade-offs, and date.")
             # Candidate terminology signal: uppercase domain abbreviations with
             # no glossary/term column. It intentionally stays P3 because the
             # authority requires semantic review before admission.
-            acronym_tokens = {token for token in re.findall(r"\b[A-Z][A-Z0-9]{2,}\b", text) if token not in {"FR", "AC", "CASE", "NFR", "HTTP", "HTTPS", "JSON", "API"}}
-            if acronym_tokens and not any(any("术语" in header or "缩写" in header or "glossary" in header.lower() for header in headers) for _, headers, _ in tables):
+            acronym_tokens = {token for token in re.findall(r"\b[A-Z][A-Z0-9]{2,}\b", text) if token not in {"FR", "AC", "CASE", "NFR", "GEN", "HTTP", "HTTPS", "JSON", "API", "MUST", "NOT"}}
+            has_term_definition_area = bool(re.search(
+                r"(?im)^#{1,6}\s+.*(?:terms? and abbreviations|glossary|术语|缩写)", text,
+            )) or any(any("术语" in header or "缩写" in header or "glossary" in header.lower() for header in headers) for _, headers, _ in tables)
+            if acronym_tokens and not has_term_definition_area:
                 first = min((text.count("\n", 0, text.find(token)) + 1 for token in acronym_tokens if token in text), default=1)
                 add("glossary-missing", "TERM-001", "P3", None, first, None,
                     "Potential domain abbreviations are used without a glossary table.", _line_excerpt(text, first),
@@ -337,11 +1091,16 @@ class SpecQualityPlugin:
                         "The business data contract is incomplete and implementations must guess valid input and error behavior.", f"Define {name} for field {field} according to its logical business type.")
             nfr_rows = [(line, headers, row) for line, headers, rows in tables for line, row in rows
                         if any("NFR" in header.upper() for header in headers)]
-            if not nfr_rows and profile != "speckit":
+            has_nfr_decision = bool(re.search(
+                r"\bNFR[-_][A-Z0-9-]+\b.*(?:ADOPTED|NOT_APPLICABLE|EXEMPTED|采用|不适用|豁免)",
+                text,
+                re.I,
+            ))
+            if not (nfr_rows or has_nfr_decision) and profile != "speckit":
                 add("nfr-selection-missing", "NFR-001", "P1", None, bodies.get("非功能性需求选择", (None,))[0], "非功能性需求选择",
-                    "No structured NFR selection records were detected.", _line_excerpt(text, bodies.get("非功能性需求选择", (1,))[0]),
+                    "No explicit NFR applicability decision was detected.", _line_excerpt(text, bodies.get("非功能性需求选择", (1,))[0]),
                     "Required quality controls, targets, and verification plans remain undecided.", "Record each applicable NFR as adopted, not applicable with reason, or exempted with human approval and expiry.")
-            if re.search(r"权限|角色|数据范围|数据隔离|permission|role", text, re.I) and not re.search(r"无权限|权限不足|越权|数据范围|数据隔离|tenant|租户", text, re.I):
+            if re.search(r"权限|角色|数据范围|数据隔离|permission|role", text, re.I) and not re.search(r"无权限|权限不足|越权|数据范围|数据隔离|tenant|租户|permission denial|unauthorized|forbidden", text, re.I):
                 add("permission-unclear", "PERM-001", "P2", None, None, "功能需求清单",
                     "Permission-related behavior is mentioned without a clear role, data-scope, or denial response.", None,
                     "Unauthorized access and isolation behavior cannot be tested consistently.", "Define roles, readable/writable operations, data scope, and no-permission response.")
@@ -354,39 +1113,88 @@ class SpecQualityPlugin:
                     "No normal, boundary, failure, permission, concurrency, or recovery scenario signal was detected.", None,
                     "Material failure behavior may be left to implementation assumptions.", "Add risk-based scenarios with distinct preconditions, actions, and observable outcomes.")
 
-            candidate_results = [_canonical_candidate(candidate) for candidate in candidates]
+            scanner_candidates = list(candidates)
+            review_strategy = str(item.metadata.get("reviewStrategy") or "candidate")
+            if review_strategy not in {"candidate", "navigation"}:
+                review_strategy = "candidate"
+            candidate_results = (
+                _navigation_candidates(navigation["units"])
+                if review_strategy == "navigation"
+                else [_canonical_candidate(candidate) for candidate in scanner_candidates]
+            )
             check_results = []
             for item_def in _CHECKLIST:
                 prefixes = tuple(item_def.get("rulePrefixes", ()))
                 related = [candidate for candidate in candidates if any(candidate["ruleId"] == prefix or candidate["ruleId"].startswith(prefix) for prefix in prefixes)]
-                manual = bool(item_def.get("manual"))
-                partial = bool(item_def.get("partial"))
-                note = "This dimension requires Agent or human semantic review." if manual or partial else None
+                semantic_review = bool(item_def.get("semanticReviewRequired", True))
+                note = "This dimension requires evidence-backed Agent or human semantic review." if semantic_review else None
                 check_results.append({
                     "checkId": item_def["id"], "category": item_def["category"], "question": item_def["question"], "method": item_def["method"],
-                    "status": "FINDING" if related else "UNVERIFIED" if manual or partial else "PASS",
+                    "status": "FINDING" if related else "UNVERIFIED" if semantic_review else "PASS",
                     "candidateIds": [candidate["candidateId"] for candidate in related],
                     "evidence": [candidate["evidence"] or candidate["message"] for candidate in related[:3]], "reviewNote": note,
                 })
+            mapping_ids_by_check: dict[str, list[str]] = {}
+            for mapping in dimension_evidence:
+                mapping_ids_by_check.setdefault(str(mapping["check_id"]), []).append(
+                    str(mapping["mapping_id"]),
+                )
+            checklist_items = [{
+                "check_id": result["checkId"],
+                "batch": result["category"],
+                "question": result["question"],
+                "method": result["method"],
+                "scanner_status": result["status"],
+                "candidate_ids": result["candidateIds"],
+                "source_mapping_ids": mapping_ids_by_check.get(result["checkId"], []),
+            } for result in check_results]
             evidence_id = f"evidence:{item.work_item_id}:{source_digest[:16]}"
             evidence_manifest = {
                 "manifest_version": "1.1.0",
                 "policy": {"policy_id": _POLICY_ID, "policy_version": _POLICY_VERSION, "authority_path": "authority.md", "authority_version": _AUTHORITY_VERSION},
                 "target": {"path": str(path), "version_or_commit": None},
-                "scope": {"kind": "single-file", "project_root": None, "code_verification": False, "external_materials": False},
+                "scope": {"kind": "cross-spec" if isinstance(cross_scope, Mapping) else "single-file", "project_root": None, "code_verification": False, "external_materials": bool(cross_scope)},
                 "selected_sources": [
                     {"kind": "skill-default", "source": "authority.md", "version": _AUTHORITY_VERSION, "owner": "spec-quality-audit maintainers", "applicable_dimensions": ["all"], "adoption_basis": "canonical authority"},
-                    {"kind": "organization-baseline", "source": "self-check-checklist.md", "version": _POLICY_VERSION, "owner": "spec-quality-audit maintainers", "applicable_dimensions": ["CHK-01..CHK-18"], "adoption_basis": "adopted organization baseline"},
+                    {"kind": "organization-baseline", "source": "quality-standard.md", "version": _POLICY_VERSION, "owner": "spec-quality-audit maintainers", "applicable_dimensions": ["CHK-01..CHK-18"], "adoption_basis": "reviewed semantic standard derived from the organization baseline"},
                 ],
-                "profiles": {"selected": profile, "overlays": ["adversarial"] if profile == "adversarial" else [], "available": ["product-spec", "speckit", "adversarial"]},
+                "profiles": {"selected": profile, "overlays": ["adversarial"] if profile == "adversarial" else [], "available": list(_AVAILABLE_PROFILES)},
                 "claim_verifications": [],
-                "unavailable_evidence": ["Target version/commit was not established.", "Business correctness and human approval authenticity are not proven by deterministic inspection.", "Existing-system compatibility and cross-spec conflicts were not verified in single-file scope."],
+                "unavailable_evidence": ["Target version/commit was not established.", "Business correctness and human approval authenticity are not proven by deterministic inspection."] + ([] if isinstance(cross_scope, Mapping) else ["Existing-system compatibility and cross-spec conflicts were not verified in single-file scope."]),
                 "checker_drift": ["The platform emits candidate evidence; semantic review and structured result presentation are Agent/platform responsibilities.", "Full lifecycle gates for speckit remain reviewer responsibilities."],
             }
+            cross_document_packet = ({
+                "schema_version": "1.0.0",
+                "scope": cross_scope,
+                "evidence": cross_document_evidence,
+            } if isinstance(cross_scope, Mapping) else None)
+            cross_document_review_items = ([{
+                "relationship_id": relationship["relationship_id"],
+                "from_document_id": relationship["from_document_id"],
+                "to_document_id": relationship["to_document_id"],
+                "kind": relationship["kind"],
+                "relationship_evidence": relationship["evidence"],
+                "resolution_owner": relationship["resolution_owner"],
+                "selection_reason": relationship.get("selection_reason"),
+                "evidence_item_ids": [
+                    evidence_item["evidence_item_id"]
+                    for evidence_item in cross_document_evidence
+                    if evidence_item["relationship_id"] == relationship["relationship_id"]
+                ],
+            } for relationship in cross_scope.get("relationships", ())]
+                if isinstance(cross_scope, Mapping) else [])
             payload = {
                 "authorityVersion": _AUTHORITY_VERSION, "policyId": _POLICY_ID, "policyVersion": _POLICY_VERSION,
                 "profile": profile, "sourceDigest": source_digest, "candidateOnly": True,
-                "candidates": candidates, "candidateFindings": candidate_results,
+                "reviewStrategy": review_strategy,
+                "candidates": scanner_candidates, "candidateFindings": candidate_results,
+                "navigation": navigation,
+                "sourceChunks": source_chunks, "dimensionEvidence": dimension_evidence,
+                "documentContext": document_context,
+                "sourceFacts": source_facts,
+                "crossDocumentPacket": cross_document_packet,
+                "crossDocumentReviewItems": cross_document_review_items,
+                "checklistItems": checklist_items,
                 "checklistResults": check_results, "checklist_results": [{
                     "check_id": result["checkId"], "category": result["category"], "question": result["question"], "method": result["method"],
                     "status": result["status"], "candidate_ids": result["candidateIds"], "evidence": result["evidence"], "review_note": result["reviewNote"],
@@ -394,6 +1202,17 @@ class SpecQualityPlugin:
                 "evidenceManifest": evidence_manifest, "evidence_manifest": evidence_manifest,
                 "readiness": {"status": "UNVERIFIED", "reason": "Scanner candidates require explicit semantic review; no final readiness is inferred."},
             }
+            # Platform-owned projection used for generic coverage and exact
+            # root-cause grouping.  The plugin candidate payload remains the
+            # source of truth and is intentionally not replaced.
+            candidate_graph = build_candidate_evidence_graph(
+                candidate_results,
+                work_item_id=item.work_item_id,
+                check_id=check.check_id,
+                check_version=check.version,
+            )
+            payload["candidateGraph"] = render_candidate_evidence_graph(candidate_graph)
+            validate_candidate_evidence_graph_projection(payload["candidateGraph"])
             evidence = EvidenceRecord(evidence_id, item.work_item_id, check.check_id, check.version, "structured", item.identity, payload)
             dimensions = tuple(DimensionObservation(
                 item_def["id"],
@@ -406,15 +1225,75 @@ class SpecQualityPlugin:
                 metadata={
                     "path": str(path),
                     "profile": profile,
-                    "candidateCount": len(candidates),
+                    "reviewStrategy": review_strategy,
+                    "candidateCount": len(candidate_results),
+                    "scannerCandidateCount": len(scanner_candidates),
+                    "sourceChunkCount": len(source_chunks),
+                    "documentTypeProposal": document_context["documentType"],
+                    "documentContextConfidence": document_context["classificationConfidence"],
+                    "sourceFactCounts": {
+                        key: len(value) for key, value in source_facts["identifiers"].items()
+                    },
+                    "dimensionEvidenceCount": len(dimension_evidence),
                     "evidenceManifest": evidence_manifest,
-                    "evidenceCollections": [{
-                        "collectionId": "candidate-findings",
-                        "evidenceId": evidence_id,
-                        "jsonPointer": "/candidateFindings",
-                        "itemIdField": "candidate_id",
-                        "groupBy": ["rule_id"],
-                    }],
+                    "evidenceCollections": [
+                        {
+                            "collectionId": "candidate-findings",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/candidateFindings",
+                            "itemIdField": "candidate_id",
+                            "groupBy": ["rule_id"],
+                            "reviewRequired": review_strategy == "candidate",
+                        },
+                        {
+                            "collectionId": "document-navigation",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/navigation/units",
+                            "itemIdField": "unitId",
+                            "groupBy": ["kind"],
+                            "reviewRequired": review_strategy == "navigation",
+                        },
+                        *([{
+                            "collectionId": "cross-document-relationships",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/crossDocumentReviewItems",
+                            "itemIdField": "relationship_id",
+                            "groupBy": ["kind"],
+                            "reviewRequired": True,
+                        }] if isinstance(cross_scope, Mapping) else []),
+                        {
+                            "collectionId": "checklist-dimensions",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/checklistItems",
+                            "itemIdField": "check_id",
+                            "groupBy": ["batch"],
+                            "reviewRequired": True,
+                        },
+                        {
+                            "collectionId": "dimension-evidence",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/dimensionEvidence",
+                            "itemIdField": "mapping_id",
+                            "groupBy": ["check_id"],
+                            "reviewRequired": False,
+                        },
+                        {
+                            "collectionId": "source-sections",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/sourceChunks",
+                            "itemIdField": "source_chunk_id",
+                            "groupBy": ["heading_level"],
+                            "reviewRequired": False,
+                        },
+                        *([{
+                            "collectionId": "cross-document-evidence",
+                            "evidenceId": evidence_id,
+                            "jsonPointer": "/crossDocumentPacket/evidence",
+                            "itemIdField": "evidence_item_id",
+                            "groupBy": ["relationship_id", "document_id"],
+                            "reviewRequired": False,
+                        }] if isinstance(cross_scope, Mapping) else []),
+                    ],
                 },
             ))
         return tuple(packets)
@@ -424,7 +1303,7 @@ class SpecQualityPlugin:
         packet: InvestigationPacket, check: CheckContract, context: PlatformContext,
     ) -> Mapping[str, Any]:
         """Assemble paged Agent review records into the canonical Spec envelope."""
-        del packet, check, context
+        del check, context
         readiness_context = finalization.get("readiness_context")
         if not isinstance(readiness_context, Mapping):
             raise PlatformContractError(
@@ -437,12 +1316,78 @@ class SpecQualityPlugin:
             raise PlatformContractError(
                 "SPEC_REVIEW_INVALID", "reviewer_origin_decisions must be an array of objects",
             )
+        if "checklist_review" in readiness_context:
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID",
+                "Checkpoint finalization must not resend persisted checklist_review items",
+            )
         decisions: list[Mapping[str, Any]] = []
+        checklist_review: list[Mapping[str, Any]] = []
+        cross_document_review: list[Mapping[str, Any]] = []
         for checkpoint in checkpoints:
+            if checkpoint.collection_id == "checklist-dimensions":
+                raw_checklist = checkpoint.payload.get("checklist_review")
+                if not isinstance(raw_checklist, (tuple, list)) or not raw_checklist:
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID",
+                        "Each Spec checklist checkpoint requires checklist_review",
+                    )
+                check_ids: list[str] = []
+                for item in raw_checklist:
+                    if not isinstance(item, Mapping):
+                        raise PlatformContractError(
+                            "SPEC_REVIEW_INVALID", "Checkpoint checklist reviews must be objects",
+                        )
+                    check_ids.append(str(item.get("check_id", "")))
+                    checklist_review.append(dict(item))
+                if tuple(check_ids) != checkpoint.item_ids:
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID",
+                        "Checklist checkpoint payload must preserve its declared CHK order",
+                    )
+                continue
+            if checkpoint.collection_id == "cross-document-relationships":
+                raw_reviews = checkpoint.payload.get("cross_document_review")
+                if not isinstance(raw_reviews, (tuple, list)) or not raw_reviews:
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID",
+                        "Each cross-document checkpoint requires cross_document_review",
+                    )
+                relationship_ids: list[str] = []
+                for item in raw_reviews:
+                    if not isinstance(item, Mapping):
+                        raise PlatformContractError(
+                            "SPEC_REVIEW_INVALID",
+                            "Cross-document checkpoint reviews must be objects",
+                        )
+                    relationship_ids.append(str(item.get("relationship_id", "")))
+                    cross_document_review.append(dict(item))
+                    raw_decisions = item.get("decisions")
+                    if not isinstance(raw_decisions, (tuple, list)):
+                        raise PlatformContractError(
+                            "SPEC_REVIEW_INVALID",
+                            "Cross-document checkpoint review decisions must be an array",
+                        )
+                    decisions.extend(
+                        dict(decision) for decision in raw_decisions
+                        if isinstance(decision, Mapping)
+                    )
+                if set(relationship_ids) != set(checkpoint.item_ids) or len(
+                    relationship_ids
+                ) != len(set(relationship_ids)):
+                    raise PlatformContractError(
+                        "SPEC_REVIEW_INVALID",
+                        "Cross-document checkpoint must cover its relationships exactly once",
+                    )
+                continue
+            if checkpoint.collection_id not in {"candidate-findings", "document-navigation"}:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID", "Spec review checkpoint uses an unsupported collection",
+                )
             raw_decisions = checkpoint.payload.get("decisions")
             if not isinstance(raw_decisions, (tuple, list)) or not raw_decisions:
                 raise PlatformContractError(
-                    "SPEC_REVIEW_INVALID", "Each Spec review checkpoint requires decisions",
+                    "SPEC_REVIEW_INVALID", "Each Spec finding checkpoint requires decisions",
                 )
             handled: list[str] = []
             for item in raw_decisions:
@@ -461,12 +1406,104 @@ class SpecQualityPlugin:
                 raise PlatformContractError(
                     "SPEC_REVIEW_INVALID", "Checkpoint payload must cover its declared candidate IDs exactly once",
                 )
+        expected_checks = tuple(str(item["id"]) for item in _CHECKLIST)
+        checklist_review.sort(key=lambda item: expected_checks.index(str(item.get("check_id"))))
+        if tuple(item.get("check_id") for item in checklist_review) != expected_checks:
+            raise PlatformContractError(
+                "SPEC_REVIEW_INCOMPLETE",
+                "Checkpointed review must cover CHK-01 through CHK-18 exactly once",
+            )
         decisions.extend(dict(item) for item in reviewer_origin)
-        return {"review": {
-            "review_schema_version": "1.0.0",
-            "readiness_context": dict(readiness_context),
+        if any(
+            item.get("semantic_type") in {
+                "ambiguity", "conflict", "contradiction", "drift", "unverified_dependency",
+            }
+            for item in reviewer_origin
+        ):
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID",
+                "Cross-document findings must come from relationship review checkpoints",
+            )
+        cross_scope = packet.evidence[0].payload.get("crossDocumentPacket") if packet.evidence else None
+        if isinstance(cross_scope, Mapping):
+            relationship_order = [
+                str(item["relationship_id"])
+                for item in cross_scope.get("scope", {}).get("relationships", ())
+            ]
+            cross_document_review.sort(
+                key=lambda item: relationship_order.index(str(item.get("relationship_id"))),
+            )
+            if [str(item.get("relationship_id")) for item in cross_document_review] != relationship_order:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INCOMPLETE",
+                    "Checkpointed review must cover every declared cross-document relationship",
+                )
+        elif cross_document_review:
+            raise PlatformContractError(
+                "SPEC_REVIEW_INVALID",
+                "Single-document review cannot contain cross-document relationship checkpoints",
+            )
+        assembled_context = dict(readiness_context)
+        assembled_context["checklist_review"] = checklist_review
+        # The current Spec policy is v1.3.  A checkpointed review is a
+        # formal decision boundary, so silently assembling a legacy v1.2
+        # envelope would let an Agent omit the source-bound semantic fields
+        # and still publish a completed result.  Fail at the boundary with a
+        # repairable contract error instead of downgrading the review.
+        strict_review = bool(checklist_review) and all(
+            isinstance(item, Mapping)
+            and all(
+                field in item
+                for field in (
+                    "applicability", "observation", "gap", "impact",
+                    "recommendation", "owner", "next_action", "confidence",
+                )
+            )
+            for item in checklist_review
+        )
+        if not strict_review:
+            raise PlatformContractError(
+                "SPEC_REVIEW_SCHEMA_OUTDATED",
+                "Checkpointed Spec review must use review schema 1.3.0 and provide "
+                "applicability, observation, gap, impact, recommendation, owner, "
+                "next_action, and confidence for all 18 checklist dimensions",
+            )
+        review_envelope: dict[str, Any] = {
+            "review_schema_version": "1.3.0" if strict_review else "1.2.0",
+            "readiness_context": assembled_context,
             "decisions": decisions,
-        }}
+            "cross_document_review": cross_document_review,
+        }
+        raw_candidates = packet.evidence[0].payload.get("candidateFindings", ()) if packet.evidence else ()
+        if isinstance(raw_candidates, (tuple, list)):
+            candidate_graph = build_candidate_evidence_graph(
+                raw_candidates,
+                work_item_id=packet.work_item.work_item_id,
+                check_id=packet.check_id,
+                check_version=packet.check_version,
+                decisions=decisions,
+            )
+            if not candidate_graph.coverage_complete:
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INCOMPLETE",
+                    "Finalized Spec review must dispose every candidate in the evidence graph",
+                )
+            review_envelope["candidate_graph"] = render_candidate_evidence_graph(candidate_graph)
+            validate_candidate_evidence_graph_projection(review_envelope["candidate_graph"])
+        if strict_review:
+            raw_context = packet.evidence[0].payload.get("documentContext") if packet.evidence else None
+            if not isinstance(raw_context, Mapping):
+                raise PlatformContractError(
+                    "SPEC_REVIEW_INVALID",
+                    "Strict v1.3 review requires a documentContext in the investigation packet",
+                )
+            review_envelope["document_context"] = _review_document_context(raw_context)
+        return {
+            "review": review_envelope,
+            "result_delivery": _actionable_result_delivery(
+                decisions, checklist_review, packet,
+            ),
+        }
 
     def summarize(self, work_items: Sequence[WorkItem], investigations: Sequence[InvestigationPacket],
                   decisions: Sequence[Any], status: str) -> Mapping[str, Any]:
@@ -490,24 +1527,28 @@ class SpecQualityPlugin:
             if isinstance(manifest, Mapping):
                 unavailable_evidence.extend(manifest.get("unavailable_evidence", ()))
 
-        reviewed_reports: list[dict[str, Any]] = []
+        reviewed_reports: list[tuple[dict[str, Any], InvestigationPacket]] = []
         for decision in decisions:
             details = getattr(decision, "details", None)
             packet = packet_by_id.get(getattr(decision, "work_item_id", ""))
             if isinstance(details, Mapping) and details.get("review") and packet is not None:
-                reviewed_reports.append(evaluate_review(decision, packet))
+                reviewed_reports.append((evaluate_review(decision, packet), packet))
 
         reviewed = bool(decisions) and len(reviewed_reports) == len(decisions)
         precedence = {"READY": 0, "REWORK": 1, "UNVERIFIED": 2, "ESCALATE": 3}
         readiness = {"status": "UNVERIFIED", "reason": "Deterministic scanner output is candidate evidence only; semantic reviewer confirmation is required."}
         if reviewed_reports:
-            readiness = max((report["readiness"] for report in reviewed_reports), key=lambda item: precedence[item["status"]])
+            readiness = max(
+                (report["readiness"] for report, _packet in reviewed_reports),
+                key=lambda item: precedence[item["status"]],
+            )
 
         status_counts = {name: 0 for name in ("CONFIRMED", "SUPPRESSED", "MERGED", "UNVERIFIED")}
         confirmed_findings: list[dict[str, Any]] = []
         checklist_counts = {name: 0 for name in ("PASS", "REWORK", "ESCALATE", "UNVERIFIED")}
         checklist_items: list[dict[str, Any]] = []
-        for report in reviewed_reports:
+        remediations: list[dict[str, Any]] = []
+        for report, packet in reviewed_reports:
             for finding in report["reviewed_findings"]:
                 finding_status = finding["status"]
                 status_counts[finding_status] += 1
@@ -516,14 +1557,28 @@ class SpecQualityPlugin:
                         key: finding.get(key) for key in (
                             "finding_id", "severity", "object_id", "dimension", "gap",
                             "impact", "recommendation", "closure_evidence", "evidence",
+                            "semantic_type", "relationship_id", "document_ids",
+                            "affected_elements", "resolution_owner", "next_action",
+                            "evidence_refs",
                         )
                     })
             context = report["readiness_context"]
+            delivery = _actionable_result_delivery(
+                report["reviewed_findings"], context["checklist_review"], packet,
+            )
+            remediations.extend(delivery["remediations"])
             for item in context["checklist_review"]:
                 checklist_counts[item["status"]] += 1
-                checklist_items.append({"checkId": item["check_id"], "status": item["status"], "note": item["note"]})
+                checklist_items.append({
+                    "checkId": item["check_id"], "status": item["status"],
+                    "note": item["note"], "evidenceRefs": [
+                        dict(ref) if isinstance(ref, Mapping) else ref
+                        for ref in item.get("evidence_refs", ())
+                    ],
+                })
         handled_candidate_count = sum(
-            report["review_summary"]["handled_candidate_count"] for report in reviewed_reports
+            report["review_summary"]["handled_candidate_count"]
+            for report, _packet in reviewed_reports
         )
 
         work_item_summaries = []
@@ -551,6 +1606,7 @@ class SpecQualityPlugin:
                 "pendingCandidateCount": max(candidate_count - handled_candidate_count, 0),
                 "statusCounts": status_counts,
                 "confirmedFindings": confirmed_findings,
+                "remediations": remediations,
                 "checklist": {"total": 18 * len(work_items), "statusCounts": checklist_counts, "items": checklist_items},
             },
             "policy": {"policyId": _POLICY_ID, "policyVersion": _POLICY_VERSION, "authorityVersion": _AUTHORITY_VERSION},

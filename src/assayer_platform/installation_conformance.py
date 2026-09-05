@@ -270,6 +270,12 @@ def inspect_plugin_installation(
         isolated_env = os.environ.copy()
         isolated_env.pop("ASSAYER_RESOURCE_ROOT", None)
         isolated_env.pop("PYTHONPATH", None)
+        # The worker is intentionally isolated from the caller's environment,
+        # but it still needs the installed Assayer platform harness to load
+        # ``assayer_platform.installation_conformance``.  Point it at the
+        # platform distribution that is executing this gate (the plugin under
+        # test remains first on sys.path inside the worker).
+        isolated_env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         isolated_env.update({
             "PYTHONNOUSERSITE": "1",
             "UV_CACHE_DIR": str(temporary / "uv-cache"),

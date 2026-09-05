@@ -223,6 +223,21 @@ registration = PluginRegistration(
             {"PLUGIN_IDENTITY_MISMATCH", "PLUGIN_RUNTIME_INCOMPLETE"},
         )
 
+    def test_evidence_graph_feature_requires_runtime_marker(self):
+        declared = self.registration(result_features=frozenset({"evidence_graph"}))
+        report = inspect_plugin_registration(declared, construct_implementations=True)
+        self.assertTrue(report.passed)
+
+        class Unmarked(ConfigQualityPlugin):
+            evidence_graph_enabled = False
+
+        unmarked = self.registration(
+            plugin_factory=lambda: Unmarked(),
+            result_features=frozenset({"evidence_graph"}),
+        )
+        report = inspect_plugin_registration(unmarked, construct_implementations=True)
+        self.assertIn("PLUGIN_RESULT_FEATURE_UNIMPLEMENTED", {issue.code for issue in report.issues})
+
     def test_registration_validation_does_not_construct_the_runtime(self):
         def unavailable_until_execution():
             raise RuntimeError("live runtime is not configured")

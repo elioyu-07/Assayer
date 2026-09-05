@@ -9,8 +9,12 @@ lifecycle or validation rules.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
+import logging
+import os
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -33,13 +37,18 @@ from .contract import (
 from .plugin_registry import PluginRegistry, PluginRegistration
 from .result_delivery import StagedResultDocument
 from .canonical_result import validate_canonical_result
+from .actionable_result import extract_result_delivery
+from .evidence_graph import validate_candidate_evidence_graph_projection
+from .evidence_collection import EvidenceCollectionPager
 from .ledger import JsonPlatformLedgerStore, workflow_progress
+from .ownership import RunOwnership
 from .session import InteractivePlatformRun, InteractivePlatformSession
 
 
 INTERACTIVE_PROTOCOL_VERSION = "1.0"
 INTERACTIVE_OPERATIONS = (
     "start",
+    "resume",
     "advance",
     "get_result",
     "discover",
@@ -49,6 +58,9 @@ INTERACTIVE_OPERATIONS = (
     "progress",
     "finish",
 )
+
+_RUN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{2,127}$")
+_LOG = logging.getLogger(__name__)
 
 DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE = 20
 MAX_EVIDENCE_COLLECTION_PAGE_SIZE = 100
@@ -68,6 +80,63 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (tuple, list, set, frozenset)):
         return [_plain(item) for item in value]
     return value
+
+
+def _result_evidence_graphs(investigations: Sequence[InvestigationPacket]) -> list[dict[str, Any]]:
+    """Build a bounded summary of optional plugin evidence graphs."""
+    result: list[dict[str, Any]] = []
+    for packet in investigations:
+        payload = packet.evidence[0].payload if packet.evidence else None
+        graph = payload.get("candidateGraph") if isinstance(payload, Mapping) else None
+        if not isinstance(graph, Mapping):
+            continue
+        validate_candidate_evidence_graph_projection(graph)
+        result.append({"workItemId": packet.work_item.work_item_id, **_plain(graph)})
+    return result
+
+
+def _evidence_graph_progress(run: InteractivePlatformRun) -> dict[str, Any]:
+    """Summarize candidate coverage from immutable packets and checkpoints."""
+    total = covered = 0
+    pending_ids: list[str] = []
+    by_item: list[dict[str, Any]] = []
+    checkpointed = {
+        item_id
+        for checkpoint in run.effective_review_checkpoints
+        for item_id in checkpoint.item_ids
+    }
+    for packet in run.investigations.values():
+        payload = packet.evidence[0].payload if packet.evidence else None
+        graph = payload.get("candidateGraph") if isinstance(payload, Mapping) else None
+        candidates = payload.get("candidateFindings", ()) if isinstance(payload, Mapping) else ()
+        if not isinstance(graph, Mapping) or not isinstance(candidates, (tuple, list)):
+            continue
+        validate_candidate_evidence_graph_projection(graph)
+        ids = [str(item.get("candidate_id")) for item in candidates if isinstance(item, Mapping) and item.get("candidate_id")]
+        # A deterministic plugin may already emit a fully disposed graph. For
+        # Agent-review graphs, checkpoint membership is the durable coverage
+        # boundary; never treat the scanner's candidate existence as review.
+        pending = [] if graph.get("coverageComplete") is True else [
+            item_id for item_id in ids if item_id not in checkpointed
+        ]
+        item_covered = len(ids) - len(pending)
+        total += len(ids)
+        covered += item_covered
+        pending_ids.extend(pending)
+        by_item.append({
+            "workItemId": packet.work_item.work_item_id,
+            "candidateCount": len(ids),
+            "coveredCandidateCount": item_covered,
+            "pendingCandidateIds": pending,
+            "coverageComplete": not pending,
+        })
+    return {
+        "candidateCount": total,
+        "coveredCandidateCount": covered,
+        "pendingCandidateIds": pending_ids,
+        "coverageComplete": not pending_ids,
+        "workItems": by_item,
+    }
 
 
 def _proposal(value: Mapping[str, Any], check_id: str, check_version: str) -> DecisionProposal:
@@ -138,6 +207,24 @@ def _terminal_result_views(
     decided = len(decided_ids)
     failure_count = len(failures)
     needs_review_count = outcome_counts["needs_review"]
+    packet_by_id = {
+        item.work_item.work_item_id: item for item in investigations
+    }
+    actionability_statuses: list[str] = []
+    remediation_count = 0
+    if status != "failed":
+        for decision in decisions:
+            packet = packet_by_id.get(decision.work_item_id)
+            if packet is None:
+                continue
+            delivery_status, remediations = extract_result_delivery(decision, packet)
+            actionability_statuses.append(delivery_status)
+            remediation_count += len(remediations)
+    actionability = (
+        "not_declared" if not actionability_statuses or "not_declared" in actionability_statuses
+        else "partial" if "partial" in actionability_statuses
+        else "complete"
+    )
     if status == "failed":
         message = (
             f"The Run failed with {failure_count} recorded failure(s). "
@@ -165,7 +252,12 @@ def _terminal_result_views(
             f"The Run completed its declared scope; {needs_review_count} decision(s) "
             "still require review before they can be treated as resolved."
         )
+        if remediation_count:
+            message += f" {remediation_count} confirmed remediation item(s) also require changes."
         next_action = (
+            f"Address the {remediation_count} confirmed remediation item(s), then review "
+            f"the {needs_review_count} unresolved decision(s) and their missing facts."
+            if remediation_count else
             f"Review the {needs_review_count} needs-review decision(s) and resolve "
             "the concrete gaps listed for each WorkItem."
         )
@@ -197,6 +289,8 @@ def _terminal_result_views(
             result: 0 for result in outcome_counts
         },
         "needsReviewCount": needs_review_count if status != "failed" else 0,
+        "remediationCount": remediation_count if status != "failed" else 0,
+        "actionability": actionability if status != "failed" else "not_declared",
         "failureCount": failure_count,
         "invalidatedDecisionCount": decided if status == "failed" else 0,
         "nextAction": next_action,
@@ -310,6 +404,7 @@ def _evidence_collections(packet: InvestigationPacket) -> dict[str, dict[str, An
         pointer = descriptor.get("jsonPointer")
         item_id_field = descriptor.get("itemIdField")
         group_by = descriptor.get("groupBy", ())
+        review_required = descriptor.get("reviewRequired", True)
         if not all(isinstance(value, str) and value for value in (
             collection_id, evidence_id, item_id_field,
         )) or not isinstance(pointer, str):
@@ -319,6 +414,10 @@ def _evidence_collections(packet: InvestigationPacket) -> dict[str, dict[str, An
         if collection_id in collections:
             raise PlatformContractError(
                 "INVALID_EVIDENCE_COLLECTION", "Evidence collection IDs must be unique within an InvestigationPacket",
+            )
+        if not isinstance(review_required, bool):
+            raise PlatformContractError(
+                "INVALID_EVIDENCE_COLLECTION", "Evidence collection reviewRequired must be boolean",
             )
         if evidence_id not in evidence_by_id:
             raise PlatformContractError(
@@ -375,6 +474,7 @@ def _evidence_collections(packet: InvestigationPacket) -> dict[str, dict[str, An
             "jsonPointer": pointer,
             "itemIdField": item_id_field,
             "groupBy": tuple(group_by),
+            "reviewRequired": review_required,
             "items": tuple(items),
             "itemIds": tuple(item_ids),
             "groups": groups,
@@ -389,6 +489,7 @@ def _collection_index(collections: Mapping[str, Mapping[str, Any]]) -> list[dict
         "itemCount": len(collection["itemIds"]),
         "itemIdField": collection["itemIdField"],
         "groupBy": list(collection["groupBy"]),
+        "reviewRequired": collection["reviewRequired"],
         "groupCount": len(collection["groups"]),
         "groups": [{
             "groupKey": group["groupKey"],
@@ -423,11 +524,11 @@ class InteractivePluginController:
         self.capabilities_resolver = capabilities_resolver
         self._controller_epoch = uuid.uuid4().hex
         self._runs: dict[str, dict[str, Any]] = {}
+        self._ownership_locks: dict[str, Any] = {}
         self._terminal_results: dict[str, dict[str, Any]] = {}
         self._resume_error: PlatformContractError | None = None
         self._terminal_error: PlatformContractError | None = None
         self._restore_latest_terminal_result()
-        self._restore_active_run()
 
     @property
     def operations(self) -> tuple[str, ...]:
@@ -484,6 +585,11 @@ class InteractivePluginController:
         run_id = run_id or f"run-{uuid.uuid4().hex}"
         if run_id in self._runs:
             raise PlatformContractError("RUN_CONFLICT", "An interactive Run with this ID already exists")
+        existing_root = self.output_root / run_id
+        if existing_root.exists() and any(existing_root.iterdir()):
+            raise PlatformContractError(
+                "RUN_CONFLICT", "An interactive Run with this ID already has durable state; use explicit resume",
+            )
         resolved_runtime = runtime
         if self.runtime_resolver is not None:
             resolved_runtime = self.runtime_resolver(registration, scope)
@@ -501,25 +607,28 @@ class InteractivePluginController:
         if getattr(plugin, "manifest", None) != registration.manifest:
             raise PlatformContractError("PLUGIN_IDENTITY_MISMATCH", "Plugin factory returned different registered metadata")
         store = JsonPlatformLedgerStore(self.output_root / run_id)
-        run = InteractivePlatformSession(registration.manifest).begin(
-            context, scope, check.check_id, check.version, store,
-        )
-        self._runs[run_id] = {
-            "registration": registration,
-            "scope": scope,
-            "context": context,
-            "plugin": plugin,
-            "run": run,
-            "committer": registration.create_committer(resolved_runtime),
-            "evidence_collections": {},
-            "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
-            "discovery_complete": False,
-        }
-        self._write_resume_descriptor(run_id, registration, scope, caps)
+        self._claim_ownership(run_id)
+        try:
+            run = InteractivePlatformSession(registration.manifest).begin(
+                context, scope, check.check_id, check.version, store,
+            )
+            self._runs[run_id] = {
+                "registration": registration,
+                "scope": scope,
+                "context": context,
+                "plugin": plugin,
+                "run": run,
+                "committer": registration.create_committer(resolved_runtime),
+                "evidence_collections": {},
+                "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
+                "discovery_complete": False,
+            }
+            self._write_resume_descriptor(run_id, registration, scope, caps)
+        except Exception:
+            self._runs.pop(run_id, None)
+            self._release_ownership(run_id, reason="start_failed")
+            raise
         return self._response(run_id, "started", {"check": {"checkId": check.check_id, "version": check.version}})
-
-    def _active_pointer_path(self) -> Path:
-        return self.output_root / ".active-plugin-run.json"
 
     def _terminal_pointer_path(self) -> Path:
         return self.output_root / ".latest-plugin-run.json"
@@ -591,7 +700,7 @@ class InteractivePluginController:
                 ) from error
         document = StagedResultDocument({
             key: item for key, item in full_result.items()
-            if key in {"resultOverview", "summary", "decisions", "reviewItems", "failures"}
+            if key in {"resultOverview", "summary", "decisions", "reviewItems", "evidenceGraph", "failures"}
         }, source_digest=expected_digest)
         workflow = ledger.get("workflow")
         if not isinstance(workflow, Mapping) or workflow.get("state") != status:
@@ -675,73 +784,118 @@ class InteractivePluginController:
             "scope": _plain(scope), "capabilities": sorted(set(capabilities)),
         }
         run_path = self.output_root / run_id / "platform-resume.json"
-        pointer = self._active_pointer_path()
         try:
-            for destination, value in (
-                (run_path, descriptor), (pointer, {
-                    "schemaVersion": "1.0.0", "runId": run_id,
-                    "ownerEpoch": self._controller_epoch,
-                }),
-            ):
-                temporary = destination.with_name(destination.name + ".tmp")
-                temporary.write_text(
-                    json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-                    encoding="utf-8",
-                )
-                temporary.replace(destination)
+            temporary = run_path.with_name(run_path.name + ".tmp")
+            temporary.write_text(
+                json.dumps(descriptor, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(run_path)
         except OSError as error:
             raise PlatformContractError(
                 "RUN_RESUME_PERSIST_FAILED", "Interactive Run resume metadata could not be persisted",
             ) from error
 
-    def _restore_active_run(self) -> None:
-        pointer = self._active_pointer_path()
-        if not pointer.is_file():
-            try:
-                descriptors = tuple(self.output_root.glob("*/platform-resume.json"))
-                if not descriptors:
-                    return
-                if len(descriptors) != 1:
-                    raise PlatformContractError(
-                        "RUN_RESUME_FAILED", "More than one orphaned active Run descriptor exists",
-                    )
-                descriptor = json.loads(descriptors[0].read_text(encoding="utf-8"))
-                run_id = str(descriptor["runId"])
-                if descriptors[0].parent.name != run_id:
-                    raise PlatformContractError(
-                        "RUN_MISMATCH", "Orphaned Run descriptor path and identity differ",
-                    )
-                temporary = pointer.with_name(pointer.name + ".tmp")
-                temporary.write_text(json.dumps({
-                    "schemaVersion": "1.0.0", "runId": run_id,
-                    "ownerEpoch": descriptor.get("ownerEpoch"),
-                }, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-                temporary.replace(pointer)
-            except PlatformContractError as error:
-                self._resume_error = error
-                return
-            except Exception:
-                self._resume_error = PlatformContractError(
-                    "RUN_RESUME_FAILED", "Orphaned active Run metadata could not be reconstructed",
-                )
-                return
+    def _owner_path(self, run_id: str) -> Path:
+        return self.output_root / run_id / "platform-owner.json"
+
+    def _lock_path(self, run_id: str) -> Path:
+        return self.output_root / run_id / "platform-owner.lock"
+
+    def _claim_ownership(self, run_id: str) -> None:
+        if not _RUN_ID.fullmatch(run_id):
+            raise PlatformContractError("INVALID_RUN_ID", "Run ID is not safe for ownership persistence")
+        if run_id in self._ownership_locks:
+            return
+        run_root = self.output_root / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
         try:
-            pointer_value = json.loads(pointer.read_text(encoding="utf-8"))
-            run_id = str(pointer_value["runId"])
-            descriptor_path = self.output_root / run_id / "platform-resume.json"
+            handle = self._lock_path(run_id).open("a+", encoding="utf-8")
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            handle.close()
+            raise PlatformContractError(
+                "RUN_ALREADY_ACTIVE",
+                f"Run {run_id} is owned by another live Host; continue there or close it before resuming",
+            ) from error
+        except OSError as error:
+            if "handle" in locals():
+                handle.close()
+            raise PlatformContractError(
+                "RUN_OWNERSHIP_FAILED", "Run ownership could not be acquired",
+            ) from error
+        owner = RunOwnership(run_id, self._controller_epoch, os.getpid())
+        destination = self._owner_path(run_id)
+        try:
+            temporary = destination.with_name(destination.name + ".tmp")
+            temporary.write_text(
+                json.dumps(owner.as_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(destination)
+        except OSError as error:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
+            raise PlatformContractError(
+                "RUN_OWNERSHIP_FAILED", "Run ownership metadata could not be persisted",
+            ) from error
+        self._ownership_locks[run_id] = handle
+
+    def _release_ownership(self, run_id: str, *, reason: str) -> None:
+        handle = self._ownership_locks.pop(run_id, None)
+        if handle is None:
+            return
+        destination = self._owner_path(run_id)
+        if destination.is_file():
+            try:
+                value = json.loads(destination.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                value = {}
+            try:
+                owner = RunOwnership.from_mapping(value)
+            except PlatformContractError:
+                owner = None
+            if owner is not None and owner.owner_epoch == self._controller_epoch:
+                try:
+                    temporary = destination.with_name(destination.name + ".tmp")
+                    temporary.write_text(
+                        json.dumps(owner.released_record(reason).as_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    temporary.replace(destination)
+                except OSError as error:
+                    _LOG.debug("Run ownership release metadata could not be persisted", exc_info=error)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+    def resume(self, run_id: str) -> dict[str, Any]:
+        """Explicitly claim and restore one durable interactive Run."""
+        if self._runs:
+            raise PlatformContractError("RUN_CONFLICT", "This Host already owns an interactive plugin Run")
+        if not _RUN_ID.fullmatch(run_id):
+            raise PlatformContractError("INVALID_RUN_ID", "Run ID is not safe for ownership persistence")
+        descriptor_path = self.output_root / run_id / "platform-resume.json"
+        if not descriptor_path.is_file():
+            raise PlatformContractError(
+                "RUN_RESUME_FAILED", "No recoverable Run exists for the requested Run ID",
+            )
+        self._claim_ownership(run_id)
+        try:
             descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
             if descriptor.get("runId") != run_id:
-                raise PlatformContractError("RUN_MISMATCH", "Active Run pointer and resume descriptor differ")
+                raise PlatformContractError("RUN_MISMATCH", "Run path and resume descriptor differ")
             store = JsonPlatformLedgerStore(self.output_root / run_id)
             ledger = store.load(run_id)
             if ledger is None:
-                raise PlatformContractError("RUN_RESUME_FAILED", "The active Run ledger is missing")
+                raise PlatformContractError("RUN_RESUME_FAILED", "The requested Run ledger is missing")
             if ledger.get("status") != "running":
                 self._hydrate_terminal_result(run_id, ledger)
                 self._write_terminal_pointer(run_id)
-                pointer.unlink(missing_ok=True)
                 descriptor_path.unlink(missing_ok=True)
-                return
+                self._release_ownership(run_id, reason="terminal_replay")
+                return self.terminal_status(run_id)
             registration = self.registry.select(
                 plugin_id=str(descriptor["pluginId"]),
                 check_ref=(str(descriptor["checkId"]), str(descriptor["checkVersion"])),
@@ -787,26 +941,47 @@ class InteractivePluginController:
                 "discovery_complete": run.discovery_complete,
             }
             self._write_resume_descriptor(run_id, registration, scope, capabilities)
+            response = self.advance(run_id)
+            response["resumed"] = True
+            return response
         except PlatformContractError as error:
-            self._resume_error = error
+            self._runs.pop(run_id, None)
+            self._release_ownership(run_id, reason="resume_failed")
+            raise
         except Exception as error:
-            self._resume_error = PlatformContractError(
+            self._runs.pop(run_id, None)
+            self._release_ownership(run_id, reason="resume_failed")
+            raise PlatformContractError(
                 "RUN_RESUME_FAILED", "The active interactive Run could not be reconstructed",
-            )
+            ) from error
 
     def _assert_active_owner(self, run_id: str) -> None:
-        pointer = self._active_pointer_path()
+        handle = self._ownership_locks.get(run_id)
+        if handle is None or handle.closed:
+            raise PlatformContractError(
+                "STALE_RUN_OWNER", "This Host does not hold the writer lock for the requested Run",
+            )
         try:
-            value = json.loads(pointer.read_text(encoding="utf-8"))
+            value = json.loads(self._owner_path(run_id).read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
             raise PlatformContractError(
-                "RUN_RESUME_FAILED", "The active Run ownership record is unavailable",
+                "RUN_OWNERSHIP_FAILED", "The Run ownership record is unavailable",
             ) from error
-        if value.get("runId") != run_id or value.get("ownerEpoch") != self._controller_epoch:
-            raise PlatformContractError(
-                "STALE_RUN_OWNER",
-                "This Host no longer owns the active Run; continue through the latest Host process",
-            )
+        try:
+            RunOwnership.from_mapping(value).assert_active(run_id, self._controller_epoch)
+        except PlatformContractError:
+            raise
+
+    def close(self) -> None:
+        """Release live writer locks without deleting recoverable Run state."""
+        for run_id in tuple(self._ownership_locks):
+            self._release_ownership(run_id, reason="shutdown")
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception as error:
+            _LOG.debug("Run ownership could not be released during finalization", exc_info=error)
 
     def discover(self, run_id: str) -> dict[str, Any]:
         self._assert_active_owner(run_id)
@@ -978,48 +1153,9 @@ class InteractivePluginController:
         collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
         if collection is None:
             raise PlatformContractError("UNKNOWN_EVIDENCE_COLLECTION", "Evidence collection is not declared for this WorkItem")
-        if page_size is not None and (
-            not isinstance(page_size, int) or isinstance(page_size, bool) or page_size < 1
-        ):
-            raise PlatformContractError("INVALID_PAGE_SIZE", "Evidence collection page size must be a positive integer")
-        size = min(page_size or DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE, MAX_EVIDENCE_COLLECTION_PAGE_SIZE)
-        selected_items = collection["items"]
-        selected_ids = collection["itemIds"]
-        if group_key is not None:
-            group = collection["groups"].get(group_key)
-            if group is None:
-                raise PlatformContractError(
-                    "UNKNOWN_EVIDENCE_GROUP", "Evidence collection group key is not valid for this collection",
-                )
-            wanted_ids = set(group["itemIds"])
-            pairs = tuple(
-                (item_id, item) for item_id, item in zip(collection["itemIds"], collection["items"])
-                if item_id in wanted_ids
-            )
-            selected_ids = tuple(item_id for item_id, _ in pairs)
-            selected_items = tuple(item for _, item in pairs)
-        fingerprint_source = "\x1f".join((work_item_id, collection_id, group_key or "", *selected_ids))
-        fingerprint = hashlib.sha256(fingerprint_source.encode("utf-8")).hexdigest()[:16]
-        start = 0
-        if cursor is not None:
-            if not isinstance(cursor, str) or not cursor.startswith(f"{fingerprint}:"):
-                raise PlatformContractError(
-                    "INVALID_CURSOR", "Evidence collection cursor does not match the requested collection and group",
-                )
-            try:
-                start = int(cursor.split(":", 1)[1])
-            except (TypeError, ValueError):
-                raise PlatformContractError("INVALID_CURSOR", "Evidence collection cursor is malformed") from None
-            if start < 0 or start > len(selected_ids):
-                raise PlatformContractError("INVALID_CURSOR", "Evidence collection cursor is outside the collection")
-        end = min(start + size, len(selected_ids))
-        next_cursor = f"{fingerprint}:{end}" if end < len(selected_ids) else None
-        group_summaries = [{
-            "groupKey": group["groupKey"],
-            "values": _plain(group["values"]),
-            "count": len(group["itemIds"]),
-            "itemIds": list(group["itemIds"]),
-        } for group in collection["groups"].values()] if group_key is None and cursor is None else []
+        page = EvidenceCollectionPager(
+            collection, work_item_id=work_item_id, collection_id=collection_id,
+        ).page(cursor=cursor, page_size=page_size, group_key=group_key)
         return self._response(run_id, "evidence_collection_expanded", {
             "workItemId": work_item_id,
             "collection": {
@@ -1027,15 +1163,16 @@ class InteractivePluginController:
                 "evidenceId": collection["evidenceId"],
                 "itemIdField": collection["itemIdField"],
                 "groupBy": list(collection["groupBy"]),
+                "reviewRequired": collection["reviewRequired"],
                 "totalItems": len(collection["itemIds"]),
                 "selectedGroupKey": group_key,
-                "selectedItems": len(selected_ids),
+                "selectedItems": page["selectedItems"],
             },
-            "groupSummaries": group_summaries,
-            "items": [_plain(item) for item in selected_items[start:end]],
-            "itemIds": list(selected_ids[start:end]),
-            "page": {"start": start, "count": end - start, "total": len(selected_ids)},
-            "nextCursor": next_cursor,
+            "groupSummaries": _plain(page["groupSummaries"]),
+            "items": [_plain(item) for item in page["items"]],
+            "itemIds": page["itemIds"],
+            "page": page["page"],
+            "nextCursor": page["nextCursor"],
         })
 
     def checkpoint_review(
@@ -1051,6 +1188,11 @@ class InteractivePluginController:
         if collection is None:
             raise PlatformContractError(
                 "UNKNOWN_EVIDENCE_COLLECTION", "Review checkpoint references an undeclared Evidence collection",
+            )
+        if not collection["reviewRequired"]:
+            raise PlatformContractError(
+                "EVIDENCE_COLLECTION_NOT_REVIEWABLE",
+                "Reference Evidence collections can be expanded but cannot receive review checkpoints",
             )
         requested = tuple(sorted(item_ids))
         if len(requested) > MAX_EVIDENCE_COLLECTION_PAGE_SIZE:
@@ -1139,7 +1281,43 @@ class InteractivePluginController:
             if packet is None or work_item_id in run.decisions:
                 continue
             collections = state["evidence_collections"].get(work_item_id, {})
+            evidence_payload = packet.evidence[0].payload if packet.evidence else {}
+            review_context = None
+            if isinstance(evidence_payload, Mapping):
+                raw_context = evidence_payload.get("documentContext")
+                raw_facts = evidence_payload.get("sourceFacts")
+                if isinstance(raw_context, Mapping):
+                    # Keep the semantic context visible at every bounded
+                    # Agent turn without repeating the full source document.
+                    review_context = {"documentContext": _plain(raw_context)}
+                    if isinstance(raw_facts, Mapping):
+                        identifiers = raw_facts.get("identifiers", {})
+                        compact_identifiers = {}
+                        if isinstance(identifiers, Mapping):
+                            for kind, values in identifiers.items():
+                                if isinstance(values, (tuple, list)):
+                                    compact_identifiers[str(kind)] = [
+                                        _plain(item) for item in values[:200]
+                                    ]
+                        review_context["sourceFacts"] = {
+                            "schemaVersion": raw_facts.get("schemaVersion"),
+                            "identifierCounts": {
+                                str(kind): len(values) if isinstance(values, (tuple, list)) else 0
+                                for kind, values in identifiers.items()
+                            } if isinstance(identifiers, Mapping) else {},
+                            "identifiers": compact_identifiers,
+                            "explicitStatements": [
+                                _plain(item) for item in raw_facts.get("explicitStatements", ())[:80]
+                            ] if isinstance(raw_facts.get("explicitStatements"), (tuple, list)) else [],
+                        }
+            reference_collection_index = _collection_index({
+                collection_id: collection
+                for collection_id, collection in collections.items()
+                if not collection["reviewRequired"]
+            })
             for collection in collections.values():
+                if not collection["reviewRequired"]:
+                    continue
                 checkpoints = tuple(
                     item for item in run.effective_review_checkpoints
                     if item.work_item_id == work_item_id
@@ -1163,7 +1341,7 @@ class InteractivePluginController:
                         break
                 if remaining_pairs:
                     selected = remaining_pairs[:page_size]
-                    return {
+                    task = {
                         "kind": "review_evidence_items",
                         "workItemId": work_item_id,
                         "collectionId": collection["collectionId"],
@@ -1174,33 +1352,46 @@ class InteractivePluginController:
                             "values": _plain(selected_group["values"]),
                             "remainingItems": len(remaining_pairs),
                         } if selected_group is not None else None),
+                        "referenceCollectionIndex": reference_collection_index,
                         "coverage": {
                             "reviewedItems": len(reviewed),
                             "remainingItems": len(all_remaining_pairs),
                             "totalItems": len(collection["itemIds"]),
                         },
                     }
-            if collections:
+                    if review_context is not None:
+                        task["reviewContext"] = review_context
+                    return task
+            review_collections = tuple(
+                collection for collection in collections.values()
+                if collection["reviewRequired"]
+            )
+            if review_collections:
                 checkpoints = tuple(
                     item for item in run.effective_review_checkpoints
                     if item.work_item_id == work_item_id
                 )
-                return {
+                task = {
                     "kind": "finalize_decision",
                     "workItemId": work_item_id,
                     "reviewCheckpointIds": [item.checkpoint_id for item in checkpoints],
+                    "referenceCollectionIndex": reference_collection_index,
                     "investigation": _packet(packet, include_evidence=False),
                 }
+                if review_context is not None:
+                    task["reviewContext"] = review_context
+                return task
             return {
                 "kind": "decide_work_item",
                 "workItemId": work_item_id,
+                "referenceCollectionIndex": reference_collection_index,
                 # A normal product client does not expose the diagnostic
                 # expansion operations.  When no declared collection gives
                 # the Host a bounded paging contract, return the complete
                 # immutable packet at the semantic boundary so the Agent can
                 # make an evidence-backed decision without falling back to a
                 # low-level tool.
-                "investigation": _packet(packet, include_evidence=True),
+                "investigation": _packet(packet, include_evidence=not bool(collections)),
             }
         return None
 
@@ -1220,8 +1411,8 @@ class InteractivePluginController:
             self._hydrate_terminal_result(run_id, ledger)
             self._write_terminal_pointer(run_id)
             self._runs.pop(run_id, None)
-            self._active_pointer_path().unlink(missing_ok=True)
             (self.output_root / run_id / "platform-resume.json").unlink(missing_ok=True)
+            self._release_ownership(run_id, reason="terminal_replay")
             return self.terminal_status(run_id)
         accepted_operation_id: str | None = None
         operation_replayed = False
@@ -1338,6 +1529,15 @@ class InteractivePluginController:
         if not collection_ids or not collection_ids.issubset(collections):
             raise PlatformContractError(
                 "UNKNOWN_EVIDENCE_COLLECTION", "Decision references an unknown Evidence collection",
+            )
+        required_collection_ids = {
+            collection_id for collection_id, collection in collections.items()
+            if collection["reviewRequired"] and collection["itemIds"]
+        }
+        if collection_ids != required_collection_ids:
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_INCOMPLETE",
+                "Decision checkpoints must cover every required Evidence collection",
             )
         for collection_id in collection_ids:
             expected = set(collections[collection_id]["itemIds"])
@@ -1477,13 +1677,26 @@ class InteractivePluginController:
             "reviewCheckpoints": len(run.effective_review_checkpoints),
             "reviewCheckpointRecords": len(run.review_checkpoints),
             "reviewItemsCheckpointed": sum(len(item.item_ids) for item in run.effective_review_checkpoints),
+            "evidenceGraph": _evidence_graph_progress(run),
             "inspectionBatching": {
                 "attempts": run.inspection_batches,
                 "splits": run.batch_splits,
                 "failures": run.inspection_failures,
                 "effectiveBatchSize": run.adaptive_inspect_batch_size,
-            },
+        },
         })
+
+    def record_rejection(
+        self, run_id: str, error_code: str, *, work_item_id: str | None = None,
+        operation_id: str | None = None, message: str | None = None,
+    ) -> None:
+        """Persist a Host-side rejection for the active Run when possible."""
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        state["run"].record_host_rejection(
+            error_code, work_item_id=work_item_id,
+            operation_id=operation_id, message=message,
+        )
 
     def get_result(
         self, run_id: str, section_id: str, *, cursor: str | None = None,
@@ -1610,10 +1823,12 @@ class InteractivePluginController:
             tuple(prospective_failures),
             discovery_complete=state["run"].discovery_complete,
         )
+        evidence_graphs = _result_evidence_graphs(tuple(state["run"].investigations.values()))
         full_result_payload = {
             "resultOverview": result_overview,
             "decisions": decision_views,
             "reviewItems": review_items,
+            "evidenceGraph": evidence_graphs,
             "failures": [
                 {"workItemId": item.work_item_id, "code": item.code, "message": item.message}
                 for item in prospective_failures
@@ -1629,7 +1844,7 @@ class InteractivePluginController:
         ).encode("utf-8")).hexdigest()
         result_document = StagedResultDocument({
             key: value for key, value in full_result_payload.items()
-            if key in {"resultOverview", "summary", "decisions", "reviewItems", "failures"}
+            if key in {"resultOverview", "summary", "decisions", "reviewItems", "evidenceGraph", "failures"}
         }, source_digest=full_result_digest)
         result_artifact = state["run"].store.root / "result-summary.json"
         pending_result_artifact = state["run"].store.root / "result-summary.pending.json"
@@ -1684,15 +1899,8 @@ class InteractivePluginController:
         # boundary. Remove live plugin objects while retaining only the latest
         # compact paging document for this MCP session.
         self._runs.pop(run_id, None)
-        pointer = self._active_pointer_path()
-        if pointer.is_file():
-            try:
-                value = json.loads(pointer.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                value = {}
-            if value.get("runId") == run_id:
-                pointer.unlink(missing_ok=True)
         (self.output_root / run_id / "platform-resume.json").unlink(missing_ok=True)
+        self._release_ownership(run_id, reason="terminal")
         return terminal_response
 
     def _state(self, run_id: str) -> dict[str, Any]:
@@ -1713,6 +1921,8 @@ class InteractivePluginController:
         review_remaining = 0
         for work_item_id in undecided:
             for collection in state.get("evidence_collections", {}).get(work_item_id, {}).values():
+                if not collection["reviewRequired"]:
+                    continue
                 item_ids = set(collection["itemIds"])
                 reviewed = {
                     item_id

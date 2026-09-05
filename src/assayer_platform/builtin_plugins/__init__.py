@@ -5,7 +5,9 @@ from assayer_platform import PluginRegistration, PluginRegistry
 
 from .config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from .frontend_audit import FrontendAuditPlugin, FrontendDecisionCommitter
-from .spec_quality import SpecQualityDecisionCommitter, SpecQualityPlugin
+from .spec_quality import (
+    SPEC_QUALITY_SCOPE_SCHEMA, SpecQualityDecisionCommitter, SpecQualityPlugin,
+)
 
 
 def builtin_plugin_registry() -> PluginRegistry:
@@ -21,6 +23,7 @@ def builtin_plugin_registry() -> PluginRegistry:
             plugin_factory=lambda _runtime=None: ConfigQualityPlugin(),
             decision_provider_factory=lambda _runtime=None: ConfigurationDecisionProvider(),
             capabilities=frozenset({"structured_read"}),
+            result_features=frozenset({"evidence_graph"}),
             scope_schema={
                 "type": "object", "additionalProperties": False,
                 "required": ["files"],
@@ -61,29 +64,9 @@ def builtin_plugin_registry() -> PluginRegistry:
             plugin_factory=lambda _runtime=None: SpecQualityPlugin(),
             committer_factory=lambda _runtime=None: SpecQualityDecisionCommitter(),
             capabilities=frozenset({"structured_read"}),
+            result_features=frozenset({"evidence_graph"}),
             execution_modes=frozenset({"interactive"}),
-            scope_schema={
-                "type": "object", "additionalProperties": False,
-                "required": ["files"],
-                "properties": {
-                    "files": {
-                        "type": "array", "minItems": 1,
-                        "items": {
-                            "oneOf": [
-                                {"type": "string", "minLength": 1},
-                                {
-                                    "type": "object", "additionalProperties": False,
-                                    "required": ["path"],
-                                    "properties": {
-                                        "path": {"type": "string", "minLength": 1},
-                                        "profile": {"type": "string", "minLength": 1},
-                                    },
-                                },
-                            ],
-                        },
-                    },
-                },
-            },
+            scope_schema=SPEC_QUALITY_SCOPE_SCHEMA,
         ),
     ))
 

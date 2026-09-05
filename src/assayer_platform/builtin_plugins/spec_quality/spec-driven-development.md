@@ -2,7 +2,10 @@
 
 **Version**: 2.0
 
-> **规范归属**：本文件是 Speckit/SDD profile 的规则与生命周期说明，不是默认十二章产品 Spec 的第二套强制模板。是否启用本 profile、哪些条款适用于当前审计，以 `references/authority.md` 为准。
+> **Policy role**: This file defines the Speckit/SDD profile and lifecycle. It
+> applies only when `speckit` is explicitly selected and does not silently
+> enable the optional `strict-12-chapter` profile. Applicable authority and
+> conflict rules are defined by `authority.md`.
 >
 > 本文件中的 `PASS / FAIL / EXEMPT / BLOCKED` 是 Speckit profile 内部的阶段 Gate 状态，不是审计报告的最终 readiness；最终状态只按 `references/authority.md` 输出。
 

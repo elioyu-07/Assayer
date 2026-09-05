@@ -47,6 +47,7 @@ from .interactive import (
     InteractivePluginController,
 )
 from .registry import load_plugin_manifest, validate_plugin_manifest
+from .evaluation import load_evaluation_corpus, validate_evaluation_corpus
 from .plugin_registry import PluginRegistration, PluginRegistry
 from .provider_registry import (
     ProviderRegistration,
@@ -54,6 +55,7 @@ from .provider_registry import (
     load_provider_descriptor,
     validate_provider_descriptor,
 )
+from .provider_catalog import builtin_provider_registry, installed_provider_registry
 from .provider_conformance import (
     ProviderConformanceIssue,
     ProviderConformanceReport,
@@ -79,6 +81,8 @@ from .result_conformance import (
     inspect_result_conformance,
 )
 from .result_delivery import StagedResultDocument
+from .actionable_result import extract_result_delivery, extract_result_delivery_bundle, validate_result_delivery
+from .evidence_claim import validate_evidence_claims
 from .conformance import (
     PluginConformanceIssue,
     PluginConformanceReport,
@@ -88,6 +92,28 @@ from .conformance import (
     require_plugin_registration_conformance,
 )
 from .runner import PlatformRunner
+from .state_machine import (
+    RUN_TERMINAL_STATES, RUN_WORKFLOW_STATES, WORK_ITEM_STATES,
+    derive_work_item_state, validate_terminal_transition, validate_workflow,
+    validate_workflow_transition,
+)
+from .ownership import RunOwnership
+from .observability import build_platform_observability, render_platform_observability
+from .layers import (
+    DeliveryObserver, EvidenceCollectionProvider, NavigationProvider,
+    ReviewProtocol,
+)
+from .navigation import MarkdownNavigationAdapter
+from .evidence_collection import EvidenceCollectionPager
+from .review_protocol import REVIEW_DISPOSITIONS, build_review_task, validate_review_submission
+from .delivery_observer import PlatformDeliveryObserver
+from .evidence_graph import (
+    CANDIDATE_DISPOSITIONS, EvidenceCandidate, EvidenceGraph, FindingRecord,
+    RootCauseGroup, build_candidate_evidence_graph,
+    candidate_dispositions_from_decisions, conservative_root_cause_groups,
+    render_candidate_evidence_graph, stable_candidate_fingerprint,
+    validate_candidate_evidence_graph_projection,
+)
 
 __all__ = [
     "Artifact",
@@ -140,10 +166,14 @@ __all__ = [
     "PLATFORM_API_VERSION",
     "load_plugin_manifest",
     "validate_plugin_manifest",
+    "load_evaluation_corpus",
+    "validate_evaluation_corpus",
     "PluginRegistration",
     "PluginRegistry",
     "ProviderRegistration",
     "ProviderRegistry",
+    "builtin_provider_registry",
+    "installed_provider_registry",
     "load_provider_descriptor",
     "validate_provider_descriptor",
     "ProviderConformanceIssue",
@@ -168,6 +198,10 @@ __all__ = [
     "ResultConformanceReport",
     "inspect_result_conformance",
     "StagedResultDocument",
+    "extract_result_delivery",
+    "extract_result_delivery_bundle",
+    "validate_result_delivery",
+    "validate_evidence_claims",
     "PluginConformanceIssue",
     "PluginConformanceReport",
     "inspect_plugin_registration",
@@ -175,4 +209,35 @@ __all__ = [
     "inspect_plugin_package",
     "require_plugin_registration_conformance",
     "PlatformRunner",
+    "RUN_TERMINAL_STATES",
+    "RUN_WORKFLOW_STATES",
+    "WORK_ITEM_STATES",
+    "derive_work_item_state",
+    "validate_terminal_transition",
+    "validate_workflow",
+    "validate_workflow_transition",
+    "RunOwnership",
+    "build_platform_observability",
+    "render_platform_observability",
+    "NavigationProvider",
+    "EvidenceCollectionProvider",
+    "ReviewProtocol",
+    "DeliveryObserver",
+    "MarkdownNavigationAdapter",
+    "EvidenceCollectionPager",
+    "REVIEW_DISPOSITIONS",
+    "build_review_task",
+    "validate_review_submission",
+    "PlatformDeliveryObserver",
+    "CANDIDATE_DISPOSITIONS",
+    "EvidenceCandidate",
+    "EvidenceGraph",
+    "FindingRecord",
+    "RootCauseGroup",
+    "build_candidate_evidence_graph",
+    "candidate_dispositions_from_decisions",
+    "conservative_root_cause_groups",
+    "render_candidate_evidence_graph",
+    "stable_candidate_fingerprint",
+    "validate_candidate_evidence_graph_projection",
 ]

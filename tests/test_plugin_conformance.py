@@ -15,6 +15,7 @@ from assayer_platform import (
     PlatformKernel,
     WorkItem,
     load_plugin_manifest,
+    validate_candidate_evidence_graph_projection,
 )
 from assayer_platform.builtin_plugins.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from assayer_platform.builtin_plugins.frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, FrontendLedgerCommitter, ProductFrontendRuntime
@@ -77,6 +78,19 @@ class RecordDecisionProvider:
 
 
 class CrossPluginConformanceTest(unittest.TestCase):
+    def test_config_plugin_can_publish_platform_evidence_graph(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            plugin = ConfigQualityPlugin()
+            context = PlatformContext("run", frozenset({"structured_read"}))
+            item = plugin.discover(str(path), context)[0]
+            packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]
+            graph = packet.evidence[0].payload["candidateGraph"]
+            validate_candidate_evidence_graph_projection(graph)
+            self.assertEqual(graph["candidateCount"], 3)
+            self.assertTrue(graph["coverageComplete"])
+
     def test_frontend_adapter_maps_runtime_packets_without_kernel_browser_types(self):
         class Runtime:
             def discover_work_items(self, scope, context):

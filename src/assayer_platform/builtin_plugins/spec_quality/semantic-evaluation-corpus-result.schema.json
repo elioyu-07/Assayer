@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/plugins/spec-quality/semantic-evaluation-corpus-result.schema.json",
+  "title": "Spec Quality Semantic Corpus Evaluation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "corpusId", "pluginId", "passed", "metrics", "cases", "limitations"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "corpusId": { "type": "string", "minLength": 1 },
+    "pluginId": { "const": "assayer.spec-quality" },
+    "passed": { "type": "boolean" },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "expectedCaseCount",
+        "providedCaseCount",
+        "evaluatedCaseCount",
+        "passedCaseCount",
+        "failedCaseCount",
+        "missingCaseCount",
+        "unexpectedCaseCount"
+      ],
+      "properties": {
+        "expectedCaseCount": { "type": "integer", "minimum": 0 },
+        "providedCaseCount": { "type": "integer", "minimum": 0 },
+        "evaluatedCaseCount": { "type": "integer", "minimum": 0 },
+        "passedCaseCount": { "type": "integer", "minimum": 0 },
+        "failedCaseCount": { "type": "integer", "minimum": 0 },
+        "missingCaseCount": { "type": "integer", "minimum": 0 },
+        "unexpectedCaseCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["caseId", "status", "passed"],
+        "properties": {
+          "caseId": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["passed", "failed", "missing", "unexpected"] },
+          "passed": { "type": "boolean" },
+          "result": {
+            "$ref": "semantic-evaluation-result.schema.json"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": { "enum": ["passed", "failed"] }
+              },
+              "required": ["status"]
+            },
+            "then": { "required": ["result"] },
+            "else": { "not": { "required": ["result"] } }
+          }
+        ]
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}
+

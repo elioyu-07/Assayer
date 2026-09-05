@@ -134,6 +134,8 @@ start_plugin_run -> advance_plugin_run
                   -> (semantic input + advance_plugin_run)*
                   -> formal summary
                   -> get_plugin_result(sectionId, cursor)* when detail is needed
+
+resume_plugin_run(runId) -> advance_plugin_run* after Host interruption
 ```
 
 The `advance_plugin_run` operation is the normal Host-driven product path. It
@@ -142,13 +144,17 @@ semantic boundary. After the Agent supplies a checkpoint or decision, the Host
 continues paging, coverage validation, decision assembly, and eligible closeout
 without requiring one tool call for each bookkeeping step. It also accepts an
 explicit `partial` or `failed` closeout when a blocked Run cannot continue. The
-normal product MCP catalog exposes only `start_plugin_run`,
-`advance_plugin_run`, `recover_work_item`, and `get_plugin_progress` for this
-lifecycle. The lower-level
-`discover_work_items`, `inspect_work_items`, `checkpoint_review`,
-`submit_decisions`, and `finish_plugin_run` operations remain available for
-compatibility and diagnostics through the standalone interactive transport;
-they are intentionally absent from the normal product catalog.
+normal product MCP catalog exposes `start_plugin_run`, `resume_plugin_run`,
+`advance_plugin_run`, `expand_evidence_collection`, `get_plugin_result`,
+`recover_work_item`, and `get_plugin_progress` for this lifecycle. Evidence
+expansion is bounded and read-only; normal state changes still go exclusively
+through `advance_plugin_run`. Resume uses the opaque Run ID retained from
+start; Host startup never resumes implicitly. The lower-level
+`discover_work_items`, `inspect_work_items`, `expand_investigation`,
+`checkpoint_review`, `submit_decisions`, and `finish_plugin_run` operations
+remain available for compatibility and diagnostics through the standalone
+interactive transport; they are intentionally absent from the normal product
+catalog.
 
 Terminal delivery is summary-first for every plugin. The platform recursively
 replaces non-empty arrays and oversized text in the Agent response with stable
@@ -189,14 +195,22 @@ Plugins must supply stable unique item IDs and may declare only mechanical
 grouping fields. They must not implement their own transport cursor or treat a
 mechanical group as a semantic decision.
 
+Set `reviewRequired=false` for a collection that provides pageable reference
+context but is not itself a queue of items that must receive durable semantic
+review checkpoints. Reference collections never contribute to completion
+coverage and cannot be checkpointed.
+
 An interactive plugin may implement
 `assemble_review_checkpoints(checkpoints, finalization, packet, check, context)`
 to support incremental semantic review. The platform treats each checkpoint
 payload as opaque plugin data, but validates its WorkItem, Check, declared
 collection, stable item IDs, replay identity, and non-overlapping coverage.
-Before assembly it requires the referenced checkpoints to cover the collection
-exactly once. The plugin hook returns ordinary Decision `details`; existing
-decision and committer gates remain authoritative.
+Before assembly it requires the referenced checkpoints to cover every
+non-empty `reviewRequired=true` collection exactly once. This lets a plugin
+declare separate required queues, such as candidate dispositions and final
+dimension reviews, without allowing either queue to be bypassed. The plugin
+hook returns ordinary Decision `details`; existing decision and committer gates
+remain authoritative.
 
 The transport-independent reference implementation is
 `InteractivePluginController`.  MCP and CLI adapters should delegate to it

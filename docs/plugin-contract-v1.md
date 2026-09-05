@@ -110,6 +110,15 @@ validates the declaration, retains the full immutable Evidence in the ledger,
 and owns bounded paging, cursors, and the mapping from groups back to original
 item IDs. A declared group is never a semantic finding merge.
 
+An Evidence collection may set `reviewRequired=false` when it is immutable
+reference context rather than a semantic review queue. Reference collections
+use the same validation, grouping, and paging contract, but do not contribute
+to review coverage, do not block a WorkItem Decision, and reject review
+checkpoints. Omitting `reviewRequired` preserves the default value `true`.
+At a decision or finalization boundary, the Host includes a compact
+`referenceCollectionIndex` so an Agent can select a group and page without
+reloading the full Evidence payload.
+
 Long semantic reviews may be persisted as `ReviewCheckpoint` records. Each
 checkpoint binds opaque plugin review data to one WorkItem, Check version,
 declared Evidence collection, and a non-empty set of stable item IDs. The
@@ -123,9 +132,11 @@ incomplete domain references, and Evidence that does not trace to the selected
 items. A plugin without this hook cannot persist semantic checkpoints. A
 rejected checkpoint leaves no checkpoint, operation, or decision record in the
 ledger. The platform checkpoints only accepted fragments. A final decision
-may reference checkpoints only when they cover the selected collection exactly
-once. The plugin assembles domain details through its declared hook, after
-which the normal decision and commit gates still apply without exception.
+may reference checkpoints only when they cover every non-empty collection
+whose `reviewRequired` value is `true`, with every item covered exactly once.
+Reference collections are excluded. The plugin assembles domain details
+through its declared hook, after which the normal decision and commit gates
+still apply without exception.
 
 An accepted checkpoint is immutable. Before its WorkItem Decision is
 committed, a reviewer may append a correction with
@@ -141,7 +152,10 @@ It performs deterministic discovery and inspection, pauses at an explicit
 semantic boundary, persists supplied checkpoints, assembles supplied decisions,
 and performs eligible closeout. Normal product transports must make this the
 only route for discovery, inspection, checkpoints, decisions, and closeout;
-primitive lifecycle operations belong to diagnostic transports. Responses identify `state`, `phase`,
+primitive lifecycle operations belong to diagnostic transports. They may also
+expose `expand_evidence_collection` as a bounded read-only operation for
+reference collections named by the semantic task; it cannot checkpoint,
+decide, recover, or advance a Run. Responses identify `state`, `phase`,
 `requiredNextStep`, `canFinish`, and remaining work counts.
 `awaiting_agent_decision` means semantic input is required;
 `ready_to_finish` means all coverage gates pass and the Host may produce the

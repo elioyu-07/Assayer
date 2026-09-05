@@ -244,9 +244,10 @@ implemented in Vertical Slices 042-045. Incremental semantic-review
 checkpointing and final decision assembly are implemented in Vertical Slice
 046. Host-driven workflow state, explicit semantic boundaries, deterministic
 advance, and eligible automatic closeout are implemented in Vertical Slice
-047. The normal product MCP catalog now exposes only the Host-driven lifecycle
-surface; primitive lifecycle calls remain diagnostic-only, and explicit
-noncompleted closeout is carried by `advance_plugin_run`. Staged user-facing
+047. The normal product MCP catalog exposes the Host-driven lifecycle plus
+bounded read-only Evidence collection paging; primitive lifecycle mutations
+remain diagnostic-only, and explicit noncompleted closeout is carried by
+`advance_plugin_run`. Staged user-facing
 output and delta result transport are implemented in Vertical Slice 048:
 terminal arrays and oversized text are sectioned by the platform, details use
 result-bound cursor pages, and the full JSON remains a durable artifact.
@@ -590,7 +591,7 @@ silently broaden the selected rule boundary.
 | M0 Scope and baseline | Scope is documented | Refresh the clean CLI baseline when owner acceptance runs |
 | M1 Vertical user journey | J04-J05 implementation and J06b recovery complete | J04-J05 owner acceptance, J07 clean CLI, and J08 lifecycle evidence |
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
-| M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted | Collect measured owner workloads and close remaining clean-CLI evidence |
+| M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted; multi-window ownership defect designed | Implement multi-window Run isolation, then collect measured owner workloads and remaining clean-CLI evidence |
 | M4 External Spec plugin | Queued | Starts only after the M3 reliability gate |
 | M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
@@ -619,26 +620,108 @@ silently broaden the selected rule boundary.
 
 ### Next work, in order
 
-1. Obtain fresh clean-CLI evidence for the implemented J04 runtime and J05
-   result behavior, then close the remaining J07 and J08 journey gaps. J08a
-   read-only installation and feedback status is implemented in Vertical Slice
-   059; fail-closed lifecycle planning is implemented in Vertical Slice 060.
-   Durable transaction execution and automatic compensation are implemented
-   behind an adapter in Vertical Slice 061. The restricted Codex
-   list/add/remove adapter is implemented and isolated-tested in Vertical
-   Slice 062. Two-stage product authorization with durable one-use plan tokens,
-   external authorization, and terminal replay is implemented behind an
-   optional product controller in Vertical Slice 063. Safe private-runtime
-   cleanup is implemented as an out-of-process,
-   transaction-gated capability in Vertical Slice 064. A Codex client boundary
-   that proves the source of user approval, invokes cleanup after the old MCP
-   stops, and passes real lifecycle acceptance remains. Vertical Slice 065
-   passes the complete composed lifecycle against a stateful fake Codex process
-   and is explicitly non-publishable; it does not satisfy UAT-08.
-   Retain
-   three independent owner-run CLI journeys as an explicit acceptance item
-   until they are actually run.
-2. Complete the remaining M3 platform performance evidence:
+1. Converge the four logical platform layers and plugin boundary according to
+   [Four-Layer Platform Boundary Convergence](architecture-layer-convergence-design.md).
+   Design is complete; implementation must proceed through L1-L6 with Spec and
+   Config as the first two migration proofs. Do not split processes or add
+   ecosystem machinery during this stage.
+2. Complete the remaining acceptance around the platform-level
+   [multi-window Run isolation and Host lifecycle design](multi-window-run-isolation-and-host-lifecycle-design.md)
+   only to the minimum required for safe user journeys. The first implementation
+   slice is complete: startup/tool discovery no longer claims a Run, ownership
+   is Run-local, independent Runs coexist, simultaneous cross-process resume
+   has one winner, `resume_plugin_run` is explicit, and MCP shutdown releases
+   ownership. The implementation and focused evidence are recorded in
+   [platform-run-isolation-implementation-slice.md](platform-run-isolation-implementation-slice.md).
+   Clean owner-run CLI interruption and multi-window acceptance remains before
+   this item can be closed. A cross-process registry is permitted only if this
+   minimum proves insufficient; global scheduling and broad migration remain
+   deferred.
+3. Complete the Spec golden journey through the generic plugin path: fresh CLI
+   discovery, long-running staged progress, bounded semantic checkpoints,
+   interruption and resume, readable terminal result, failure and retry, and a
+   second independent Run. Build a fixed semantic evaluation corpus covering
+   strong, weak, contradictory, ambiguous, duplicate, false-positive, large,
+   interrupted, and cross-document Specs. Cross-document cases must use one
+   anchor Spec to identify semantic ambiguity, conflict, contradiction, and
+   drift in explicitly related or profile-selected documents, with both source
+   sides, document digests, relationship evidence, impact, and resolution
+   ownership. Improve the plugin-owned 18-check authority, checklist, rubric,
+   template, NFR catalog, recognition signals, cross-document comparison rules,
+   and review instructions against that corpus. Treat this as an anchored
+   analysis profile mapped to affected core checks; do not scan the whole
+   repository or add a `CHK-19` until the corpus proves a separate dimension is
+   necessary. Fix only shared platform gaps or demonstrated Spec domain defects.
+   The S1 corpus slice is complete: the platform provides a domain-neutral
+   schema and reference validator, while the Spec plugin packages its semantic
+   baseline plus fixed strong, weak, ambiguity, contradiction, duplicate, and
+   false-positive Markdown cases, plus large, interrupted, and anchored
+   cross-document cases. Every deterministic candidate is compared by stable ID
+   and every candidate has an explicit semantic disposition. Cross-document
+   relationships carry both source identities, relationship evidence, impact,
+   and resolution ownership; the scanner leaves their semantic comparison to
+   review. The S2 policy slice is also complete: the reviewed CHK-01 through
+   CHK-18 standard is content-first and layout-neutral by default, the bundled
+   twelve-chapter structure is an explicit strict profile, source evidence is
+   pageable and immutable, and checklist decisions are processed in four
+   required durable checkpoint batches before finalization. The next Spec
+   slice has started with single-document calibration: exact candidate ID and
+   rule pairs are regression-checked, and Agent guidance now distinguishes
+   ambiguity, contradiction, duplicate root causes, and non-normative noise.
+   The model-level structural comparator, corpus-suite aggregator, terminal
+   ledger adapter, and portable result schemas are complete. They compare
+   candidate dispositions, merged root-cause clusters, severity, and readiness
+   without binding generated IDs or prose, while keeping missing, unexpected,
+   and failed Cases distinct. The first anchored cross-document contract slice
+   is complete: the plugin publishes an exclusive `anchor + relatedDocuments +
+   relationships` scope schema, creates only one anchor WorkItem, computes all
+   document digests internally, invalidates on either-side drift, and exposes a
+   schema-validated pageable evidence collection carrying relationship basis,
+   ownership, both document identities, exact excerpts, source chunks, line
+   ranges, and digests. Duplicate or unanchored scope is rejected, and the
+   fixed retention corpus Case exercises this packet without pretending that
+   deterministic code has made the semantic decision. Connecting these
+   bilateral references to Agent-origin cross-document findings is also
+   complete at the admission boundary. Review schema `1.2.0` requires a valid
+   semantic type, declared relationship, exactly both documents, affected CHK
+   and elements, matching resolution owner, next action, and immutable evidence
+   from both sides; formal readiness, commit receipts, and summary projection
+   preserve those fields. The Host-driven relationship slice is also complete:
+   every declared relationship is a required review checkpoint between
+   candidates and the checklist, resume returns the remaining relationship,
+   finalization cannot bypass it, and the product MCP surface provides bounded
+   read-only paging over the bilateral Evidence groups. The Assayer Spec Skill
+   describes the same workflow. The corpus evaluator now models this contract
+   directly: cross-document Cases compare exact relationship coverage and
+   outcomes plus semantic type, status, severity, both document identities,
+   and resolution ownership, instead of pretending that relationship findings
+   are scanner candidates. Executing actual model corpus Runs remains next;
+   real CLI acceptance remains user-run. The immediate validation slice now
+   narrows to a reusable Markdown document-navigation provider: it returns a
+   complete, line-addressable structure map for the Spec plugin while leaving
+   semantic judgment in the plugin/Agent. JSON, YAML, PDF, and other formats
+   remain out of scope until the Markdown-to-Spec A/B result proves the
+   boundary useful. The provider and Spec navigation-mode flow are now covered
+   by focused contract tests: every parsed unit is pageable, checkpointed once,
+   and included in a complete 18-dimension review before finalization. The
+   legacy candidate strategy remains the default until real corpus evidence
+   demonstrates that navigation-first review improves quality without hiding
+   findings. The platform now exposes built-in and installed capability
+   providers through one isolated Provider Catalog; the Assayer distribution's
+   own entry point is deduplicated while third-party identity conflicts remain
+   fail-closed. The subsequent Spec result-integrity Slices A-E are now
+   implemented deterministically: review schema `1.3.0` requires source-backed
+   document context, applicability, precise checklist explanations, and
+   actionable Findings; the plugin exposes stable source facts; Host admission
+   rejects directly false absence claims and orphan `REWORK`; canonical output
+   preserves the admitted Findings; and the fixed corpus now distinguishes a
+   shared delegated contract from a feature Spec with genuine CASE and
+   risk-scenario omissions. Automated corpus checks cover `FR-G01` through
+   `FR-G08`, `AS-006`, delegation, non-applicability, classification, and
+   checklist outcomes. A user-run real-model CLI evaluation remains the exit
+   gate; deterministic completion alone is not model-quality acceptance.
+4. Complete the remaining M3 platform performance evidence required by the Spec
+   golden journey:
    collect measured parallel workloads across generic plugins. The legacy
    frontend compatibility result adapter is complete without changing
    historical outputs. Provider timing and the unified performance bill are implemented
@@ -646,9 +729,25 @@ silently broaden the selected rule boundary.
    072; portable canonical results are implemented in Slice 073, and frontend
    compatibility publication is implemented in Slice 074. Persistent
    platform caching is deferred and is not a prerequisite.
-3. Externalize the Spec plugin and complete its independent lifecycle,
+   The next result-quality slice is Vertical Slice 075: a platform-owned,
+   additive actionable-result envelope that separates dimension Findings from
+   root-cause Remediations, validates impact/Evidence/action/closure/owner
+   fields, and publishes confirmed remediation work alongside unresolved
+   blockers. Existing plugin results remain readable with
+   `actionability=not_declared` until they adopt the envelope.
+   The first Evidence Claim follow-up is also implemented additively: the
+   platform validates direct, absence, derived, and external-unverified claim
+   shape, same-Investigation Evidence binding, bounded line scopes, and
+   Remediation `claimRefs`; the Spec plugin emits bounded absence claims for
+   confirmed missing-content findings. Semantic search completeness remains
+   plugin-owned.
+5. Externalize the Spec plugin and complete its independent lifecycle,
    including persistent install, upgrade, rollback, and uninstall.
-4. Build the Agent-first plugin workbench.
+6. Resume the deferred Frontend Alpha J04-J07 journey closure. Existing
+   frontend implementation and regression coverage remain maintained, but this
+   acceptance is not in the current active sequence.
+7. Build the Agent-first plugin workbench after one external plugin lifecycle is
+   proven.
 
 ### Deferred
 
@@ -656,12 +755,45 @@ silently broaden the selected rule boundary.
   partial or failed Run and a successful retry without stale-state reuse. The
   implementation may advance to J05, but J04 cannot be marked accepted until
   this evidence exists;
+- Full Frontend Alpha journey closure is deferred while the Spec golden journey
+  and independent package pilot are completed. Frontend J04-J07 remains a
+  release gate and must not be declared complete from Spec or smoke evidence;
 - New FUA cases and broad crawler/deep-recursion expansion;
 - Plugin marketplace UI and distributed execution;
 - Automatic screenshot redaction;
 - Source/version attribution proof;
 - Per-plugin micro-optimizations;
 - Advanced distributed execution without measured evidence.
+
+## 6.1 Platform construction boundary
+
+The global platform construction plan is maintained in
+[Platform Foundation and User-Journey Delivery Plan](platform-foundation-and-user-journey-plan.md).
+That document is the detailed implementation boundary for the next stage and
+must be read together with this roadmap.
+
+Its rule is simple: implement the shared capabilities required by the J01-J08
+journey first—installation and discovery, scope binding, runtime progress,
+result semantics, recovery and second use, clean acceptance, and safe feedback.
+Use Spec as the first cross-domain golden-path pilot while retaining Frontend as
+the real-browser acceptance path. Do not build a daemon, general scheduler,
+persistent cache, marketplace UI, or other ecosystem machinery until a failed
+acceptance scenario, measured workload, security finding, or two independent
+plugin use cases requires it.
+
+The plan's current platform sequence is:
+
+```text
+journey and observability baseline
+  -> minimum ownership/recovery correction
+  -> Spec golden journey
+  -> independent Spec packaging
+  -> Frontend Alpha journey closure
+  -> ecosystem expansion
+```
+
+This section intentionally summarizes the boundary rather than duplicating the
+normative workstreams, exit gates, and deferred list in the dedicated plan.
 
 ## 7. Change-control rule
 

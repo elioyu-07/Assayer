@@ -21,7 +21,7 @@ from .ledger import JsonPlatformLedgerStore
 from .plugin_registry import PluginRegistry
 from .provider_execution import BoundCapabilityProvider
 from .provider_registry import ProviderRegistry
-from .reporting import JsonSummaryPublisher
+from .delivery_observer import PlatformDeliveryObserver
 
 
 class PlatformRunner:
@@ -57,7 +57,7 @@ class PlatformRunner:
             plugin_id=plugin_id, check_version=check_version, runtime=runtime,
         )
         if result.status != "failed" and result.receipts:
-            result = kernel.publish(result, JsonSummaryPublisher(run_root))
+            result = kernel.publish(result, PlatformDeliveryObserver(run_root))
         return result
 
     def run_with_provider(
@@ -140,5 +140,5 @@ class PlatformRunner:
         else:
             result = replace(result, metrics=merged_metrics)
         if result.status != "failed" and result.receipts:
-            result = kernel.publish(result, JsonSummaryPublisher(run_root))
+            result = kernel.publish(result, PlatformDeliveryObserver(run_root))
         return result

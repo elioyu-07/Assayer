@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from .contract import PlatformContractError, PlatformLedger
 from .canonical_result import canonical_ledger_bytes, render_canonical_result
 from .platform_performance import render_platform_performance_bill
+from .observability import render_platform_observability
 
 
 class PlatformLedgerStore(Protocol):
@@ -265,6 +266,7 @@ def _render_platform_diary(ledger: PlatformLedger) -> str:
 def render_platform_artifacts(ledger: PlatformLedger) -> dict[str, bytes]:
     """Render the canonical platform ledger and readable event timelines."""
     performance_json, performance_markdown, _bill = render_platform_performance_bill(ledger)
+    observability_json, observability_markdown, _observability = render_platform_observability(ledger)
     ledger_json = canonical_ledger_bytes(ledger)
     canonical_json, _canonical = render_canonical_result(
         ledger, ledger_bytes=ledger_json,
@@ -278,6 +280,8 @@ def render_platform_artifacts(ledger: PlatformLedger) -> dict[str, bytes]:
         "platform-run.log": _render_platform_diary(ledger).encode("utf-8"),
         "platform-performance-bill.json": performance_json,
         "platform-performance-bill.md": performance_markdown,
+        "platform-observability.json": observability_json,
+        "platform-observability.md": observability_markdown,
         **({"canonical-result.json": canonical_json} if canonical_json is not None else {}),
     }
 
@@ -331,6 +335,10 @@ class JsonPlatformLedgerStore:
             performance_markdown_path,
             rendered["platform-performance-bill.md"].decode("utf-8"),
         )
+        observability_path = self.root / f"{ledger.run.run_id}.platform-observability.json"
+        self._atomic_write(observability_path, rendered["platform-observability.json"].decode("utf-8"))
+        observability_markdown_path = self.root / f"{ledger.run.run_id}.platform-observability.md"
+        self._atomic_write(observability_markdown_path, rendered["platform-observability.md"].decode("utf-8"))
         canonical = rendered.get("canonical-result.json")
         if canonical is not None:
             canonical_path = self.root / f"{ledger.run.run_id}.canonical-result.json"

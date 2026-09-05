@@ -175,6 +175,15 @@ def inspect_plugin_registration(
                     "The plugin implementation omits required operations: " + ", ".join(missing_operations),
                     "Implement callable discover and inspect operations.",
                 ))
+            if "evidence_graph" in registration.result_features and getattr(
+                plugin, "evidence_graph_enabled", False,
+            ) is not True:
+                issues.append(_issue(
+                    "PLUGIN_RESULT_FEATURE_UNIMPLEMENTED",
+                    "PCV1-RESULT-FEATURE",
+                    "The registration declares evidence_graph but the runtime does not mark it as enabled.",
+                    "Expose evidence_graph_enabled = True only after emitting and validating the platform projection.",
+                ))
     if (
         construct_implementations
         and "batch" in registration.execution_modes

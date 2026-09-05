@@ -1,8 +1,8 @@
 # Spec 审计规范权威清单
 
-**Policy 版本**：1.2.0
+**Policy 版本**：1.3.0
 
-**生效日期**：2026-09-03
+**生效日期**：2026-09-04
 
 **维护者**：`spec-quality-audit` maintainers
 
@@ -64,15 +64,16 @@
 
 | 来源 | 当前内容来源与采用方式 | 在本 skill 中的地位 | 上游核验状态 |
 |---|---|---|---|
-| `self-check-checklist.md` | 用户提供并要求保留的 18 项清单；本 skill 将其采纳为组织基线 | 规范性；原始问题、分类、编号、顺序和检查方式不得被扩写成别的规则 | 未提供原始制度名称、Owner、版本或发布地址，外部组织归因未核验 |
-| `spec-template.md` | 本 skill 仓库维护的十二章产品 Spec 模板 | 强制结构规范；所有普通产品 Spec 必须遵守，除非存在更高层级治理文件明确批准替代结构 | 本地规则；没有证据表明它逐字来自某一外部标准 |
-| `spec-driven-development.md` | 本仓库维护的 Speckit/SDD 工作流 profile，混合了 Spec Kit 工作流概念和项目治理约束 | 仅在更高层级治理文件明确选择 `speckit` profile 时为规范；不能由文件长相自动替代十二章强制结构 | 未记录对应 Spec Kit 上游版本/commit；不得宣称与某个上游版本完全一致 |
+| `self-check-checklist.md` | The original eighteen-item checklist supplied by the user | Historical source record; it preserves the origin but no longer overrides the reviewed 1.3.0 semantic definitions | No external organization name, owner, version, or publication address was supplied |
+| `quality-standard.md` | The eighteen dimensions reviewed and approved for policy 1.3.0 | Normative rule body for `CHK-01` through `CHK-18` | Local policy maintained with this authority version |
+| `spec-template.md` | The skill-maintained twelve-chapter product Spec template | Recommended authoring aid under `product-spec`; an exact structural contract only when `strict-12-chapter` is explicitly selected | Local rule; no evidence establishes it as a verbatim external standard |
+| `spec-driven-development.md` | The repository-maintained Speckit/SDD workflow profile | Normative only when the `speckit` profile is explicitly selected; document appearance never activates it | The corresponding upstream version or commit is not recorded |
 | `nfr-catalog.md` | 本仓库维护者整理的默认 NFR 控制目录 | 默认规范；项目明确指定 NFR catalog 时由项目来源覆盖相应维度 | 本地规则；不是 ISO/IEEE 认证或逐条转录 |
 | 本文件第 7–11 节 | 为解决规则冲突、数量门槛、finding admission、严重度和 readiness 而形成的 skill 治理决策 | skill 默认规范 | 本地维护者决策，版本由本文件控制 |
 | `review-rubric.md` | 对本文件默认契约的语义展开和评审示例 | 解释性；只有本文件明确授权的要求具有规范性 | 本地整理 |
 | `expert-judgment-governance.md` | 对 candidate finding 的准入、合并、降级和降噪方法 | 解释性执行指南 | 本地整理 |
 | 交互结果摘要 | Assayer 平台对评审结果的结构化展示约定 | 仅对交互结果展示具有规范性 | 平台通用结果契约 |
-| `default-policy.json` / `policy.schema.json` | 将本文件的关键决策投影为可校验数据 | 非规范性实现投影；发生差异时以本文件为准 | 由 policy 版本和测试约束 |
+| `policy.json`, `checklist.json`, and schemas | Machine-readable projections of the authority and quality standard | Implementation projections; this file and `quality-standard.md` prevail on drift | Controlled by policy version and tests |
 | `policy_loader.py` | 校验默认 policy 并安全合并显式项目 overlay | 实现，不是规范来源 | checker 已接入；仍不改变 authority.md 的规范地位 |
 | finding/review/readiness/manifest 脚本与 schemas | candidate、review decision、readiness context、evidence manifest 和兼容 report envelope 的数据契约 | 实现，不是规范来源 | 已实现 decision 校验、准入投影、统一 readiness 推导和 manifest 生成；语义判断仍由 reviewer 完成 |
 | `check_spec.py` / platform result summarizer | 将部分规则实现为扫描并整理交互结果 | 实现，不是规范来源 | 需通过测试和 policy 对齐验证 |
@@ -98,8 +99,9 @@
 
 | 维度 | 默认规则正文 | 项目能否替换 | 证据不可用时的默认处理 |
 |---|---|---:|---|
-| 18 项问题及其顺序 | `self-check-checklist.md` | 仅限更高权威明确替代或批准例外 | `UNVERIFIED` |
-| 产品 Spec 章节结构 | `spec-template.md` | 仅限更高层级治理文件明确批准替代 | 缺失十二章必要结构为 `REWORK`；模板不可读取为 `UNVERIFIED` |
+| Eighteen quality dimensions | `quality-standard.md`; historical origin in `self-check-checklist.md` | Only an explicit higher authority may replace or exempt a dimension | `UNVERIFIED` |
+| Product Spec content | The eighteen checks and their authorized semantic rules | A higher authority may replace or extend a dimension explicitly | Missing required content is `REWORK`; unavailable evidence is `UNVERIFIED` |
+| Product Spec structure | `spec-template.md` only under explicit `strict-12-chapter` selection | Yes, through an explicit governing or project profile | Layout is not a default finding; strict-profile violations are `REWORK` |
 | Speckit 生命周期与产物职责 | 仅在更高层级治理文件明确选择 `speckit` profile 时使用 `spec-driven-development.md` | 仅限更高层级治理文件明确批准 | `UNVERIFIED` |
 | FR、AC 和场景充分性 | 本文件第 7 节；细化方法见 `review-rubric.md` | 可以 | 缺少关键行为契约为 `REWORK` |
 | 字段业务契约 | 本文件第 8 节；细化方法见 `review-rubric.md` | 可以 | 依据影响定 P1/P2/P3；外部口径缺失为 `UNVERIFIED` |
@@ -108,26 +110,27 @@
 | 严重度与 readiness | 本文件第 11 节 | 仅限明确项目 policy | `UNVERIFIED` 会阻止 `READY` |
 | 结果展示 | Assayer interactive result summary | 可以 | 展示失败不改变 Spec finding；平台账本仍是持久化追踪来源 |
 
-## 6. 默认 profile 和 Spec 边界
+## 6. Default profiles and the Spec boundary
 
-普通产品 Spec 必须使用 `spec-template.md` 的十二章结构。未按以下章节编号和标题组织时，判定为章节结构不规范：
+The default `product-spec` profile is content-first and layout-neutral. It
+requires evidence for all applicable quality dimensions, but it does not
+require the bundled chapter names, numbering, order, or uniqueness. Renaming,
+reordering, combining, or splitting sections is not a finding by itself.
 
-1. 模块定义
-2. 状态模型
-3. 功能需求清单
-4. 关键实体
-5. 数据字段定义
-6. 非功能性需求选择
-7. 成功标准
-8. 参考资料与合规依据
-9. 关键决策记录
-10. 依赖与假设
-11. 阶段差异说明
-12. 修订记录
+`spec-template.md` is the recommended authoring template. The explicit
+`strict-12-chapter` profile promotes that template to a structural contract.
+Only a user or governing project policy may select the strict profile; the
+checker must not infer it from document appearance.
 
-该默认契约描述产品行为，不要求把页面布局、物理数据库结构、线级 API schema、内部类结构或任务顺序写入产品 Spec；这些内容应由下游产物拥有时，只检查引用和边界是否清楚。
+The content contract describes product behavior. It does not require page
+layout, physical database structure, line-level API schemas, internal class
+structure, or task ordering when those details belong to downstream artifacts.
+The Spec must instead make their ownership, references, and boundaries clear
+when they are relevant.
 
-只有更高层级治理文件明确选择 `speckit` profile 时，`spec-driven-development.md` 才对结构和生命周期负责；十二章模板仅作补充参考，不再同时作为第二套强制结构。不能仅凭 `# Feature Specification`、`User Scenarios & Testing`、`Requirements` 等标题自动绕过十二章强制结构。
+The `speckit` profile governs its own lifecycle and artifacts only when it is
+explicitly selected. The `adversarial` profile adds semantic challenge and
+does not silently enable strict structure.
 
 ## 7. FR、AC 与场景契约
 
@@ -231,7 +234,7 @@ Reviewer 不受 scanner 命中范围限制。发现漏报时，可以新增没�
 | Target | 实际读取的 Spec 路径与版本/commit（如有） |
 | Scope | 单文件、cross-spec、代码核验和外部资料的实际范围 |
 | Selected sources | 每个适用维度选中的来源、版本、Owner 和采用依据 |
-| Profiles | `default`、`speckit`、`adversarial` 或项目定义 profile |
+| Profiles | `product-spec`, `strict-12-chapter`, `speckit`, `adversarial`, or an explicitly governed project profile |
 | Unavailable evidence | 无法读取、无法确认版本或需要人工/外部事实的项目 |
 | Checker drift | 会影响本次结论的已知实现偏差 |
 
@@ -258,9 +261,10 @@ Reviewer 不受 scanner 命中范围限制。发现漏报时，可以新增没�
 
 | 领域 | Policy 目标 | 当前实现状态 |
 |---|---|---|
-| Policy 定义 | 本权威清单的关键决策有机器可读投影 | 已提供 `default-policy.json` 和 schema；它们不是独立规范来源 |
+| Policy definition | Key authority decisions have machine-readable projections | `policy.json`, `checklist.json`, and schemas are implemented; they are not independent normative sources |
 | Policy 加载 | checker 从机器可读 policy 和已选 profile 获取检查配置 | checker 已接入 policy、base profile 和 overlay；其他规则仍待迁移 |
-| Speckit profile | 显式选择后才启用，且不与十二章默认模板同时强制 | 已实现 base/overlay 路由和必需交付物检查；完整生命周期 gate 仍需人工复核 |
+| Structure profiles | Default review is content-first; exact structure is explicit | `product-spec` is layout-neutral and `strict-12-chapter` preserves the optional deterministic structure gate |
+| Speckit profile | It activates explicitly and does not silently combine with strict structure | Base and overlay routing and required-artifact checks are implemented; complete lifecycle gates still require semantic review |
 | AC/CASE 阈值 | 默认按行为与风险；固定数量为 opt-in | 已接入 policy；只有显式项目 overlay 才启用固定数量 |
 | 18 项组织基线 | 每次审计逐项记录，不用总体印象替代 | checker 输出固定 `CHK-01..CHK-18`；交互结果摘要要求逐项复核状态和理由 |
 | Candidate / reviewed finding | renderer 只消费语义复核后的 finding | JSON review/admission 已实现，支持有目标原文证据的 reviewer 漏报补充；只有 `CONFIRMED` 进入兼容 `findings`；JSON renderer 会重验 canonical projection |

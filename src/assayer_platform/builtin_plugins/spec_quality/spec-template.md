@@ -1,6 +1,9 @@
 # 产品功能规约（Spec）：{功能名称}
 
-> **规范归属**：这是本 skill 的默认产品 Spec 模板。来源优先级、profile 选择和冲突处理以 `references/authority.md` 为准；当项目明确选择其他模板时，本文件不再作为结构强制标准。
+> **Policy role**: This is the recommended product Spec authoring template.
+> It becomes an exact structural requirement only when the user or governing
+> project policy explicitly selects `strict-12-chapter`. The default
+> `product-spec` audit is content-first and accepts equivalent layouts.
 
 > **模版说明**：本文档面向 PM + 后端开发，是 BRD 到开发的桥梁。描述“系统做什么”，不描述“界面长什么样”（见 frontend-spec.md）。
 > 篇幅目标 10-25KB。
