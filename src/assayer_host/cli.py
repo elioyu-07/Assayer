@@ -16,6 +16,7 @@ from assayer_platform.plugin_lifecycle import PluginLifecycleManager
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
+from .plugin_intent import IntentResolutionError, IntentStep, resolve_intent
 from .runtime_router import RuntimeRouter
 from .transport import JsonLineTransport
 
@@ -115,6 +116,135 @@ def _print_error(code: str, message: str) -> None:
     _print_json(_error(code, message))
 
 
+def _prompt_confirmation(plan: list[dict]) -> bool:
+    try:
+        answer = input("Proceed with this operation? [y/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in {"y", "yes"}
+
+
+def _known_plugin_ids(store_root: str) -> tuple[str, ...]:
+    ids = [registration.manifest.plugin_id for registration in installed_plugin_registry().list()]
+    for entry in _store_index_entries(store_root):
+        plugin_id = entry.get("pluginId")
+        if plugin_id and plugin_id not in ids:
+            ids.append(plugin_id)
+    return tuple(ids)
+
+
+def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str]:
+    store = "./.assayer/plugins"
+    output_root = "./assayer-output"
+    yes = False
+    words: list[str] = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--yes":
+            yes = True
+        elif arg == "--store":
+            store = argv[index + 1]
+            index += 1
+        elif arg.startswith("--store="):
+            store = arg.split("=", 1)[1]
+        elif arg == "--output-root":
+            output_root = argv[index + 1]
+            index += 1
+        elif arg.startswith("--output-root="):
+            output_root = arg.split("=", 1)[1]
+        else:
+            words.append(arg)
+        index += 1
+    return " ".join(words), store, yes, output_root
+
+
+def _mutation_step(args) -> dict:
+    step = {"operation": args.plugin_command}
+    if args.plugin_command in {"install", "upgrade"}:
+        step["package"] = args.package
+    elif args.plugin_command == "downgrade":
+        step["pluginId"] = args.plugin_id
+        step["version"] = args.version
+    else:
+        step["pluginId"] = args.plugin_id
+    return step
+
+
+def _execute_intent_step(step: IntentStep, store_root: str, output_root: str) -> dict:
+    manager = _lifecycle_manager(store_root)
+    operation = step.operation
+    if operation == "list":
+        catalog = _plugin_catalog(_store_registry(store_root))
+        quarantined = [
+            entry for entry in _store_index_entries(store_root)
+            if entry.get("state") == "dirty"
+        ]
+        payload = {"operation": "list", "status": "completed", "plugins": catalog}
+        if quarantined:
+            payload["quarantined"] = quarantined
+        return payload
+    if operation == "info":
+        entry = manager.get(step.plugin_id)
+        if entry is None:
+            return {"operation": "info", "status": "failed",
+                    "error": {"code": "UNKNOWN_PLUGIN",
+                              "message": f"Plugin is not installed: {step.plugin_id}"}}
+        return {"operation": "info", "status": "completed", **entry}
+    if operation == "run":
+        try:
+            scope = _load_scope(None, step.scope_file)
+            result = PlatformRunner(_store_registry(store_root), output_root).run(
+                plugin_id=step.plugin_id, check_id=step.check_id,
+                check_version=None, scope=scope,
+            )
+        except PlatformContractError as error:
+            return {"operation": "run", "status": "failed",
+                    "error": {"code": error.code, "message": error.message}}
+        return {
+            "operation": "run",
+            "status": "completed" if result.status in {"completed", "partial"} else "failed",
+            "runId": result.run_id,
+            "decisions": [decision.result for decision in result.decisions],
+        }
+    try:
+        if operation == "install":
+            result = manager.install(step.package)
+        elif operation == "upgrade":
+            result = manager.upgrade(step.package)
+        elif operation == "downgrade":
+            result = manager.downgrade(step.plugin_id, step.version)
+        elif operation == "rollback":
+            result = manager.rollback(step.plugin_id)
+        else:
+            result = manager.uninstall(step.plugin_id)
+    except PlatformContractError as error:
+        return {"operation": operation, "status": "failed",
+                "error": {"code": error.code, "message": error.message}}
+    return result
+
+
+def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, confirm) -> int:
+    try:
+        plan = resolve_intent(
+            text, known_plugin_ids=_known_plugin_ids(store_root), cwd=Path.cwd(),
+        )
+    except IntentResolutionError as error:
+        _print_error(error.code, error.message)
+        return 2
+    plan_payload = [step.as_dict() for step in plan]
+    if any(step.dangerous for step in plan) and not yes:
+        _print_json({"plan": plan_payload, "pending": "confirmation"})
+        if not confirm(plan_payload):
+            _print_json({"plan": plan_payload, "status": "aborted",
+                         "reason": "confirmation required"})
+            return 0
+    results = [_execute_intent_step(step, store_root, output_root) for step in plan]
+    _print_json({"plan": plan_payload, "results": results})
+    completed = all(result.get("status") in {"completed", "quarantined"} for result in results)
+    return 0 if completed else 1
+
+
 def _load_scope(scope_json: str | None, scope_file: str | None):
     if scope_file is not None:
         try:
@@ -131,7 +261,100 @@ def _load_scope(scope_json: str | None, scope_file: str | None):
         raise PlatformContractError("INVALID_SCOPE", "Plugin scope must be valid JSON")
 
 
-def main(argv: list[str] | None = None) -> int:
+def _plugins_command(args, *, confirm) -> int:
+    if args.plugin_command == "run":
+        store_path = Path(args.store).expanduser().resolve()
+        if (store_path / "index.json").is_file():
+            entry = _lifecycle_manager(args.store).get(args.plugin_id)
+            if entry is not None and entry.get("state") == "dirty":
+                _print_error(
+                    "PLUGIN_DIRTY",
+                    f"Plugin is quarantined and cannot run: {args.plugin_id} "
+                    f"({entry.get('stateReason')})",
+                )
+                return 2
+        try:
+            scope = _load_scope(args.scope_json, args.scope_file)
+            result = PlatformRunner(
+                _store_registry(args.store), args.output_root,
+            ).run(
+                plugin_id=args.plugin_id, check_id=args.check_id,
+                check_version=args.check_version, scope=scope,
+            )
+        except PlatformContractError as error:
+            _print_error(error.code, error.message)
+            return 2
+        payload = {
+            "runId": result.run_id,
+            "status": result.status,
+            "pluginId": args.plugin_id,
+            "checkId": args.check_id,
+            "decisions": [decision.result for decision in result.decisions],
+            "failures": [
+                {"code": failure.code, "message": failure.message,
+                 "workItemId": failure.work_item_id}
+                for failure in result.failures
+            ],
+            "outputDir": str((Path(args.output_root).expanduser().resolve() / result.run_id)),
+        }
+        _print_json(payload)
+        return 0 if result.status in {"completed", "partial"} else 1
+    if args.plugin_command == "info":
+        manager = _lifecycle_manager(args.store)
+        entry = manager.get(args.plugin_id)
+        if entry is None:
+            _print_error("UNKNOWN_PLUGIN", f"Plugin is not installed: {args.plugin_id}")
+            return 2
+        _print_json(entry)
+        return 0
+    if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
+        if not args.yes and not confirm([_mutation_step(args)]):
+            _print_json({"operation": args.plugin_command, "status": "aborted",
+                         "reason": "confirmation required"})
+            return 0
+        manager = _lifecycle_manager(args.store)
+        try:
+            if args.plugin_command == "install":
+                result = manager.install(args.package)
+            elif args.plugin_command == "upgrade":
+                result = manager.upgrade(args.package)
+            elif args.plugin_command == "downgrade":
+                result = manager.downgrade(args.plugin_id, args.version)
+            elif args.plugin_command == "rollback":
+                result = manager.rollback(args.plugin_id)
+            else:
+                result = manager.uninstall(args.plugin_id)
+        except PlatformContractError as error:
+            _print_error(error.code, error.message)
+            return 2
+        _print_json(result)
+        return 0
+    catalog = _plugin_catalog(_store_registry(args.store))
+    quarantined = [
+        entry for entry in _store_index_entries(args.store)
+        if entry.get("state") == "dirty"
+    ]
+    if args.as_json:
+        payload = {"plugins": catalog}
+        if quarantined:
+            payload["quarantined"] = quarantined
+        _print_json(payload)
+    else:
+        for plugin in catalog:
+            checks = ", ".join(
+                f"{item['checkId']}@{item['version']}" for item in plugin["checks"]
+            )
+            print(f"{plugin['pluginId']} {plugin['version']} [{checks}]")
+        for entry in quarantined:
+            print(f"{entry['pluginId']} (dirty: {entry.get('stateReason')})")
+    return 0
+
+
+def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] not in {"audit", "smoke", "serve", "plugins"} and not argv[0].startswith("-"):
+        text, store, yes, output_root = _split_intent_args(argv)
+        return _run_intent(text, store, yes=yes, output_root=output_root, confirm=confirm)
     parser = argparse.ArgumentParser(prog="assayer", description="Run Assayer Agent audits and Host smoke checks")
     subparsers = parser.add_subparsers(dest="command", required=True)
     audit = subparsers.add_parser("audit", help="Run a formal Agent audit through the Codex Skill and dynamic MCP")
@@ -164,20 +387,23 @@ def main(argv: list[str] | None = None) -> int:
     plugin_run.add_argument("--scope", dest="scope_file",
                             help="Path to a JSON scope file (alternative to --scope-json)")
     plugin_run.add_argument("--output-root", default="./assayer-output")
-    plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common],
+    plugin_mutation_common = argparse.ArgumentParser(add_help=False)
+    plugin_mutation_common.add_argument("--yes", action="store_true", dest="yes",
+                                        help="Skip the stop-and-confirm prompt for dangerous operations")
+    plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common, plugin_mutation_common],
                                                    help="Install a plugin package into the store")
     plugin_install.add_argument("package")
-    plugin_upgrade = plugins_subparsers.add_parser("upgrade", parents=[plugin_common],
+    plugin_upgrade = plugins_subparsers.add_parser("upgrade", parents=[plugin_common, plugin_mutation_common],
                                                    help="Upgrade an installed plugin to a newer package")
     plugin_upgrade.add_argument("package")
-    plugin_downgrade = plugins_subparsers.add_parser("downgrade", parents=[plugin_common],
+    plugin_downgrade = plugins_subparsers.add_parser("downgrade", parents=[plugin_common, plugin_mutation_common],
                                                      help="Downgrade an installed plugin to a previous version")
     plugin_downgrade.add_argument("plugin_id")
     plugin_downgrade.add_argument("version")
-    plugin_rollback = plugins_subparsers.add_parser("rollback", parents=[plugin_common],
+    plugin_rollback = plugins_subparsers.add_parser("rollback", parents=[plugin_common, plugin_mutation_common],
                                                     help="Roll back an installed plugin to its previous version")
     plugin_rollback.add_argument("plugin_id")
-    plugin_uninstall = plugins_subparsers.add_parser("uninstall", parents=[plugin_common],
+    plugin_uninstall = plugins_subparsers.add_parser("uninstall", parents=[plugin_common, plugin_mutation_common],
                                                      help="Remove an installed plugin from the store")
     plugin_uninstall.add_argument("plugin_id")
     args = parser.parse_args(argv)
@@ -192,88 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             router.close()
     if args.command == "plugins":
-        if args.plugin_command == "run":
-            store_path = Path(args.store).expanduser().resolve()
-            if (store_path / "index.json").is_file():
-                entry = _lifecycle_manager(args.store).get(args.plugin_id)
-                if entry is not None and entry.get("state") == "dirty":
-                    _print_error(
-                        "PLUGIN_DIRTY",
-                        f"Plugin is quarantined and cannot run: {args.plugin_id} "
-                        f"({entry.get('stateReason')})",
-                    )
-                    return 2
-            try:
-                scope = _load_scope(args.scope_json, args.scope_file)
-                result = PlatformRunner(
-                    _store_registry(args.store), args.output_root,
-                ).run(
-                    plugin_id=args.plugin_id, check_id=args.check_id,
-                    check_version=args.check_version, scope=scope,
-                )
-            except PlatformContractError as error:
-                _print_error(error.code, error.message)
-                return 2
-            payload = {
-                "runId": result.run_id,
-                "status": result.status,
-                "pluginId": args.plugin_id,
-                "checkId": args.check_id,
-                "decisions": [decision.result for decision in result.decisions],
-                "failures": [
-                    {"code": failure.code, "message": failure.message,
-                     "workItemId": failure.work_item_id}
-                    for failure in result.failures
-                ],
-                "outputDir": str((Path(args.output_root).expanduser().resolve() / result.run_id)),
-            }
-            _print_json(payload)
-            return 0 if result.status in {"completed", "partial"} else 1
-        if args.plugin_command == "info":
-            manager = _lifecycle_manager(args.store)
-            entry = manager.get(args.plugin_id)
-            if entry is None:
-                _print_error("UNKNOWN_PLUGIN", f"Plugin is not installed: {args.plugin_id}")
-                return 2
-            _print_json(entry)
-            return 0
-        if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
-            manager = _lifecycle_manager(args.store)
-            try:
-                if args.plugin_command == "install":
-                    result = manager.install(args.package)
-                elif args.plugin_command == "upgrade":
-                    result = manager.upgrade(args.package)
-                elif args.plugin_command == "downgrade":
-                    result = manager.downgrade(args.plugin_id, args.version)
-                elif args.plugin_command == "rollback":
-                    result = manager.rollback(args.plugin_id)
-                else:
-                    result = manager.uninstall(args.plugin_id)
-            except PlatformContractError as error:
-                _print_error(error.code, error.message)
-                return 2
-            _print_json(result)
-            return 0
-        catalog = _plugin_catalog(_store_registry(args.store))
-        quarantined = [
-            entry for entry in _store_index_entries(args.store)
-            if entry.get("state") == "dirty"
-        ]
-        if args.as_json:
-            payload = {"plugins": catalog}
-            if quarantined:
-                payload["quarantined"] = quarantined
-            _print_json(payload)
-        else:
-            for plugin in catalog:
-                checks = ", ".join(
-                    f"{item['checkId']}@{item['version']}" for item in plugin["checks"]
-                )
-                print(f"{plugin['pluginId']} {plugin['version']} [{checks}]")
-            for entry in quarantined:
-                print(f"{entry['pluginId']} (dirty: {entry.get('stateReason')})")
-        return 0
+        return _plugins_command(args, confirm=confirm)
     runtime = BrowserHostRuntime(args.url, Path(args.output_dir))
     try:
         try:

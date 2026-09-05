@@ -17,11 +17,18 @@ PACKAGE = ROOT / "plugins" / "spec-quality"
 PLUGIN_ID = "assayer.spec-quality"
 
 
-def _run(argv: list[str]) -> tuple[int, dict]:
+def _run(argv: list[str], confirm=lambda plan: True) -> tuple[int, dict]:
     output = io.StringIO()
     with redirect_stdout(output):
-        code = cli.main(argv)
+        code = cli.main(argv, confirm=confirm)
     return code, json.loads(output.getvalue())
+
+
+def _run_raw(argv: list[str], confirm=lambda plan: True) -> tuple[int, str]:
+    output = io.StringIO()
+    with redirect_stdout(output):
+        code = cli.main(argv, confirm=confirm)
+    return code, output.getvalue()
 
 
 def _bumped_copy(version: str, directory: Path) -> Path:
@@ -201,6 +208,66 @@ class CliPluginLifecycleTest(unittest.TestCase):
                 [item["pluginId"] for item in listing["plugins"]],
                 ["assayer.config-quality", "assayer.frontend-audit"],
             )
+
+    def test_install_requires_confirmation_when_denied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, output = _run_raw(
+                ["plugins", "install", str(PACKAGE), "--store", str(store)],
+                confirm=lambda plan: False,
+            )
+            self.assertEqual(code, 0)
+            self.assertIn('"aborted"', output)
+            self.assertIn('"confirmation required"', output)
+            self.assertFalse((store / "index.json").exists())
+
+    def test_install_with_yes_skips_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run([
+                "plugins", "install", str(PACKAGE), "--store", str(store), "--yes",
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["pluginId"], PLUGIN_ID)
+            self.assertEqual(result["version"], "1.0.0")
+
+    def test_nl_install_list_info_journey(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run(["install", str(PACKAGE), "--store", str(store), "--yes"])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["plan"], [{"operation": "install", "package": str(PACKAGE.resolve())}])
+            self.assertEqual(result["results"][0]["pluginId"], PLUGIN_ID)
+
+            code, listing = _run(["what", "plugins", "do", "i", "have", "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertIn(
+                PLUGIN_ID,
+                [item["pluginId"] for item in listing["results"][0]["plugins"]],
+            )
+
+            code, info = _run(["tell", "me", "about", "spec-quality", "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(info["results"][0]["activeVersion"], "1.0.0")
+
+    def test_nl_install_bare_name_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run(["install", "spec-quality", "--store", str(store), "--yes"])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "INTENT_PACKAGE_UNRESOLVED")
+
+    def test_nl_run_without_check_asks_for_detail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, result = _run(["review", "spec.md", "with", "spec-quality", "--store", str(store)])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "INTENT_NEEDS_DETAIL")
 
     def test_run_accepts_scope_file(self):
         with tempfile.TemporaryDirectory() as directory:
