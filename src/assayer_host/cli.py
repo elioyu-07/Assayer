@@ -9,8 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from assayer_platform import PlatformContractError, PlatformRunner
-from assayer_platform.builtin_plugins import installed_plugin_registry
+from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
+from assayer_platform.builtin_plugins import builtin_plugin_registry, installed_plugin_registry
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.plugin_lifecycle import PluginLifecycleManager
 
@@ -58,9 +58,9 @@ def _run_agent_audit(url: str, output_root: Path) -> int:
     return completed.returncode
 
 
-def _plugin_catalog() -> list[dict]:
+def _plugin_catalog(registry) -> list[dict]:
     catalog = []
-    for registration in installed_plugin_registry().list():
+    for registration in registry.list():
         manifest = registration.manifest
         catalog.append({
             "pluginId": manifest.plugin_id,
@@ -82,6 +82,21 @@ def _plugin_catalog() -> list[dict]:
 
 def _lifecycle_manager(store_root: str) -> PluginLifecycleManager:
     return PluginLifecycleManager(PluginInstallationStore(store_root))
+
+
+def _store_registry(store_root: str):
+    """Built-ins plus every plugin installed in the durable store.
+
+    Falls back to the entry-point registry when no store index exists so that
+    read-only commands never create a store directory as a side effect.
+    """
+    store_path = Path(store_root).expanduser().resolve()
+    if not (store_path / "index.json").is_file():
+        return installed_plugin_registry()
+    return discover_plugin_registry(
+        PluginInstallationStore(store_path),
+        builtins=installed_plugin_registry().list(),
+    )
 
 
 def _print_json(value: dict) -> None:
@@ -173,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 scope = _load_scope(args.scope_json, args.scope_file)
                 result = PlatformRunner(
-                    installed_plugin_registry(), args.output_root,
+                    _store_registry(args.store), args.output_root,
                 ).run(
                     plugin_id=args.plugin_id, check_id=args.check_id,
                     check_version=args.check_version, scope=scope,
@@ -222,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             _print_json(result)
             return 0
-        catalog = _plugin_catalog()
+        catalog = _plugin_catalog(_store_registry(args.store))
         if args.as_json:
             _print_json({"plugins": catalog})
         else:

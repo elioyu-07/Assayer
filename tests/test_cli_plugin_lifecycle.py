@@ -118,6 +118,38 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "PLUGIN_VERSION_UNAVAILABLE")
 
+    def test_list_and_run_see_installed_store_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+
+            code, listing = _run(["plugins", "list", "--json", "--store", str(store)])
+            self.assertEqual(code, 0)
+            spec = next(
+                item for item in listing["plugins"] if item["pluginId"] == PLUGIN_ID
+            )
+            self.assertEqual(spec["checks"], [{"checkId": "SPEC-001", "version": "1.0.0"}])
+            self.assertEqual(spec["executionModes"], ["interactive"])
+
+            code, result = _run([
+                "plugins", "run", "--plugin", PLUGIN_ID, "--check", "SPEC-001",
+                "--scope-json", "{}", "--store", str(store),
+            ])
+            self.assertEqual(code, 2)
+            self.assertEqual(result["error"]["code"], "PLUGIN_EXECUTION_MODE_UNSUPPORTED")
+
+    def test_list_without_store_reports_builtins_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            code, listing = _run(["plugins", "list", "--json", "--store", str(store)])
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                [item["pluginId"] for item in listing["plugins"]],
+                ["assayer.config-quality", "assayer.frontend-audit"],
+            )
+
     def test_run_accepts_scope_file(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
