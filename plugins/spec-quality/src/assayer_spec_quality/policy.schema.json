@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/elioyu-07/spec-quality-audit/blob/main/references/policy.schema.json",
+  "title": "Spec Quality Audit Policy",
+  "description": "Schema for a machine-readable implementation projection of references/authority.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "policy_id",
+    "policy_version",
+    "authority",
+    "default_profile",
+    "profiles",
+    "source_precedence",
+    "rules",
+    "severity",
+    "readiness"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "./policy.schema.json"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/semanticVersion"
+    },
+    "policy_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_version": {
+      "$ref": "#/$defs/semanticVersion"
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "version",
+        "relationship",
+        "normative"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "$ref": "#/$defs/semanticVersion"
+        },
+        "relationship": {
+          "const": "implementation_projection"
+        },
+        "normative": {
+          "const": false
+        }
+      }
+    },
+    "default_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "selected_overlays": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "source_precedence": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_structure",
+        "ac_case_coverage",
+        "fr_ac_coverage",
+        "finding_admission",
+        "external_claims",
+        "scoring"
+      ],
+      "properties": {
+        "profile_structure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strategy"
+          ],
+          "properties": {
+            "strategy": {
+              "enum": [
+                "selected_profile_only"
+              ]
+            }
+          }
+        },
+        "ac_case_coverage": {
+          "$ref": "#/$defs/coverageRule"
+        },
+        "fr_ac_coverage": {
+          "$ref": "#/$defs/coverageRule"
+        },
+        "finding_admission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scanner_output",
+            "semantic_review_required",
+            "evidence_required"
+          ],
+          "properties": {
+            "scanner_output": {
+              "const": "candidate_evidence"
+            },
+            "semantic_review_required": {
+              "type": "boolean"
+            },
+            "evidence_required": {
+              "type": "boolean"
+            }
+          }
+        },
+        "external_claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "unavailable_evidence_result"
+          ],
+          "properties": {
+            "unavailable_evidence_result": {
+              "const": "UNVERIFIED"
+            }
+          }
+        },
+        "scoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "affects_readiness",
+            "explicit_project_policy_required"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "affects_readiness": {
+              "type": "boolean"
+            },
+            "explicit_project_policy_required": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "severity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_section",
+        "vocabulary"
+      ],
+      "properties": {
+        "authority_section": {
+          "const": 11
+        },
+        "vocabulary": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "P1"
+            },
+            {
+              "const": "P2"
+            },
+            {
+              "const": "P3"
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_section",
+        "vocabulary",
+        "ready_requires_no_confirmed_p1_or_p2",
+        "ready_requires_all_mandatory_dimensions_checked",
+        "material_unverified_prevents_ready",
+        "numeric_score_can_override"
+      ],
+      "properties": {
+        "authority_section": {
+          "const": 11
+        },
+        "vocabulary": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "READY"
+            },
+            {
+              "const": "REWORK"
+            },
+            {
+              "const": "ESCALATE"
+            },
+            {
+              "const": "UNVERIFIED"
+            }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "ready_requires_no_confirmed_p1_or_p2": {
+          "type": "boolean"
+        },
+        "ready_requires_all_mandatory_dimensions_checked": {
+          "type": "boolean"
+        },
+        "material_unverified_prevents_ready": {
+          "type": "boolean"
+        },
+        "numeric_score_can_override": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semanticVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "activation",
+        "reference"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "base",
+            "overlay"
+          ]
+        },
+        "activation": {
+          "enum": [
+            "default",
+            "explicit"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "coverageRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "strategy",
+        "fixed_minimum",
+        "fixed_threshold_requires_explicit_project_policy"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "strategy": {
+          "enum": [
+            "risk_based",
+            "fixed_minimum"
+          ]
+        },
+        "fixed_minimum": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "fixed_threshold_requires_explicit_project_policy": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "fixed_minimum"
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fixed_minimum": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "fixed_minimum": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

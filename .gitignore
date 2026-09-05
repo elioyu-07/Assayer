@@ -8,5 +8,6 @@ __pycache__/
 /auto/
 /build/
 /dist/
+plugins/*/build/
 *.swp
 *.swo

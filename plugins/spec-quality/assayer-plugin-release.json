@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "pluginId": "assayer.spec-quality",
+  "pluginVersion": "1.0.0",
+  "platformApiVersion": "1.0.0",
+  "registration": "assayer_spec_quality:registration",
+  "manifest": "src/assayer_spec_quality/manifest.json",
+  "scopeSchema": "src/assayer_spec_quality/scope.schema.json",
+  "runtimeSource": "src",
+  "semanticReview": "semantic-review.md",
+  "fixtures": ["fixtures/spec-smoke.json"],
+  "packageMetadata": "pyproject.toml",
+  "conformance": { "contractVersion": "1.0.0" }
+}

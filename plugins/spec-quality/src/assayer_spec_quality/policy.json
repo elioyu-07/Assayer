@@ -1,0 +1,94 @@
+{
+  "$schema": "./policy.schema.json",
+  "schema_version": "1.0.0",
+  "policy_id": "spec-quality-audit/default",
+  "policy_version": "1.3.0",
+  "authority": {
+    "path": "authority.md",
+    "version": "1.3.0",
+    "relationship": "implementation_projection",
+    "normative": false
+  },
+  "default_profile": "product-spec",
+  "profiles": {
+    "product-spec": {
+      "kind": "base",
+      "activation": "default",
+      "reference": "spec-template.md"
+    },
+    "strict-12-chapter": {
+      "kind": "base",
+      "activation": "explicit",
+      "reference": "spec-template.md"
+    },
+    "speckit": {
+      "kind": "base",
+      "activation": "explicit",
+      "reference": "spec-driven-development.md"
+    },
+    "adversarial": {
+      "kind": "overlay",
+      "activation": "explicit",
+      "reference": "expert-judgment-governance.md"
+    }
+  },
+  "source_precedence": [
+    "explicit-governing-authority",
+    "organization-baseline",
+    "explicit-project-authority",
+    "skill-default",
+    "external-reference",
+    "heuristic"
+  ],
+  "rules": {
+    "profile_structure": {
+      "strategy": "selected_profile_only"
+    },
+    "ac_case_coverage": {
+      "enabled": true,
+      "strategy": "risk_based",
+      "fixed_minimum": null,
+      "fixed_threshold_requires_explicit_project_policy": true
+    },
+    "fr_ac_coverage": {
+      "enabled": true,
+      "strategy": "risk_based",
+      "fixed_minimum": null,
+      "fixed_threshold_requires_explicit_project_policy": true
+    },
+    "finding_admission": {
+      "scanner_output": "candidate_evidence",
+      "semantic_review_required": true,
+      "evidence_required": true
+    },
+    "external_claims": {
+      "unavailable_evidence_result": "UNVERIFIED"
+    },
+    "scoring": {
+      "enabled": false,
+      "affects_readiness": false,
+      "explicit_project_policy_required": true
+    }
+  },
+  "severity": {
+    "authority_section": 11,
+    "vocabulary": [
+      "P1",
+      "P2",
+      "P3"
+    ]
+  },
+  "readiness": {
+    "authority_section": 11,
+    "vocabulary": [
+      "READY",
+      "REWORK",
+      "ESCALATE",
+      "UNVERIFIED"
+    ],
+    "ready_requires_no_confirmed_p1_or_p2": true,
+    "ready_requires_all_mandatory_dimensions_checked": true,
+    "material_unverified_prevents_ready": true,
+    "numeric_score_can_override": false
+  }
+}

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assayer-spec-quality"
+version = "1.0.0"
+description = "Spec-quality audit plugin for the Assayer platform"
+requires-python = ">=3.11"
+dependencies = ["assayer>=0.1.0,<0.2.0"]
+
+[project.entry-points."assayer.plugins"]
+spec-quality = "assayer_spec_quality:registration"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+assayer_spec_quality = ["*.json", "*.md", "evaluation/*"]

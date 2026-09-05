@@ -592,7 +592,7 @@ silently broaden the selected rule boundary.
 | M1 Vertical user journey | J04-J05 implementation and J06b recovery complete | J04-J05 owner acceptance, J07 clean CLI, and J08 lifecycle evidence |
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
 | M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted; multi-window ownership defect designed | Implement multi-window Run isolation, then collect measured owner workloads and remaining clean-CLI evidence |
-| M4 External Spec plugin | Active; durable platform plugin lifecycle landed (install/upgrade/rollback/uninstall + fail-closed discovery) | Move Spec-quality into an independently buildable distribution and prove the CLI journey |
+| M4 External Spec plugin | Active; durable platform plugin lifecycle landed (install/upgrade/rollback/uninstall + fail-closed discovery); Spec-quality now builds as an independent `plugins/spec-quality` distribution passing static + isolated-install + lifecycle gates | Remove the built-in `builtin_plugins/spec_quality`, migrate its test references, and record the real interactive CLI journey |
 | M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
 | M7 Ecosystem expansion | Deferred | Requires evidence from at least two real plugin use cases |
@@ -742,7 +742,11 @@ silently broaden the selected rule boundary.
    confirmed missing-content findings. Semantic search completeness remains
    plugin-owned.
 5. Externalize the Spec plugin and complete its independent lifecycle,
-   including persistent install, upgrade, rollback, and uninstall.
+   including persistent install, upgrade, rollback, and uninstall. The
+   independent `plugins/spec-quality` distribution now exists and passes the
+   static, isolated-install, and durable lifecycle gates. Remaining: remove the
+   built-in `builtin_plugins/spec_quality` (migrating its test references) and
+   record the real interactive CLI journey.
 6. Resume the deferred Frontend Alpha J04-J07 journey closure. Existing
    frontend implementation and regression coverage remain maintained, but this
    acceptance is not in the current active sequence.
