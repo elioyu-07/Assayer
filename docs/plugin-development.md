@@ -269,7 +269,7 @@ new plugin. The product MCP also exposes the domain-neutral `list_plugins` and
 plugin/check identity and business scope while preserving the same ledger
 invariants.
 
-The `assayer.touchstone` plugin (now an independently installed distribution
+The `ass-spec` plugin (now an independently installed distribution
 rather than a built-in) is the first cross-domain interactive reference for
 Markdown requirements. Its deterministic runtime owns only read-only Markdown
 parsing and bounded candidate excerpts; an Agent must review that evidence and

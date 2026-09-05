@@ -8,8 +8,8 @@ from jsonschema import Draft202012Validator, RefResolver
 
 from assayer_host import InteractivePlatformMcpToolTransport
 from assayer_platform import PluginRegistry
-from assayer_touchstone import evaluation as evaluation_module
-from assayer_touchstone import (
+from ass_spec import evaluation as evaluation_module
+from ass_spec import (
     evaluate_semantic_review_case,
     evaluate_semantic_review_corpus,
     inspect_evaluation_case,
@@ -21,10 +21,10 @@ from assayer_touchstone import (
 
 
 def spec_registry() -> PluginRegistry:
-    """Return a fresh registry containing the external Touchstone plugin."""
+    """Return a fresh registry containing the external ass-spec plugin."""
     return PluginRegistry((registration,))
 
-class TouchstoneEvaluationCorpusTest(unittest.TestCase):
+class AssSpecEvaluationCorpusTest(unittest.TestCase):
     @staticmethod
     def _review_for(case):
         expected = case["expected"]
@@ -89,7 +89,7 @@ class TouchstoneEvaluationCorpusTest(unittest.TestCase):
 
     def test_packaged_corpus_is_valid_and_ids_are_closed(self):
         corpus = load_evaluation_corpus()
-        self.assertEqual(corpus["pluginId"], "assayer.touchstone")
+        self.assertEqual(corpus["pluginId"], "ass-spec")
         self.assertEqual(len(corpus["cases"]), 11)
 
     def test_single_document_cases_match_deterministic_candidate_ids(self):
@@ -292,7 +292,7 @@ class TouchstoneEvaluationCorpusTest(unittest.TestCase):
         case = next(item for item in corpus["cases"] if item["category"] == "ambiguity")
         actual = self._review_for(case)
         ledger = {
-            "run": {"plugin_id": "assayer.touchstone"},
+            "run": {"plugin_id": "ass-spec"},
             "status": "completed",
             "decisions": [{
                 "work_item_id": "spec:ambiguity",
@@ -326,7 +326,7 @@ class TouchstoneEvaluationCorpusTest(unittest.TestCase):
                 output, plugin_registry=spec_registry(),
             )
             started = transport.call_tool("start_plugin_run", {
-                "pluginId": "assayer.touchstone",
+                "pluginId": "ass-spec",
                 "checkId": "SPEC-001",
                 "scope": {"files": [scope_document]},
             })["structuredContent"]["result"]

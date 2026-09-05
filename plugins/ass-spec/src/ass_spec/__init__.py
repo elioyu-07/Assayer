@@ -1,4 +1,4 @@
-"""Standalone Touchstone audit plugin (independent distribution).
+"""Standalone ass-spec audit plugin (independent distribution).
 
 This package is the externalized Spec domain. It depends on the Assayer
 platform (``assayer``) and exposes one ``assayer.plugins`` entry point,
@@ -16,8 +16,8 @@ from pathlib import Path
 
 from assayer_platform import PluginRegistration
 
-from .runtime import TouchstonePlugin
-from .review import TouchstoneDecisionCommitter
+from .runtime import AssSpecPlugin
+from .review import AssSpecDecisionCommitter
 from .evaluation import (
     evaluate_semantic_review_case,
     evaluate_semantic_review_corpus,
@@ -28,31 +28,31 @@ from .evaluation import (
 )
 
 
-TOUCHSTONE_SCOPE_SCHEMA = json.loads(
+ASS_SPEC_SCOPE_SCHEMA = json.loads(
     Path(__file__).with_name("scope.schema.json").read_text(encoding="utf-8")
 )
 
 
 registration = PluginRegistration(
-    TouchstonePlugin.manifest,
-    plugin_factory=lambda _runtime=None: TouchstonePlugin(),
-    committer_factory=lambda _runtime=None: TouchstoneDecisionCommitter(),
+    AssSpecPlugin.manifest,
+    plugin_factory=lambda _runtime=None: AssSpecPlugin(),
+    committer_factory=lambda _runtime=None: AssSpecDecisionCommitter(),
     capabilities=frozenset({"structured_read"}),
     result_features=frozenset({"evidence_graph"}),
     execution_modes=frozenset({"interactive"}),
-    scope_schema=TOUCHSTONE_SCOPE_SCHEMA,
+    scope_schema=ASS_SPEC_SCOPE_SCHEMA,
 )
 
 
 __all__ = [
-    "TouchstoneDecisionCommitter",
-    "TouchstonePlugin",
+    "AssSpecDecisionCommitter",
+    "AssSpecPlugin",
     "evaluate_semantic_review_case",
     "evaluate_semantic_review_corpus",
     "inspect_evaluation_case",
     "load_semantic_review_from_ledger",
     "load_evaluation_corpus",
     "validate_evaluation_corpus",
-    "TOUCHSTONE_SCOPE_SCHEMA",
+    "ASS_SPEC_SCOPE_SCHEMA",
     "registration",
 ]

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Prove the M4 exit gate for the external Touchstone plugin end to end.
+"""Prove the M4 exit gate for the external ass-spec plugin end to end.
 
-Journey against the real ``plugins/touchstone`` distribution, using a durable
+Journey against the real ``plugins/ass-spec`` distribution, using a durable
 ``PluginInstallationStore`` and the domain-neutral interactive MCP transport:
 
     install -> discover -> run (Agent semantic review, Spec business input)
     -> valid platform result -> upgrade -> rollback -> uninstall
 
-The platform never imports ``assayer_touchstone``; it only loads the package
+The platform never imports ``ass_spec``; it only loads the package
 through the lifecycle loader after static validation.  No Assayer platform
 source change is required to install or update the plugin.
 """
@@ -35,8 +35,8 @@ from assayer_platform.plugin_lifecycle import (  # noqa: E402
     discover_plugin_registry,
 )
 
-PACKAGE = ROOT / "plugins" / "touchstone"
-PLUGIN_ID = "assayer.touchstone"
+PACKAGE = ROOT / "plugins" / "ass-spec"
+PLUGIN_ID = "ass-spec"
 
 SPEC_BUSINESS_INPUT = """# Product Spec: External Journey
 
@@ -88,7 +88,7 @@ def _bumped_copy(package: Path, destination: Path, version: str) -> Path:
     descriptor = json.loads((destination / "assayer-plugin-release.json").read_text(encoding="utf-8"))
     descriptor["pluginVersion"] = version
     (destination / "assayer-plugin-release.json").write_text(json.dumps(descriptor), encoding="utf-8")
-    manifest_path = destination / "src" / "assayer_touchstone" / "manifest.json"
+    manifest_path = destination / "src" / "ass_spec" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = version
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -220,7 +220,7 @@ def main() -> int:
             "status": "failed",
             "result": {
                 "code": "SPEC_EXTERNAL_JOURNEY_FAILED",
-                "message": "The external Touchstone exit-gate journey did not complete.",
+                "message": "The external ass-spec exit-gate journey did not complete.",
             },
         }
     schema = json.loads(

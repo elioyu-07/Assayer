@@ -22,7 +22,7 @@ from assayer_platform import (
     validate_review_submission,
 )
 from assayer_platform.builtin_plugins.config_quality.runtime import ConfigQualityPlugin
-from assayer_touchstone import TouchstonePlugin
+from ass_spec import AssSpecPlugin
 
 
 MIGRATION_SPEC = """# Product Spec: Migration Proof
@@ -78,7 +78,7 @@ class LayerMigrationValidationTest(unittest.TestCase):
     def _spec_payload(self, root: Path):
         path = root / "spec.md"
         path.write_text(MIGRATION_SPEC, encoding="utf-8")
-        plugin = TouchstonePlugin()
+        plugin = AssSpecPlugin()
         context = PlatformContext("run-migration-spec", frozenset({"structured_read"}))
         item = plugin.discover({"files": [{"path": str(path)}]}, context)[0]
         packet = plugin.inspect((item,), plugin.manifest.checks[0], context)[0]

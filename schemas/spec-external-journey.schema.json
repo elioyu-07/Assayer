@@ -10,7 +10,7 @@
     "mode": { "const": "external_spec_package" },
     "publishable": { "const": false },
     "status": { "enum": ["passed", "failed"] },
-    "pluginId": { "const": "assayer.touchstone" },
+    "pluginId": { "const": "ass-spec" },
     "steps": {
       "type": "array",
       "minItems": 6,

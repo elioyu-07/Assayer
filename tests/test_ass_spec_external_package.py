@@ -1,4 +1,4 @@
-"""The external Touchstone distribution satisfies the M4 release and
+"""The external ass-spec distribution satisfies the M4 release and
 lifecycle gates: static package validation, isolated install + fixture
 execution, and durable install / discover / upgrade / rollback / uninstall
 without touching platform source."""
@@ -26,7 +26,7 @@ from assayer_platform.plugin_lifecycle import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "plugins" / "touchstone"
+PACKAGE = ROOT / "plugins" / "ass-spec"
 
 
 def _bumped_copy(package: Path, destination: Path, version: str) -> Path:
@@ -34,7 +34,7 @@ def _bumped_copy(package: Path, destination: Path, version: str) -> Path:
     descriptor = json.loads((destination / "assayer-plugin-release.json").read_text(encoding="utf-8"))
     descriptor["pluginVersion"] = version
     (destination / "assayer-plugin-release.json").write_text(json.dumps(descriptor), encoding="utf-8")
-    manifest_path = destination / "src" / "assayer_touchstone" / "manifest.json"
+    manifest_path = destination / "src" / "ass_spec" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = version
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -45,15 +45,15 @@ def _bumped_copy(package: Path, destination: Path, version: str) -> Path:
     return destination
 
 
-class TouchstoneExternalPackageTest(unittest.TestCase):
+class AssSpecExternalPackageTest(unittest.TestCase):
     def test_static_package_gate_passes_without_importing_plugin_code(self):
         report = inspect_plugin_package(PACKAGE)
         self.assertTrue(report.passed, report.as_dict())
-        self.assertEqual(report.plugin_id, "assayer.touchstone")
+        self.assertEqual(report.plugin_id, "ass-spec")
 
     def test_registration_loads_and_matches_packaged_manifest_and_scope(self):
         registration = load_registration(PACKAGE)
-        self.assertEqual(registration.manifest.plugin_id, "assayer.touchstone")
+        self.assertEqual(registration.manifest.plugin_id, "ass-spec")
         self.assertEqual(registration.manifest.version, "1.0.0")
         self.assertEqual(
             sorted(registration.execution_modes), ["interactive"],
@@ -63,11 +63,11 @@ class TouchstoneExternalPackageTest(unittest.TestCase):
         )
         self.assertIn("evidence_graph", registration.result_features)
         packaged_manifest = load_plugin_manifest(
-            PACKAGE / "src" / "assayer_touchstone" / "manifest.json",
+            PACKAGE / "src" / "ass_spec" / "manifest.json",
         )
         self.assertEqual(registration.manifest, packaged_manifest)
         packaged_scope = json.loads(
-            (PACKAGE / "src" / "assayer_touchstone" / "scope.schema.json").read_text(encoding="utf-8"),
+            (PACKAGE / "src" / "ass_spec" / "scope.schema.json").read_text(encoding="utf-8"),
         )
         self.assertEqual(dict(registration.scope_schema), packaged_scope)
 
@@ -78,13 +78,13 @@ class TouchstoneExternalPackageTest(unittest.TestCase):
 
             installed = manager.install(PACKAGE)
             self.assertEqual(installed["status"], "completed")
-            self.assertEqual(installed["pluginId"], "assayer.touchstone")
+            self.assertEqual(installed["pluginId"], "ass-spec")
             self.assertEqual(installed["version"], "1.0.0")
 
             registry = discover_plugin_registry(store)
             self.assertEqual(
                 [item.manifest.plugin_id for item in registry.list()],
-                ["assayer.touchstone"],
+                ["ass-spec"],
             )
 
             with tempfile.TemporaryDirectory() as bumped:
@@ -93,11 +93,11 @@ class TouchstoneExternalPackageTest(unittest.TestCase):
             self.assertEqual(upgraded["version"], "1.1.0")
             self.assertEqual(upgraded["previousVersion"], "1.0.0")
 
-            rolled_back = manager.rollback("assayer.touchstone")
+            rolled_back = manager.rollback("ass-spec")
             self.assertEqual(rolled_back["version"], "1.0.0")
             self.assertEqual(rolled_back["previousVersion"], "1.1.0")
 
-            uninstalled = manager.uninstall("assayer.touchstone")
+            uninstalled = manager.uninstall("ass-spec")
             self.assertEqual(uninstalled["status"], "completed")
             self.assertEqual(manager.list(), [])
 

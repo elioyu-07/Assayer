@@ -8,7 +8,7 @@ from pathlib import Path
 
 from assayer_host.plugin_intent import IntentResolutionError, resolve_intent
 
-KNOWN = ("assayer.touchstone", "assayer.config-quality", "assayer.frontend-audit")
+KNOWN = ("ass-spec", "assayer.config-quality", "assayer.frontend-audit")
 
 
 class PluginIntentResolutionTest(unittest.TestCase):
@@ -17,10 +17,10 @@ class PluginIntentResolutionTest(unittest.TestCase):
         self.assertEqual([step.operation for step in plan], ["list"])
 
     def test_resolves_info_intent_by_short_name(self):
-        plan = resolve_intent("tell me about touchstone", known_plugin_ids=KNOWN)
+        plan = resolve_intent("tell me about ass-spec", known_plugin_ids=KNOWN)
         self.assertEqual(len(plan), 1)
         self.assertEqual(plan[0].operation, "info")
-        self.assertEqual(plan[0].plugin_id, "assayer.touchstone")
+        self.assertEqual(plan[0].plugin_id, "ass-spec")
 
     def test_resolves_install_intent_from_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -32,18 +32,18 @@ class PluginIntentResolutionTest(unittest.TestCase):
             self.assertTrue(plan[0].dangerous)
 
     def test_resolves_downgrade_with_version(self):
-        plan = resolve_intent("pin touchstone to 0.9.0", known_plugin_ids=KNOWN)
+        plan = resolve_intent("pin ass-spec to 0.9.0", known_plugin_ids=KNOWN)
         self.assertEqual(plan[0].operation, "downgrade")
-        self.assertEqual(plan[0].plugin_id, "assayer.touchstone")
+        self.assertEqual(plan[0].plugin_id, "ass-spec")
         self.assertEqual(plan[0].version, "0.9.0")
 
     def test_resolves_rollback_and_uninstall(self):
         self.assertEqual(
-            resolve_intent("undo the last update for touchstone", known_plugin_ids=KNOWN)[0].operation,
+            resolve_intent("undo the last update for ass-spec", known_plugin_ids=KNOWN)[0].operation,
             "rollback",
         )
         self.assertEqual(
-            resolve_intent("remove touchstone", known_plugin_ids=KNOWN)[0].operation,
+            resolve_intent("remove ass-spec", known_plugin_ids=KNOWN)[0].operation,
             "uninstall",
         )
 
@@ -52,7 +52,7 @@ class PluginIntentResolutionTest(unittest.TestCase):
             scope = Path(directory) / "spec.md"
             scope.write_text("# spec", encoding="utf-8")
             plan = resolve_intent(
-                f"run touchstone SPEC-001 on {scope}", known_plugin_ids=KNOWN,
+                f"run ass-spec SPEC-001 on {scope}", known_plugin_ids=KNOWN,
             )
             self.assertEqual(plan[0].operation, "run")
             self.assertEqual(plan[0].check_id, "SPEC-001")
@@ -65,12 +65,12 @@ class PluginIntentResolutionTest(unittest.TestCase):
 
     def test_downgrade_without_version_asks_for_detail(self):
         with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("downgrade touchstone", known_plugin_ids=KNOWN)
+            resolve_intent("downgrade ass-spec", known_plugin_ids=KNOWN)
         self.assertEqual(ctx.exception.code, "INTENT_NEEDS_DETAIL")
 
     def test_install_bare_name_is_unresolved(self):
         with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("install touchstone", known_plugin_ids=KNOWN)
+            resolve_intent("install ass-spec", known_plugin_ids=KNOWN)
         self.assertEqual(ctx.exception.code, "INTENT_PACKAGE_UNRESOLVED")
 
     def test_empty_intent_fails_closed(self):

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://assayer.dev/plugins/touchstone/scope.schema.json",
+  "$id": "https://assayer.dev/plugins/ass-spec/scope.schema.json",
   "title": "Spec Quality Audit Scope",
   "description": "Select either independent Spec files or one anchor Spec with explicitly bounded related documents.",
   "type": "object",

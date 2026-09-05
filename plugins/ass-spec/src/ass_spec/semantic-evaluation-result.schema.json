@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://assayer.dev/plugins/touchstone/semantic-evaluation-result.schema.json",
+  "$id": "https://assayer.dev/plugins/ass-spec/semantic-evaluation-result.schema.json",
   "title": "Spec Quality Semantic Evaluation Result",
   "type": "object",
   "additionalProperties": false,

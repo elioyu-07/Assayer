@@ -18,16 +18,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-TOUCHSTONE_PLUGIN_SRC = ROOT / "plugins" / "touchstone" / "src"
+ASS_SPEC_PLUGIN_SRC = ROOT / "plugins" / "ass-spec" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-if str(TOUCHSTONE_PLUGIN_SRC) not in sys.path:
-    sys.path.insert(0, str(TOUCHSTONE_PLUGIN_SRC))
+if str(ASS_SPEC_PLUGIN_SRC) not in sys.path:
+    sys.path.insert(0, str(ASS_SPEC_PLUGIN_SRC))
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 existing_pythonpath = os.environ.get("PYTHONPATH")
 os.environ["PYTHONPATH"] = os.pathsep.join(
-    part for part in (str(SRC), str(TOUCHSTONE_PLUGIN_SRC), existing_pythonpath) if part
+    part for part in (str(SRC), str(ASS_SPEC_PLUGIN_SRC), existing_pythonpath) if part
 )
 
 BROWSER_TEST_PREFIX = "test_browser_playwright."

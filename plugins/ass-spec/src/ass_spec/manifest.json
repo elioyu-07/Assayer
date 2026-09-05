@@ -1,8 +1,8 @@
 {
-  "pluginId": "assayer.touchstone",
+  "pluginId": "ass-spec",
   "version": "1.0.0",
   "platformApiVersion": "1.0.0",
-  "domains": ["touchstone"],
+  "domains": ["spec"],
   "subjectKinds": ["spec_document"],
   "checks": [
     {

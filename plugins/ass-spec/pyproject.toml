@@ -3,17 +3,17 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "assayer-touchstone"
+name = "ass-spec"
 version = "1.0.0"
-description = "Touchstone: the Assayer plugin that assays your specs — reviews Markdown product and software specifications against the canonical 18-point quality policy."
+description = "ass-spec: the Assayer plugin that reviews Markdown product and software specifications against the canonical 18-point quality policy."
 requires-python = ">=3.11"
 dependencies = ["assayer>=0.1.0,<0.2.0"]
 
 [project.entry-points."assayer.plugins"]
-touchstone = "assayer_touchstone:registration"
+ass-spec = "ass_spec:registration"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-assayer_touchstone = ["*.json", "*.md", "evaluation/*"]
+ass_spec = ["*.json", "*.md", "evaluation/*"]

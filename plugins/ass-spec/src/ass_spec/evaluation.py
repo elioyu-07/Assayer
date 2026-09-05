@@ -1,4 +1,4 @@
-"""Touchstone plugin evaluation helpers."""
+"""ass-spec plugin evaluation helpers."""
 from __future__ import annotations
 
 from collections import Counter
@@ -13,7 +13,7 @@ from assayer_platform.evaluation import (
     load_evaluation_corpus as _load_evaluation_corpus,
     validate_evaluation_corpus,
 )
-from .runtime import TouchstonePlugin
+from .runtime import AssSpecPlugin
 
 
 _ROOT = Path(__file__).parent
@@ -136,7 +136,7 @@ def inspect_evaluation_case(
                 } for document in documents if document["documentId"] != anchor_id],
                 "relationships": [dict(relationship) for relationship in case["relationships"]],
             }
-            plugin = TouchstonePlugin()
+            plugin = AssSpecPlugin()
             context = PlatformContext("evaluation-corpus", frozenset({"structured_read"}))
             items = plugin.discover(scope, context)
             packet = plugin.inspect(items, plugin.manifest.checks[0], context)[0]
@@ -166,7 +166,7 @@ def inspect_evaluation_case(
     if "path" not in document:
         return {"caseId": case["caseId"], "status": "semantic_review_required", "candidateIds": [], "ruleIds": []}
     path = (fixture_root or _CORPUS_PATH.parent) / document["path"]
-    plugin = TouchstonePlugin()
+    plugin = AssSpecPlugin()
     context = PlatformContext("evaluation-corpus", frozenset({"structured_read"}))
     config: dict[str, Any] = {"path": str(path)}
     if document.get("profile"):
@@ -523,8 +523,8 @@ def load_semantic_review_from_ledger(
     if not isinstance(ledger, Mapping):
         raise ValueError("Spec evaluation ledger must be an object")
     run = ledger.get("run")
-    if not isinstance(run, Mapping) or run.get("plugin_id") != "assayer.touchstone":
-        raise ValueError("Evaluation ledger does not belong to assayer.touchstone")
+    if not isinstance(run, Mapping) or run.get("plugin_id") != "ass-spec":
+        raise ValueError("Evaluation ledger does not belong to ass-spec")
     if ledger.get("status") not in {"completed", "partial"}:
         raise ValueError("Evaluation ledger must contain a valid terminal conclusion")
     decisions = [
