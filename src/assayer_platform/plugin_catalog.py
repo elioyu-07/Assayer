@@ -272,8 +272,9 @@ def upsert_catalog_version(
     plugins = payload.setdefault("plugins", {})
     plugin = plugins.setdefault(plugin_id, {})
     plugin["pluginId"] = plugin_id
-    plugin.setdefault("name", name)
-    plugin.setdefault("description", description)
+    plugin["name"] = name or plugin_id
+    if description:
+        plugin["description"] = description
     versions = plugin.setdefault("versions", {})
     versions[version] = {
         "pluginId": plugin_id,
