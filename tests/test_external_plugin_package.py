@@ -23,7 +23,7 @@ from assayer_platform.plugin_lifecycle import (
     discover_plugin_registry,
     load_registration,
 )
-from assayer_host.plugin_store_registry import store_backed_plugin_registry
+from assayer_host.plugin_store_registry import default_store_root, store_backed_plugin_registry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +126,25 @@ class ExternalPluginPackageTest(unittest.TestCase):
         registry = store_backed_plugin_registry(None)
         plugin_ids = [item.manifest.plugin_id for item in registry.list()]
         self.assertIn("assayer.frontend-audit", plugin_ids)
+
+    def test_default_store_root_is_absolute_and_cwd_independent(self):
+        root = default_store_root()
+        self.assertTrue(root.is_absolute(), root)
+        self.assertNotIn("..", root.parts)
+        self.assertEqual(root.name, "plugins")
+        self.assertEqual(root.parent.name, "assayer")
+
+    def test_default_store_root_honors_env_override(self):
+        import os
+        previous = os.environ.get("ASSAYER_STORE")
+        try:
+            os.environ["ASSAYER_STORE"] = "/tmp/custom-assayer-store"
+            self.assertEqual(str(default_store_root()), "/tmp/custom-assayer-store")
+        finally:
+            if previous is None:
+                os.environ.pop("ASSAYER_STORE", None)
+            else:
+                os.environ["ASSAYER_STORE"] = previous
 
     def test_install_rejects_duplicate_identity(self):
         with tempfile.TemporaryDirectory() as directory:

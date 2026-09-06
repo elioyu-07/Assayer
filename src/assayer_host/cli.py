@@ -31,6 +31,7 @@ from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
 from .plugin_intent import IntentResolutionError, IntentStep, resolve_intent
+from .plugin_store_registry import default_store_root
 from .runtime_router import RuntimeRouter
 from .transport import JsonLineTransport
 
@@ -304,7 +305,7 @@ def _known_plugin_ids(store_root: str) -> tuple[str, ...]:
 
 
 def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str]:
-    store = "./.assayer/plugins"
+    store = str(default_store_root())
     output_root = "./assayer-output"
     yes = False
     words: list[str] = []
@@ -583,7 +584,7 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     serve.add_argument("--lease-timeout", type=float, default=300.0)
     plugins = subparsers.add_parser("plugins", help="Manage and inspect platform plugins")
     plugin_common = argparse.ArgumentParser(add_help=False)
-    plugin_common.add_argument("--store", default="./.assayer/plugins",
+    plugin_common.add_argument("--store", default=str(default_store_root()),
                                help="Plugin installation store directory")
     plugins_subparsers = plugins.add_subparsers(dest="plugin_command", required=True)
     plugin_list = plugins_subparsers.add_parser("list", parents=[plugin_common],

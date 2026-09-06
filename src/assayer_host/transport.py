@@ -29,7 +29,7 @@ from .core import HostCore, TOOL_KINDS
 from .errors import HostError
 from .lifecycle import InstallationStatusBuilder
 from .lifecycle_product import LifecycleProductController, LifecycleProductToolTransport
-from .plugin_store_registry import store_backed_plugin_registry
+from .plugin_store_registry import default_store_root, store_backed_plugin_registry
 from .resources import default_rules_root, default_schema_root
 from assayer_platform import (
     DecisionProposal, DimensionObservation, EvidenceRecord, PlatformRunner,
@@ -2382,7 +2382,7 @@ ProductMcpToolTransport = FrontendProductMcpToolTransport
 def mcp_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Assayer plugin MCP stdio server")
     parser.add_argument("--output-root", default="./assayer-output", help="Fixed parent directory for all Scan output directories")
-    parser.add_argument("--store", default=os.environ.get("ASSAYER_STORE", "./.assayer/plugins"),
+    parser.add_argument("--store", default=str(default_store_root()),
                         help="Plugin installation store directory (defaults to $ASSAYER_STORE)")
     parser.add_argument("--max-runtimes", type=int, default=4)
     parser.add_argument("--lease-timeout", type=float, default=300.0)

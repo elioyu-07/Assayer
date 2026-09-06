@@ -9,10 +9,32 @@ the CLI.
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 
 from assayer_platform import PluginInstallationStore, PluginRegistry, discover_plugin_registry
 from assayer_platform.builtin_plugins import installed_plugin_registry
+
+
+def default_store_root() -> Path:
+    """The single fixed plugin-store default shared by the CLI and the MCP runtime.
+
+    Both ``assayer plugins add`` and ``assayer-mcp`` must resolve the same store
+    without the user threading ``ASSAYER_STORE`` through two processes, so the
+    fallback is an absolute per-user data directory rather than a CWD-relative
+    path.  ``ASSAYER_STORE`` remains an explicit override for both.
+    """
+    env = os.environ.get("ASSAYER_STORE")
+    if env:
+        return Path(env).expanduser()
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "assayer" / "plugins"
 
 
 def store_backed_plugin_registry(store_root: str | Path | None) -> PluginRegistry:

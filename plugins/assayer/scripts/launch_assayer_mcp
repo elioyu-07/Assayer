@@ -145,4 +145,4 @@ fi
 export ASSAYER_PLUGIN_VERSION="$PLUGIN_VERSION"
 export ASSAYER_RUNTIME_VERSION="$RUNTIME_VERSION"
 export ASSAYER_BUNDLE_VERIFIED=1
-exec "$VENV_ROOT/bin/assayer-mcp" --output-root "${ASSAYER_OUTPUT_ROOT:-${TMPDIR:-/tmp}/assayer-output}" --store "${ASSAYER_STORE:-./.assayer/plugins}"
+exec "$VENV_ROOT/bin/assayer-mcp" --output-root "${ASSAYER_OUTPUT_ROOT:-${TMPDIR:-/tmp}/assayer-output}"
