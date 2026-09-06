@@ -30,8 +30,8 @@ class EvidenceGraphTest(unittest.TestCase):
         self.assertEqual(groups[0].candidate_ids, ("candidate:1", "candidate:2"))
 
     def test_graph_preserves_candidate_coverage_and_multi_dimension_finding(self):
-        group = RootCauseGroup("group:1", ("candidate:1", "candidate:2"), ("evidence:1",), ("CHK-02", "CHK-05"))
-        finding = FindingRecord("finding:1", "group:1", "issue_found", ("CHK-02", "CHK-05"), ("evidence:1",), "One root cause affects two dimensions.")
+        group = RootCauseGroup("group:1", ("candidate:1", "candidate:2"), ("evidence:1",), ("DIM-02", "DIM-05"))
+        finding = FindingRecord("finding:1", "group:1", "issue_found", ("DIM-02", "DIM-05"), ("evidence:1",), "One root cause affects two dimensions.")
         graph = EvidenceGraph(self.candidates(), (group,), (finding,), frozenset({"evidence:1", "evidence:2"}))
         self.assertTrue(graph.coverage_complete)
         self.assertEqual(graph.pending_candidate_ids, frozenset())
@@ -60,9 +60,9 @@ class EvidenceGraphTest(unittest.TestCase):
              "line": 10, "message": "same", "evidence": "source excerpt"},
         ]
         decisions = [
-            {"finding_id": "finding:1", "status": "CONFIRMED", "dimension": "CHK-02",
+            {"finding_id": "finding:1", "status": "CONFIRMED", "dimension": "DIM-02",
              "candidate_ids": ["candidate:1"]},
-            {"finding_id": "finding:2", "status": "MERGED", "dimension": "CHK-05",
+            {"finding_id": "finding:2", "status": "MERGED", "dimension": "DIM-05",
              "candidate_ids": ["candidate:2"]},
         ]
         graph = build_candidate_evidence_graph(
@@ -71,7 +71,7 @@ class EvidenceGraphTest(unittest.TestCase):
         )
         self.assertTrue(graph.coverage_complete)
         self.assertEqual({item.candidate_id for item in graph.candidates}, {"candidate:1", "candidate:2"})
-        self.assertEqual(graph.groups[0].affected_dimensions, ("CHK-02", "CHK-05"))
+        self.assertEqual(graph.groups[0].affected_dimensions, ("DIM-02", "DIM-05"))
         self.assertEqual(render_candidate_evidence_graph(graph)["coveredCandidateCount"], 2)
 
     def test_mapping_adapter_keeps_unreviewed_candidates_pending(self):

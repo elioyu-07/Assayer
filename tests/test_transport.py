@@ -15,6 +15,8 @@ from assayer_host import (CredentialVault, DeterministicEvidenceAdapter, Determi
                           create_product_mcp_server)
 from assayer_host.page import EntrypointExecution, EntrypointObservation, PageObservation
 from assayer_host.release_lifecycle import PluginInstallation, PluginLifecyclePlanner
+from assayer_platform import PluginRegistry
+from assayer_platform.testing import config_quality_registration
 
 
 VALID_RESPONSE = {
@@ -473,14 +475,17 @@ class TransportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "settings.json"
             source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
-            transport = PlatformMcpToolTransport(Path(directory) / "output")
+            transport = PlatformMcpToolTransport(
+                Path(directory) / "output",
+                plugin_registry=PluginRegistry((config_quality_registration(),)),
+            )
             tools = transport.list_tools()
             self.assertEqual([item["name"] for item in tools], ["list_plugins", "run_plugin"])
             catalog = transport.call_tool("list_plugins", {})["structuredContent"]["result"]["plugins"]
-            config = next(item for item in catalog if item["pluginId"] == "assayer.config-quality")
+            config = next(item for item in catalog if item["pluginId"] == "test.config-quality")
             self.assertEqual(config["scopeSchema"]["required"], ["files"])
             result = transport.call_tool("run_plugin", {
-                "pluginId": "assayer.config-quality", "checkId": "CFG-001",
+                "pluginId": "test.config-quality", "checkId": "CFG-001",
                 "scope": {"files": [{
                     "path": str(source), "requiredKeys": ["enabled"],
                     "expectedTypes": {"enabled": "boolean"},

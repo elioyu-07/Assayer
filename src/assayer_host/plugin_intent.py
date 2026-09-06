@@ -169,7 +169,7 @@ def resolve_intent(
         if plugin_id is None:
             raise IntentResolutionError(
                 "INTENT_NEEDS_PLUGIN",
-                "Specify which plugin (e.g. 'tell me about ass-spec').",
+                "Specify which plugin (e.g. 'tell me about test-minimal').",
             )
         return (IntentStep("info", plugin_id=plugin_id),)
 
@@ -187,7 +187,7 @@ def resolve_intent(
         if plugin_id is None or version is None:
             raise IntentResolutionError(
                 "INTENT_NEEDS_DETAIL",
-                "downgrade needs a plugin and a target version (e.g. 'pin ass-spec to 1.0.0').",
+                "downgrade needs a plugin and a target version (e.g. 'pin test-minimal to 1.0.0').",
             )
         return (IntentStep("downgrade", plugin_id=plugin_id, version=version),)
 
@@ -195,7 +195,7 @@ def resolve_intent(
         if plugin_id is None:
             raise IntentResolutionError(
                 "INTENT_NEEDS_PLUGIN",
-                "rollback needs a plugin (e.g. 'rollback ass-spec').",
+                "rollback needs a plugin (e.g. 'rollback test-minimal').",
             )
         return (IntentStep("rollback", plugin_id=plugin_id),)
 
@@ -203,7 +203,7 @@ def resolve_intent(
         if plugin_id is None:
             raise IntentResolutionError(
                 "INTENT_NEEDS_PLUGIN",
-                "remove/uninstall needs a plugin (e.g. 'remove ass-spec').",
+                "remove/uninstall needs a plugin (e.g. 'remove test-minimal').",
             )
         return (IntentStep("uninstall", plugin_id=plugin_id),)
 
@@ -213,7 +213,7 @@ def resolve_intent(
         raise IntentResolutionError(
             "INTENT_NEEDS_DETAIL",
             "run needs a plugin, a check id, and a scope file "
-            "(e.g. 'run ass-spec SPEC-001 on spec.md').",
+            "(e.g. 'run test-minimal TST-001 on input.md').",
         )
     return (IntentStep("run", plugin_id=plugin_id, check_id=check_id, scope_file=scope_file),)
 

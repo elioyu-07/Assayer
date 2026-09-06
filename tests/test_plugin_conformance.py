@@ -17,7 +17,7 @@ from assayer_platform import (
     load_plugin_manifest,
     validate_candidate_evidence_graph_projection,
 )
-from assayer_platform.builtin_plugins.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
+from assayer_platform.testing.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from assayer_platform.builtin_plugins.frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, FrontendLedgerCommitter, ProductFrontendRuntime
 from assayer_host import (
     DeterministicEvidenceAdapter,

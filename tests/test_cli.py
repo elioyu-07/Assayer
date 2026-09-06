@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from assayer_host import cli
+from assayer_platform import PluginRegistry
+from assayer_platform.testing import config_quality_registration
 
 
 class CliTest(unittest.TestCase):
@@ -57,16 +59,14 @@ class CliTest(unittest.TestCase):
         catalog = __import__("json").loads(output.getvalue())["plugins"]
         self.assertEqual(
             [item["pluginId"] for item in catalog],
-            ["assayer.config-quality", "assayer.frontend-audit"],
+            ["assayer.frontend-audit"],
         )
-        self.assertEqual(catalog[0]["checks"], [{"checkId": "CFG-001", "version": "1.0.0"}])
+        self.assertEqual(catalog[0]["checks"], [{"checkId": "FUA-10", "version": "1.1.0"}])
         self.assertEqual(catalog[0]["platformApiVersion"], "1.0.0")
-        self.assertIn("structured_read", catalog[0]["capabilities"])
-        self.assertEqual(catalog[0]["executionModes"], ["batch"])
-        self.assertEqual(catalog[1]["executionModes"], ["interactive"])
-        self.assertEqual(catalog[0]["scopeSchema"]["required"], ["files"])
-        self.assertFalse(catalog[0]["supportsCommit"])
-        self.assertTrue(catalog[1]["supportsCommit"])
+        self.assertIn("visual_read", catalog[0]["capabilities"])
+        self.assertEqual(catalog[0]["executionModes"], ["interactive"])
+        self.assertEqual(catalog[0]["scopeSchema"]["required"], ["url"])
+        self.assertTrue(catalog[0]["supportsCommit"])
 
     def test_registered_non_browser_plugin_runs_through_generic_cli(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -81,10 +81,13 @@ class CliTest(unittest.TestCase):
                 }]
             })
             output = io.StringIO()
+            registry = PluginRegistry((config_quality_registration(),))
 
-            with redirect_stdout(output), patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
+            with redirect_stdout(output), \
+                 patch("assayer_host.cli.installed_plugin_registry", return_value=registry), \
+                 patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
                 result = cli.main([
-                    "plugins", "run", "--plugin", "assayer.config-quality",
+                    "plugins", "run", "--plugin", "test.config-quality",
                     "--check", "CFG-001", "--scope-json", scope,
                     "--output-root", str(root / "output"),
                 ])

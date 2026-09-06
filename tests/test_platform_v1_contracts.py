@@ -43,7 +43,7 @@ class PlatformV1ContractTests(unittest.TestCase):
             "coverageComplete": False,
             "rootCauseGroups": [{
                 "groupId": "group:1", "candidateIds": ["candidate:1"],
-                "evidenceRefs": ["evidence:1"], "affectedDimensions": ["CHK-01"],
+                "evidenceRefs": ["evidence:1"], "affectedDimensions": ["DIM-01"],
             }],
             "workItems": [{
                 "workItemId": "work-001", "candidateCount": 2,

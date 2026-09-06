@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from assayer_platform import PlatformDeliveryObserver, PlatformRunner, PluginRegistry
-from assayer_platform.builtin_plugins import builtin_plugin_registry
+from assayer_platform.testing import config_quality_registration
 
 
 class DeliveryObserverTest(unittest.TestCase):
@@ -12,12 +12,9 @@ class DeliveryObserverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "settings.json"
             source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
-            registry = PluginRegistry(tuple(
-                item for item in builtin_plugin_registry().list()
-                if item.manifest.plugin_id == "assayer.config-quality"
-            ))
+            registry = PluginRegistry((config_quality_registration(),))
             result = PlatformRunner(registry, Path(directory) / "output").run(
-                plugin_id="assayer.config-quality", check_id="CFG-001",
+                plugin_id="test.config-quality", check_id="CFG-001",
                 scope={"files": [{"path": str(source)}]}, run_id="run-delivery-observer",
             )
             observed = PlatformDeliveryObserver(Path(directory) / "output" / result.run_id).observe(result)

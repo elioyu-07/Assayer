@@ -20,8 +20,8 @@ from assayer_platform import (
     build_canonical_result,
     validate_canonical_result,
 )
-from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.builtin_plugins.config_quality import (
+from assayer_platform.testing import config_quality_registration
+from assayer_platform.testing.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )
@@ -48,13 +48,10 @@ class CanonicalResultTest(unittest.TestCase):
             source = Path(directory) / "settings.json"
             source.write_text(json.dumps({"name": "demo"}), encoding="utf-8")
             result = PlatformRunner(
-                PluginRegistry(tuple(
-                    item for item in builtin_plugin_registry().list()
-                    if item.manifest.plugin_id == "assayer.config-quality"
-                )),
+                PluginRegistry((config_quality_registration(),)),
                 Path(directory) / "output",
             ).run(
-                plugin_id="assayer.config-quality",
+                plugin_id="test.config-quality",
                 check_id="CFG-001",
                 scope={"files": [{"path": str(source)}]},
                 run_id="run-canonical-result",

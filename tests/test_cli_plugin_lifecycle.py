@@ -11,10 +11,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from assayer_host import cli
+from assayer_platform import PluginRegistry
+from assayer_platform.testing import config_quality_registration
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "plugins" / "ass-spec"
-PLUGIN_ID = "ass-spec"
+PACKAGE = ROOT / "tests" / "fixtures" / "plugins" / "minimal"
+PLUGIN_ID = "test-minimal"
 
 
 def _run(argv: list[str], confirm=lambda plan: True) -> tuple[int, dict]:
@@ -32,12 +35,12 @@ def _run_raw(argv: list[str], confirm=lambda plan: True) -> tuple[int, str]:
 
 
 def _bumped_copy(version: str, directory: Path) -> Path:
-    destination = directory / f"ass-spec-{version}"
+    destination = directory / f"test-minimal-{version}"
     shutil.copytree(PACKAGE, destination)
     descriptor = json.loads((destination / "assayer-plugin-release.json").read_text(encoding="utf-8"))
     descriptor["pluginVersion"] = version
     (destination / "assayer-plugin-release.json").write_text(json.dumps(descriptor), encoding="utf-8")
-    manifest_path = destination / "src" / "ass_spec" / "manifest.json"
+    manifest_path = destination / "src" / "minimal_plugin" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["version"] = version
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -136,11 +139,11 @@ class CliPluginLifecycleTest(unittest.TestCase):
             spec = next(
                 item for item in listing["plugins"] if item["pluginId"] == PLUGIN_ID
             )
-            self.assertEqual(spec["checks"], [{"checkId": "SPEC-001", "version": "1.0.0"}])
+            self.assertEqual(spec["checks"], [{"checkId": "TST-001", "version": "1.0.0"}])
             self.assertEqual(spec["executionModes"], ["interactive"])
 
             code, result = _run([
-                "plugins", "run", "--plugin", PLUGIN_ID, "--check", "SPEC-001",
+                "plugins", "run", "--plugin", PLUGIN_ID, "--check", "TST-001",
                 "--scope-json", "{}", "--store", str(store),
             ])
             self.assertEqual(code, 2)
@@ -170,7 +173,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
             code, listing = _run(["plugins", "list", "--json", "--store", str(store)])
             self.assertEqual(code, 0)
             self.assertEqual([item["pluginId"] for item in listing["plugins"]],
-                             ["assayer.config-quality", "assayer.frontend-audit"])
+                             ["assayer.frontend-audit"])
             self.assertEqual(
                 [item["pluginId"] for item in listing["quarantined"]], ["assayer.bad"],
             )
@@ -206,7 +209,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(
                 [item["pluginId"] for item in listing["plugins"]],
-                ["assayer.config-quality", "assayer.frontend-audit"],
+                ["assayer.frontend-audit"],
             )
 
     def test_install_requires_confirmation_when_denied(self):
@@ -249,7 +252,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
                 [item["pluginId"] for item in listing["results"][0]["plugins"]],
             )
 
-            code, info = _run(["tell", "me", "about", "ass-spec", "--store", str(store)])
+            code, info = _run(["tell", "me", "about", "test-minimal", "--store", str(store)])
             self.assertEqual(code, 0)
             self.assertEqual(info["results"][0]["activeVersion"], "1.0.0")
 
@@ -257,7 +260,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            code, result = _run(["install", "ass-spec", "--store", str(store), "--yes"])
+            code, result = _run(["install", "test-minimal", "--store", str(store), "--yes"])
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "INTENT_PACKAGE_UNRESOLVED")
 
@@ -265,7 +268,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            code, result = _run(["review", "spec.md", "with", "ass-spec", "--store", str(store)])
+            code, result = _run(["review", "spec.md", "with", "test-minimal", "--store", str(store)])
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "INTENT_NEEDS_DETAIL")
 
@@ -282,11 +285,13 @@ class CliPluginLifecycleTest(unittest.TestCase):
                     "expectedTypes": {"enabled": "boolean"},
                 }]
             }), encoding="utf-8")
-            code, result = _run([
-                "plugins", "run", "--plugin", "assayer.config-quality",
-                "--check", "CFG-001", "--scope", str(scope_file),
-                "--output-root", str(root / "output"),
-            ])
+            registry = PluginRegistry((config_quality_registration(),))
+            with patch("assayer_host.cli.installed_plugin_registry", return_value=registry):
+                code, result = _run([
+                    "plugins", "run", "--plugin", "test.config-quality",
+                    "--check", "CFG-001", "--scope", str(scope_file),
+                    "--output-root", str(root / "output"),
+                ])
             self.assertEqual(code, 0)
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["decisions"], ["scanned_no_issue"])

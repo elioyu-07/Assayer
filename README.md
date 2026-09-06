@@ -43,8 +43,11 @@ lifecycle is not yet a delivered ecosystem feature.
 | Plugin | Status | What it does |
 |---|---|---|
 | `assayer.frontend-audit` | Usable Alpha | Audits anonymous test or staging web interfaces in Chromium with safe interactions and DOM/visual evidence; currently ships the FUA-10 filter-action check. |
-| `ass-spec` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point quality policy with Agent semantic judgment. |
-| `assayer.config-quality` | Reference | Demonstrates deterministic, batched auditing of structured configuration files through the generic platform kernel. |
+| `ass-spec` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point quality policy with Agent semantic judgment. Lives in its own repository (`ass-spec`) and is installed as an external distribution. |
+
+A deterministic, non-browser configuration reference lives in
+`assayer_platform.testing` for exercising the generic kernel in tests; it is not
+a shipped plugin and never appears in the plugin catalog.
 
 Every plugin publishes the same portable `canonical-result.json`. A plugin may
 also publish richer domain reports, but those reports cannot redefine the formal
@@ -182,7 +185,8 @@ The ordered roadmap is:
 1. close the remaining clean-CLI and release-lifecycle evidence for the current
    user journey;
 2. complete measured platform-performance evidence;
-3. externalize the ass-spec plugin without changing platform source;
+3. externalize the ass-spec plugin without changing platform source (done: it now
+   lives in its own repository and installs as an external distribution);
 4. build an Agent-first plugin workbench backed by inspectable packages and
    mandatory conformance gates;
 5. externalize frontend auditing and reusable capability providers;
@@ -281,7 +285,7 @@ commands are development interfaces, not substitutes for a real user journey.
 
 ```text
 plugins/                Codex Plugin source, Skills, launcher, and bundled resources
-src/assayer_platform/   Domain-neutral contracts, kernel, registry, and reference plugins
+src/assayer_platform/   Domain-neutral contracts, kernel, registry, and test references
 src/assayer_host/       Product Host, browser runtime, transport, persistence, and recovery
 src/assayer_agent/      Model-independent Agent orchestration
 rules/                  Versioned frontend audit rules

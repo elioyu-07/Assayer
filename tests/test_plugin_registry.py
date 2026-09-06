@@ -22,7 +22,8 @@ from assayer_platform import (
     load_plugin_manifest,
 )
 from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.builtin_plugins.config_quality import (
+from assayer_platform.testing import config_quality_registration
+from assayer_platform.testing.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )
@@ -92,10 +93,14 @@ class PluginRegistryTest(unittest.TestCase):
         registry = builtin_plugin_registry()
 
         frontend = registry.select(domain="frontend-audit")
-        config = registry.select(check_ref=("CFG-001", "1.0.0"))
-
         self.assertEqual(frontend.manifest.plugin_id, "assayer.frontend-audit")
-        self.assertEqual(config.manifest.plugin_id, "assayer.config-quality")
+
+        with_fixture = PluginRegistry((
+            *builtin_plugin_registry().list(),
+            config_quality_registration(),
+        ))
+        config = with_fixture.select(check_ref=("CFG-001", "1.0.0"))
+        self.assertEqual(config.manifest.plugin_id, "test.config-quality")
 
     def test_duplicate_plugin_identity_fails_closed(self):
         registration = PluginRegistration(
@@ -111,7 +116,10 @@ class PluginRegistryTest(unittest.TestCase):
             registry.register(registration)
 
     def test_ambiguous_selection_fails_closed(self):
-        registry = builtin_plugin_registry()
+        registry = PluginRegistry((
+            *builtin_plugin_registry().list(),
+            config_quality_registration(),
+        ))
 
         with self.assertRaisesRegex(PlatformContractError, "Multiple registered plugins"):
             registry.select()
@@ -122,13 +130,14 @@ class PluginRegistryTest(unittest.TestCase):
             path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
 
             result = PlatformKernel().run_registered(
-                builtin_plugin_registry(), str(path), "CFG-001",
+                PluginRegistry((config_quality_registration(),)),
+                str(path), "CFG-001",
                 PlatformContext("run-registry", frozenset({"structured_read"})),
             )
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.decisions[0].result, "scanned_no_issue")
-        self.assertEqual(result.ledger.run.plugin_id, "assayer.config-quality")
+        self.assertEqual(result.ledger.run.plugin_id, "test.config-quality")
 
     def test_registered_plugin_missing_runtime_factory_is_rejected_before_run(self):
         with self.assertRaisesRegex(PlatformContractError, "PCV1-RUNTIME-FACTORY"):
@@ -163,7 +172,7 @@ class PluginRegistryTest(unittest.TestCase):
         with patch("assayer_platform.plugin_registry.metadata.entry_points", return_value=EntryPoints()):
             registry = PluginRegistry.from_entry_points()
 
-        self.assertEqual(registry.select(plugin_id="assayer.config-quality"), registration)
+        self.assertEqual(registry.select(plugin_id="test.config-quality"), registration)
 
     def test_independently_installed_distribution_is_discovered_and_executed(self):
         with tempfile.TemporaryDirectory() as directory:

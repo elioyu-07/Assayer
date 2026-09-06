@@ -47,7 +47,7 @@ class ActionableResultBuilderTest(unittest.TestCase):
     def test_builder_projects_confirmed_decisions(self):
         decisions = [{
             "status": "CONFIRMED",
-            "dimension": "CHK-12",
+            "dimension": "DIM-12",
             "affected_elements": ["FR-001"],
             "resolution_owner": "Spec owner",
             "recommendation": "Add the failure CASE.",
@@ -62,8 +62,8 @@ class ActionableResultBuilderTest(unittest.TestCase):
         }]
         delivery = build_actionable_result(
             decisions,
-            {"CHK-12": "REWORK"},
-            {"CHK-12": ["evidence:1"]},
+            {"DIM-12": "REWORK"},
+            {"DIM-12": ["evidence:1"]},
             evidence_id="evidence:1",
             source_chunks=({"end_line": 10},),
             work_item_identity="work:1",
@@ -74,7 +74,7 @@ class ActionableResultBuilderTest(unittest.TestCase):
         )
         self.assertEqual(delivery["status"], "complete")
         self.assertEqual(delivery["remediations"][0]["remediationId"], "strict-finding")
-        self.assertEqual(delivery["remediations"][0]["dimensions"], ["CHK-12"])
+        self.assertEqual(delivery["remediations"][0]["dimensions"], ["DIM-12"])
         self.assertEqual(delivery["evidenceClaims"][0]["kind"], "direct")
 
 

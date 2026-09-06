@@ -1,0 +1,14 @@
+interface:
+  display_name: "Assayer Plugin"
+  short_description: "Run any installed Assayer plugin"
+  default_prompt: "Use $assayer-plugin to run the installed plugin on this input and summarize the reviewed result."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "assayer"
+      description: "Local Assayer stdio MCP server"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

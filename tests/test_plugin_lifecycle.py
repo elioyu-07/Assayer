@@ -273,8 +273,8 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             manager.install(_FakePackage(Path(directory)).root)
             manager.uninstall("fixture.lifecycle")
             self.assertEqual(
-                builtin_plugin_registry().select(plugin_id="assayer.config-quality").manifest.plugin_id,
-                "assayer.config-quality",
+                builtin_plugin_registry().select(plugin_id="assayer.frontend-audit").manifest.plugin_id,
+                "assayer.frontend-audit",
             )
 
     def test_list_and_get_reflect_installed_state(self):
@@ -306,7 +306,7 @@ class DiscoveryTest(unittest.TestCase):
                 loader=lambda package: _registration(),
             )
             self.assertEqual(registry.select(plugin_id="fixture.lifecycle").manifest.plugin_id, "fixture.lifecycle")
-            self.assertEqual(registry.select(plugin_id="assayer.config-quality").manifest.plugin_id, "assayer.config-quality")
+            self.assertEqual(registry.select(plugin_id="assayer.frontend-audit").manifest.plugin_id, "assayer.frontend-audit")
 
     def test_discover_skips_quarantined_plugin(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -348,12 +348,12 @@ class DiscoveryTest(unittest.TestCase):
             store = PluginInstallationStore(directory)
             index = store.load()
             store.upsert(
-                index, "assayer.config-quality", version="1.0.0",
-                package_root="packages/assayer.config-quality/1.0.0",
+                index, "assayer.frontend-audit", version="1.0.0",
+                package_root="packages/assayer.frontend-audit/1.0.0",
                 installed_at=1, conformance={},
             )
             store.save(index)
-            builtin = builtin_plugin_registry().select(plugin_id="assayer.config-quality")
+            builtin = builtin_plugin_registry().select(plugin_id="assayer.frontend-audit")
             _assert_error_code(
                 self, "PLUGIN_CONFLICT",
                 lambda: discover_plugin_registry(

@@ -22,7 +22,7 @@ from assayer_platform import (
     JsonSummaryPublisher,
     load_plugin_manifest,
 )
-from assayer_platform.builtin_plugins.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
+from assayer_platform.testing.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from assayer_host import SQLitePlatformLedgerStore, SQLiteStore
 
 

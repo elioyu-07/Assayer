@@ -1,15 +1,15 @@
 {
   "name": "assayer",
   "version": "0.1.0+codex.20260905092912",
-  "description": "Evidence-backed audits for web interfaces and software specifications in Codex",
+  "description": "Evidence-backed audits for web interfaces and installed plugins in Codex",
   "author": {
     "name": "Assayer maintainers"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Assayer",
-    "shortDescription": "Audit web interfaces and Specs with evidence-backed checks.",
-    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits. It can inspect a real web interface or review a Markdown product and software Spec against the canonical Spec quality policy, then produce traceable findings and reports from a natural-language request.",
+    "shortDescription": "Audit web interfaces and drive installed plugins with evidence-backed checks.",
+    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits. It can inspect a real web interface or drive any installed plugin through the domain-neutral plugin lifecycle, then produce traceable findings and reports from a natural-language request.",
     "developerName": "Assayer maintainers",
     "category": "Productivity",
     "capabilities": [
@@ -17,7 +17,7 @@
     ],
     "defaultPrompt": [
       "Audit this web URL for frontend issues: <URL>",
-      "Audit this project's spec.md and produce an evidence-backed report.",
+      "Run the installed plugin for this input and produce an evidence-backed report.",
       "Continue the Assayer audit and explain the current progress.",
       "Explain the Assayer result and what I should do next."
     ]
