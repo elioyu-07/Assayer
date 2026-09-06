@@ -107,6 +107,46 @@ class PluginCatalogParseTests(unittest.TestCase):
             catalog = load_catalog(path)
             self.assertIn("test-minimal", catalog.plugins)
 
+    def test_upsert_adds_a_new_version_and_preserves_metadata(self):
+        from assayer_platform.plugin_catalog import upsert_catalog_version
+
+        updated = upsert_catalog_version(
+            _catalog(),
+            plugin_id="test-minimal",
+            name="test-minimal",
+            description="Minimal external plugin",
+            version="1.3.0",
+            platform_api_version="1.0.0",
+            wheel_url="https://github.com/acme/plugins/releases/download/v1.3.0/test_minimal-1.3.0-py3-none-any.whl",
+            sha256="b" * 64,
+            published_at="2026-09-06T00:00:00Z",
+        )
+        catalog = parse_catalog(updated)
+        self.assertIn("1.3.0", catalog.plugins["test-minimal"].versions)
+        self.assertEqual(
+            catalog.plugins["test-minimal"].versions["1.3.0"].wheel_url,
+            "https://github.com/acme/plugins/releases/download/v1.3.0/test_minimal-1.3.0-py3-none-any.whl",
+        )
+        # Existing version and metadata are preserved.
+        self.assertIn("1.2.0", catalog.plugins["test-minimal"].versions)
+        self.assertEqual(catalog.plugins["test-minimal"].name, "test-minimal")
+
+    def test_upsert_rejects_invalid_input(self):
+        from assayer_platform.plugin_catalog import upsert_catalog_version
+
+        with self.assertRaises(PlatformContractError):
+            upsert_catalog_version(
+                "{not json}",
+                plugin_id="test-minimal",
+                name="test-minimal",
+                description="",
+                version="1.3.0",
+                platform_api_version="1.0.0",
+                wheel_url="https://example.com/x.whl",
+                sha256="b" * 64,
+                published_at="2026-09-06T00:00:00Z",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

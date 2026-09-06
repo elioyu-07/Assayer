@@ -246,3 +246,43 @@ def resolve_version(catalog: PluginCatalog, plugin_id: str, version: str | None 
             f"Plugin version is not in the catalog: {plugin_id}@{version}",
         )
     return resolved
+
+
+def upsert_catalog_version(
+    text: str,
+    *,
+    plugin_id: str,
+    name: str,
+    description: str,
+    version: str,
+    platform_api_version: str,
+    wheel_url: str,
+    sha256: str,
+    published_at: str,
+) -> str:
+    """Return catalog JSON text with a plugin version added or updated.
+
+    Preserves the existing catalog's plugin metadata and other versions, and
+    validates both the input and the result before returning.  Used by
+    ``plugins publish`` to compose the registry update without network side
+    effects.
+    """
+    parse_catalog(text)
+    payload = json.loads(text)
+    plugins = payload.setdefault("plugins", {})
+    plugin = plugins.setdefault(plugin_id, {})
+    plugin["pluginId"] = plugin_id
+    plugin.setdefault("name", name)
+    plugin.setdefault("description", description)
+    versions = plugin.setdefault("versions", {})
+    versions[version] = {
+        "pluginId": plugin_id,
+        "version": version,
+        "platformApiVersion": platform_api_version,
+        "wheelUrl": wheel_url,
+        "sha256": sha256.lower(),
+        "publishedAt": published_at,
+    }
+    result = json.dumps(payload, indent=2) + "\n"
+    parse_catalog(result)
+    return result

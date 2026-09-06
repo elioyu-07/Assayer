@@ -9,16 +9,19 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
 from assayer_platform.builtin_plugins import builtin_plugin_registry, installed_plugin_registry
 from assayer_platform.conformance import RELEASE_DESCRIPTOR
 from assayer_platform.plugin_catalog import (
+    CATALOG_FILENAME,
     PluginCatalog,
     load_catalog,
     parse_catalog,
     resolve_version,
+    upsert_catalog_version,
 )
 from assayer_platform.plugin_distribution import materialize_wheel
 from assayer_platform.plugin_installation import PluginInstallationStore
@@ -158,6 +161,97 @@ def _build_plugin(source: str) -> dict:
         "sha256": sha256_hex(final_bytes),
         "pluginId": source_descriptor.get("pluginId"),
         "pluginVersion": source_descriptor.get("pluginVersion"),
+        "platformApiVersion": source_descriptor.get("platformApiVersion"),
+        "name": source_descriptor.get("name") or source_descriptor.get("pluginId"),
+        "description": source_descriptor.get("description") or "",
+    }
+
+
+def _run_captured(args: list[str], *, code: str, cwd: str | None = None) -> str:
+    completed = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise PlatformContractError(code, detail or "command failed")
+    return completed.stdout.strip()
+
+
+def _publish_plugin(source, *, plugin_repo, registry, registry_path, base, yes, confirm) -> dict:
+    built = _build_plugin(source)
+    plugin_id = built["pluginId"]
+    version = built["pluginVersion"]
+    if not plugin_id or not version:
+        raise PlatformContractError(
+            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
+            "The release descriptor must declare pluginId and pluginVersion.",
+        )
+    if not built["platformApiVersion"]:
+        raise PlatformContractError(
+            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
+            "The release descriptor must declare platformApiVersion.",
+        )
+    wheel_path = Path(built["wheel"])
+    tag = f"v{version}"
+    wheel_url = f"https://github.com/{plugin_repo}/releases/download/{tag}/{wheel_path.name}"
+    published_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if not yes and not confirm([
+        {"operation": "publish", "plugin": plugin_id, "version": version,
+         "release": f"{plugin_repo}@{tag}", "registry": registry},
+    ]):
+        return {"operation": "publish", "status": "aborted",
+                "reason": "confirmation required"}
+
+    _run_captured(
+        ["gh", "release", "create", tag, str(wheel_path), "--repo", plugin_repo,
+         "--title", tag, "--notes", f"Release {version} of {plugin_id}."],
+        code="PLUGIN_PUBLISH_RELEASE_FAILED",
+    )
+
+    with tempfile.TemporaryDirectory(prefix="assayer-publish-") as tmp:
+        clone_dir = Path(tmp) / "registry"
+        _run_captured(
+            ["gh", "repo", "clone", registry, str(clone_dir)],
+            code="PLUGIN_PUBLISH_CLONE_FAILED",
+        )
+        catalog_path = clone_dir / registry_path
+        if not catalog_path.is_file():
+            raise PlatformContractError(
+                "PLUGIN_PUBLISH_FAILED",
+                f"The registry has no catalog at {registry_path}.",
+            )
+        updated = upsert_catalog_version(
+            catalog_path.read_text(encoding="utf-8"),
+            plugin_id=plugin_id,
+            name=built["name"],
+            description=built["description"],
+            version=version,
+            platform_api_version=built["platformApiVersion"],
+            wheel_url=wheel_url,
+            sha256=built["sha256"],
+            published_at=published_at,
+        )
+        catalog_path.write_text(updated, encoding="utf-8")
+        branch = f"publish/{plugin_id}-{version}"
+        _run_captured(["git", "checkout", "-b", branch], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
+        _run_captured(["git", "add", registry_path], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
+        _run_captured(["git", "commit", "-m", f"Publish {plugin_id} {version}"],
+                      code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
+        _run_captured(["git", "push", "origin", branch], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
+        pr_url = _run_captured(
+            ["gh", "pr", "create", "--repo", registry, "--base", base, "--head", branch,
+             "--title", f"Publish {plugin_id} {version}",
+             "--body", f"Adds {plugin_id}@{version} to the plugin catalog."],
+            code="PLUGIN_PUBLISH_PR_FAILED",
+        )
+
+    return {
+        "operation": "publish",
+        "status": "pr_created",
+        "plugin": plugin_id,
+        "version": version,
+        "wheelUrl": wheel_url,
+        "sha256": built["sha256"],
+        "pullRequest": pr_url,
     }
 
 
@@ -411,6 +505,22 @@ def _plugins_command(args, *, confirm) -> int:
             return 2
         _print_json(result)
         return 0 if result.get("status") in {"completed", "quarantined"} else 1
+    if args.plugin_command == "publish":
+        try:
+            result = _publish_plugin(
+                args.source,
+                plugin_repo=args.plugin_repo,
+                registry=args.registry,
+                registry_path=args.registry_path,
+                base=args.base,
+                yes=args.yes,
+                confirm=confirm,
+            )
+        except PlatformContractError as error:
+            _print_error(error.code, error.message)
+            return 2
+        _print_json(result)
+        return 0
     if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
         if not args.yes and not confirm([_mutation_step(args)]):
             _print_json({"operation": args.plugin_command, "status": "aborted",
@@ -503,6 +613,17 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin_add.add_argument("--version", default=None, help="Pin a specific plugin version")
     plugin_add.add_argument("--index", default="./plugins.json",
                             help="Catalog location: an http(s) URL or a local plugins.json path")
+    plugin_publish = plugins_subparsers.add_parser("publish", parents=[plugin_mutation_common],
+                                                   help="Build, release, and register a plugin via a catalog PR")
+    plugin_publish.add_argument("source", help="Plugin source directory")
+    plugin_publish.add_argument("--plugin-repo", required=True,
+                                help="GitHub owner/name to create the release in")
+    plugin_publish.add_argument("--registry", default="elioyu-07/assayer-registry",
+                                help="GitHub owner/name holding the plugins.json catalog")
+    plugin_publish.add_argument("--registry-path", default=CATALOG_FILENAME,
+                                help="Path to the catalog file within the registry repo")
+    plugin_publish.add_argument("--base", default="main",
+                                help="Registry branch to target with the publish PR")
     plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common, plugin_mutation_common],
                                                    help="Install a plugin package into the store")
     plugin_install.add_argument("package")
