@@ -195,12 +195,15 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             installed = manager.get("fixture.lifecycle")
             self.assertEqual(installed["history"], ["1.0.0", "2.0.0"])
 
-    def test_upgrade_same_version_fails_closed(self):
+    def test_upgrade_same_version_is_noop(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)
             package = _FakePackage(Path(directory), version="1.0.0")
             manager.install(package.root)
-            _assert_error_code(self, "PLUGIN_VERSION_CONFLICT", lambda: manager.upgrade(package.root))
+            result = manager.upgrade(package.root)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["version"], "1.0.0")
+            self.assertEqual(result["previousVersion"], "1.0.0")
 
     def test_upgrade_unknown_plugin_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -216,7 +219,7 @@ class PluginLifecycleManagerTest(unittest.TestCase):
                 lambda: manager.upgrade(_FakePackage(Path(directory), version="1.0.0").root),
             )
 
-    def test_downgrade_restores_older_version_and_truncates_history(self):
+    def test_downgrade_restores_older_version_and_preserves_history(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)
             manager.install(_FakePackage(Path(directory), version="1.0.0").root)
@@ -226,7 +229,24 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             self.assertEqual(result["version"], "1.0.0")
             self.assertEqual(result["previousVersion"], "3.0.0")
             self.assertEqual(manager.get("fixture.lifecycle")["activeVersion"], "1.0.0")
-            self.assertEqual(manager.get("fixture.lifecycle")["history"], ["1.0.0"])
+            self.assertEqual(
+                manager.get("fixture.lifecycle")["history"],
+                ["1.0.0", "2.0.0", "3.0.0", "1.0.0"],
+            )
+
+    def test_upgrade_after_rollback_reactivates_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            version_110 = _FakePackage(Path(directory), version="1.1.0").root
+            manager.upgrade(version_110)
+            manager.rollback("fixture.lifecycle")
+            self.assertEqual(manager.get("fixture.lifecycle")["activeVersion"], "1.0.0")
+
+            result = manager.upgrade(version_110)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["version"], "1.1.0")
+            self.assertEqual(manager.get("fixture.lifecycle")["activeVersion"], "1.1.0")
 
     def test_downgrade_to_active_version_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:

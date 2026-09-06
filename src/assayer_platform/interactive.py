@@ -82,6 +82,17 @@ def _plain(value: Any) -> Any:
     return value
 
 
+def _plugin_identity(registration: PluginRegistration) -> dict[str, Any]:
+    """Publish the resolved plugin identity so the Agent can immediately confirm
+    which plugin version it is driving without guessing from opaque tool names."""
+    manifest = registration.manifest
+    return {
+        "pluginId": manifest.plugin_id,
+        "version": manifest.version,
+        "platformApiVersion": manifest.platform_api_version,
+    }
+
+
 def _result_evidence_graphs(investigations: Sequence[InvestigationPacket]) -> list[dict[str, Any]]:
     """Build a bounded summary of optional plugin evidence graphs."""
     result: list[dict[str, Any]] = []
@@ -628,7 +639,10 @@ class InteractivePluginController:
             self._runs.pop(run_id, None)
             self._release_ownership(run_id, reason="start_failed")
             raise
-        return self._response(run_id, "started", {"check": {"checkId": check.check_id, "version": check.version}})
+        return self._response(run_id, "started", {
+            "plugin": _plugin_identity(registration),
+            "check": {"checkId": check.check_id, "version": check.version},
+        })
 
     def _terminal_pointer_path(self) -> Path:
         return self.output_root / ".latest-plugin-run.json"
@@ -1670,6 +1684,7 @@ class InteractivePluginController:
         state = self._state(run_id)
         run: InteractivePlatformRun = state["run"]
         return self._response(run_id, "running", {
+            "plugin": _plugin_identity(state["registration"]),
             "discovered": len(run.work_items),
             "inspected": len(run.investigations),
             "decisionsCommitted": len(run.decisions),

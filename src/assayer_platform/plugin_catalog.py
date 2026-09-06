@@ -92,6 +92,11 @@ def _version_key(version: str) -> tuple:
     return (major, minor, patch, 1 if not separator else 0, prerelease)
 
 
+def version_key(version: str) -> tuple:
+    """Public comparable semantic-version key used by lifecycle plan preconditions."""
+    return _version_key(version)
+
+
 def _fail(code: str, message: str) -> PlatformContractError:
     return PlatformContractError(code, message)
 

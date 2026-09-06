@@ -104,9 +104,13 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(downgraded["version"], "1.0.0")
             self.assertEqual(downgraded["previousVersion"], "1.1.0")
 
+            # Full activation history is preserved, so a rollback after a
+            # downgrade reactivates the previously active version instead of
+            # failing on a truncated history.
             code, rolled = _run(["plugins", "rollback", PLUGIN_ID, "--store", str(store)])
-            self.assertEqual(code, 2)
-            self.assertEqual(rolled["error"]["code"], "ROLLBACK_UNAVAILABLE")
+            self.assertEqual(code, 0)
+            self.assertEqual(rolled["version"], "1.1.0")
+            self.assertEqual(rolled["previousVersion"], "1.0.0")
 
     def test_upgrade_to_older_requires_downgrade(self):
         with tempfile.TemporaryDirectory() as directory:

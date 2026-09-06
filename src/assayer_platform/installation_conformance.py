@@ -243,6 +243,17 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 "The installed registration scope schema differs from the packaged scope schema.",
                 "Publish the same business-input schema in the descriptor and registration.",
             ))
+        review_payload_path = descriptor.get("reviewPayloadSchema")
+        if review_payload_path:
+            review_payload_schema = json.loads(
+                (package_root / review_payload_path).read_text(encoding="utf-8")
+            )
+            if dict(registration.review_payload_schema) != review_payload_schema:
+                issues.append(_package_issue(
+                    "PLUGIN_INSTALLED_REVIEW_PAYLOAD_SCHEMA_MISMATCH",
+                    "The installed registration review payload schema differs from the packaged review payload schema.",
+                    "Publish the same checkpoint payload schema in the descriptor and registration.",
+                ))
         if not issues:
             for relative in descriptor["fixtures"]:
                 fixture = json.loads((package_root / relative).read_text(encoding="utf-8"))

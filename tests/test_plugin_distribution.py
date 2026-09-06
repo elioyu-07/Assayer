@@ -15,6 +15,7 @@ from assayer_platform.plugin_distribution import (
     materialize_wheel,
     verify_sha256,
 )
+from assayer_host.plugin_lifecycle_ops import verify_catalog_identity
 
 
 def _wheel(entries: dict[str, bytes]) -> bytes:
@@ -123,6 +124,33 @@ class MaterializeWheelTests(unittest.TestCase):
             with self.assertRaises(PlatformContractError) as ctx:
                 materialize_wheel(data, digest, Path(tmp))
             self.assertEqual(ctx.exception.code, "PLUGIN_PACKAGE_NOT_FOUND")
+
+
+class VerifyCatalogIdentityTests(unittest.TestCase):
+    def test_matching_identity_passes(self):
+        data = _self_contained_wheel()
+        digest = hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = materialize_wheel(data, digest, Path(tmp))
+            verify_catalog_identity(root, "test-minimal", "1.0.0")
+
+    def test_mismatched_plugin_id_fails_closed(self):
+        data = _self_contained_wheel()
+        digest = hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = materialize_wheel(data, digest, Path(tmp))
+            with self.assertRaises(PlatformContractError) as ctx:
+                verify_catalog_identity(root, "other-plugin", "1.0.0")
+            self.assertEqual(ctx.exception.code, "PLUGIN_CATALOG_MISMATCH")
+
+    def test_mismatched_version_fails_closed(self):
+        data = _self_contained_wheel()
+        digest = hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = materialize_wheel(data, digest, Path(tmp))
+            with self.assertRaises(PlatformContractError) as ctx:
+                verify_catalog_identity(root, "test-minimal", "9.9.9")
+            self.assertEqual(ctx.exception.code, "PLUGIN_CATALOG_MISMATCH")
 
 
 if __name__ == "__main__":

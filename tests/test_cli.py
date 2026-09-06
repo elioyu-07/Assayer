@@ -50,23 +50,24 @@ class CliTest(unittest.TestCase):
         runtime.close.assert_called_once()
 
     def test_plugins_list_reports_registered_platform_plugins(self):
-        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
 
-        with redirect_stdout(output):
-            result = cli.main(["plugins", "list", "--json"])
+            with redirect_stdout(output):
+                result = cli.main(["plugins", "list", "--json", "--store", directory])
 
-        self.assertEqual(result, 0)
-        catalog = __import__("json").loads(output.getvalue())["plugins"]
-        self.assertEqual(
-            [item["pluginId"] for item in catalog],
-            ["assayer.frontend-audit"],
-        )
-        self.assertEqual(catalog[0]["checks"], [{"checkId": "FUA-10", "version": "1.1.0"}])
-        self.assertEqual(catalog[0]["platformApiVersion"], "1.0.0")
-        self.assertIn("visual_read", catalog[0]["capabilities"])
-        self.assertEqual(catalog[0]["executionModes"], ["interactive"])
-        self.assertEqual(catalog[0]["scopeSchema"]["required"], ["url"])
-        self.assertTrue(catalog[0]["supportsCommit"])
+            self.assertEqual(result, 0)
+            catalog = __import__("json").loads(output.getvalue())["plugins"]
+            self.assertEqual(
+                [item["pluginId"] for item in catalog],
+                ["assayer.frontend-audit"],
+            )
+            self.assertEqual(catalog[0]["checks"], [{"checkId": "FUA-10", "version": "1.1.0"}])
+            self.assertEqual(catalog[0]["platformApiVersion"], "1.0.0")
+            self.assertIn("visual_read", catalog[0]["capabilities"])
+            self.assertEqual(catalog[0]["executionModes"], ["interactive"])
+            self.assertEqual(catalog[0]["scopeSchema"]["required"], ["url"])
+            self.assertTrue(catalog[0]["supportsCommit"])
 
     def test_registered_non_browser_plugin_runs_through_generic_cli(self):
         with tempfile.TemporaryDirectory() as directory:

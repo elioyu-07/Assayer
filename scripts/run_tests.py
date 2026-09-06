@@ -29,6 +29,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 
 BROWSER_TEST_PREFIX = "test_browser_playwright."
 MCP_SDK_TEST_ID = "test_transport.TransportTest.test_optional_fastmcp_server_registers_single_argument_tools"
+MCP_STDIO_TEST_PREFIX = "test_mcp_stdio_integration."
 MIN_BROWSER_TESTS = 25
 
 
@@ -50,6 +51,7 @@ def fast_tests(tests: list[unittest.TestCase]) -> unittest.TestSuite:
         test for test in tests
         if not test.id().removeprefix("tests.").startswith(BROWSER_TEST_PREFIX)
         and test.id().removeprefix("tests.") != MCP_SDK_TEST_ID
+        and not test.id().removeprefix("tests.").startswith(MCP_STDIO_TEST_PREFIX)
     ]
     return unittest.TestSuite(selected)
 

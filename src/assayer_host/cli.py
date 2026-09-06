@@ -18,7 +18,8 @@ from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
-from .plugin_intent import IntentResolutionError, resolve_intent
+from .plugin_intent import IntentResolutionError
+from .plugin_lifecycle_router import route_plugin_request
 from .plugin_lifecycle_ops import (
     DEFAULT_CATALOG_URL,
     add_from_catalog as _add_from_catalog,
@@ -279,12 +280,16 @@ def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, conf
     latest_available = _latest_available_from(_resolve_index(index))
     catalog_index = index or DEFAULT_CATALOG_URL
     try:
-        plan = resolve_intent(
+        route = route_plugin_request(
             text, known_plugin_ids=_known_plugin_ids(store_root), cwd=Path.cwd(),
         )
     except IntentResolutionError as error:
         _print_error(error.code, error.message)
         return 2
+    if route.workflow.startswith("product_"):
+        _print_error("PRODUCT_LIFECYCLE_DEFERRED", route.message or "Use Codex Marketplace for Assayer lifecycle changes.")
+        return 2
+    plan = route.steps
     plan_payload = [step.as_dict() for step in plan]
     if any(step.dangerous for step in plan) and not yes:
         _print_json({"plan": plan_payload, "pending": "confirmation"})

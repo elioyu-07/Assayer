@@ -35,6 +35,7 @@ class PluginRegistration:
     result_features: frozenset[str] = frozenset()
     execution_modes: frozenset[str] = frozenset({"batch"})
     scope_schema: Mapping[str, Any] = field(default_factory=dict)
+    review_payload_schema: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
@@ -55,6 +56,11 @@ class PluginRegistration:
                 "INVALID_PLUGIN_REGISTRATION", "Plugin scope schema must be an object",
             )
         object.__setattr__(self, "scope_schema", dict(self.scope_schema))
+        if not isinstance(self.review_payload_schema, Mapping):
+            raise PlatformContractError(
+                "INVALID_PLUGIN_REGISTRATION", "Plugin review payload schema must be an object",
+            )
+        object.__setattr__(self, "review_payload_schema", dict(self.review_payload_schema))
 
     @staticmethod
     def _invoke(factory: Callable[..., Any], runtime: Any) -> Any:

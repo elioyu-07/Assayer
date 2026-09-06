@@ -280,6 +280,72 @@ def _resume_in_child(output_root, run_id, start_event, release_event, results):
 
 
 class InteractiveProtocolTest(unittest.TestCase):
+    def test_list_tools_publishes_plugin_review_payload_contract(self):
+        review_schema = {
+            "type": "object",
+            "properties": {
+                "checklist_review": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "status": {"enum": ["PASS", "REWORK", "ESCALATE", "UNVERIFIED"]},
+                            "note": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        }
+        reg = PluginRegistration(
+            MANIFEST,
+            plugin_factory=lambda runtime=None: FixturePlugin(),
+            decision_provider_factory=lambda runtime=None: FixtureProvider(),
+            capabilities=frozenset({"fixture_read"}),
+            execution_modes=frozenset({"interactive"}),
+            scope_schema={"type": "object"},
+            review_payload_schema=review_schema,
+        )
+        transport = InteractivePlatformMcpToolTransport(plugin_registry=PluginRegistry((reg,)))
+        tools = {item["name"]: item for item in transport.list_tools()}
+
+        checkpoint = tools["checkpoint_review"]
+        self.assertIn('"PASS"', checkpoint["description"])
+        self.assertIn("fixture.interactive-quality", checkpoint["description"])
+        self.assertEqual(
+            checkpoint["inputSchema"]["properties"]["payload"]["description"],
+            transport._review_payload_contract_text(),
+        )
+
+        advance = tools["advance_plugin_run"]
+        self.assertEqual(
+            advance["inputSchema"]["properties"]["reviewCheckpoint"]["properties"]["payload"]["description"],
+            transport._review_payload_contract_text(),
+        )
+
+    def test_list_tools_without_review_payload_schema_keeps_opaque_payload(self):
+        transport = InteractivePlatformMcpToolTransport(
+            plugin_registry=PluginRegistry((registration(),)),
+        )
+        checkpoint = next(item for item in transport.list_tools() if item["name"] == "checkpoint_review")
+        self.assertNotIn("description", checkpoint["inputSchema"]["properties"]["payload"])
+
+    def test_start_and_progress_report_the_resolved_plugin_identity(self):
+        transport = InteractivePlatformMcpToolTransport(
+            plugin_registry=PluginRegistry((registration(),)),
+        )
+        started = transport.call_tool("start_plugin_run", {
+            "pluginId": "fixture.interactive-quality", "checkId": "FIX-INT-001", "scope": {},
+        })["structuredContent"]["result"]["result"]
+        self.assertEqual(started["plugin"], {
+            "pluginId": "fixture.interactive-quality",
+            "version": "1.0.0",
+            "platformApiVersion": "1.0.0",
+        })
+        progress = transport.call_tool("get_plugin_progress", {})["structuredContent"]["result"]["result"]
+        self.assertEqual(progress["plugin"]["pluginId"], "fixture.interactive-quality")
+        self.assertEqual(progress["plugin"]["version"], "1.0.0")
+        transport.call_tool("finish_plugin_run", {"status": "partial"})
+
     def test_result_pages_require_a_terminal_run(self):
         transport = InteractivePlatformMcpToolTransport(
             plugin_registry=PluginRegistry((registration(),)),

@@ -16,12 +16,40 @@ Codex task, or use a nested Agent. If `mcp__assayer__*` tools are not present
 initially, resolve the deferred local `assayer` MCP server through the client's
 tool-discovery mechanism before reporting the integration as unavailable.
 
+## Choose the plugin and check from the user's goal
+
+The user can express a business goal rather than a `checkId` — for example
+"review this spec.md for requirement completeness and ambiguity". Resolve it to
+a concrete `pluginId`, `checkId`, and `scope`:
+
+1. Call `list_plugins()` to see installed plugins, their checks, and scope
+   schemas. If the user named a plugin that is not installed, do not start a
+   Run: tell them it is missing and offer to install it first (see the
+   `assayer-plugin-lifecycle` Skill's "Install then run" flow).
+2. Pick the check whose subject kinds and capabilities fit the user's input and
+   stated goal. If more than one check could match, name the candidates and ask
+   which one to run; never guess a `checkId` or silently broaden the scope.
+3. Keep the scope to exactly what the user selected. Do not crawl a repository
+   or invent a scope the user did not provide.
+
+## Pre-run checks
+
+Before calling `start_plugin_run`, confirm every precondition in order:
+
+1. `list_plugins()` (or `get_plugin_info`) shows the plugin installed and not
+   `dirty`/`quarantined`. A dirty plugin is visible but not runnable.
+2. The target `checkId` exists on the installed plugin's version.
+3. The `scope` the user supplied exists and satisfies the plugin's scope schema.
+4. No interactive Run is already active. If one is active, finish it first.
+
+If any check fails, tell the user the specific reason and do not start the Run.
+This keeps "plugin not found" and other internal errors from leaking to the user.
+
 ## Workflow
 
 1. Resolve the target. Identify the `pluginId`, the plugin's `checkId`, and the
-   business `scope` the user supplied (a file path, a document, an object, or
-   an explicit anchor). Inspect only what the user selected; do not crawl a
-   repository or invent a scope the user did not provide.
+   business `scope` from the user's goal and input (see the sections above).
+   Inspect only what the user selected.
 2. Start exactly one Run with `start_plugin_run` using only `pluginId`,
    `checkId`, and `scope`. Do not invent Run or WorkItem identifiers; retain
    the returned `runId` as opaque workflow state. If the user is continuing an
@@ -75,7 +103,18 @@ confirmed findings, or material unavailable evidence. Follow `nextCursor` one
 page at a time, never resend a consumed page, and keep each detail segment
 bounded. The complete unabridged result remains in the durable ledger.
 
-Always tell the user what was checked, what was not checked, why the result has
-that status, and what to do next. When no confirmed findings exist, say so
-explicitly. Do not expose credentials, secrets, raw source bodies, hidden
+When the Run is terminal, explain the result in plain language and cover all of:
+
+- which plugin and version ran;
+- which check executed;
+- what scope was checked;
+- the final status (completed, partial, or failed);
+- the confirmed issues found;
+- what was not covered or still needs review;
+- evidence the user still needs to supply, if any;
+- where the full report is stored;
+- what to do next (for example, re-run after a fix, or upgrade the plugin).
+
+Never return only the raw `decisions` array. When no confirmed findings exist,
+say so explicitly. Do not expose credentials, secrets, raw source bodies, hidden
 reasoning, or internal protocol details.

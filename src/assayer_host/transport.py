@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import inspect
 import json
 import logging
@@ -31,6 +32,7 @@ from assayer_platform import (
     PlatformRunner, PlatformContractError, PluginRegistry, InteractivePluginController,
 )
 from assayer_platform import installed_plugin_registry
+from assayer_platform.plugin_lifecycle import package_checksum
 
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{2,127}$")
@@ -630,7 +632,10 @@ class InteractivePlatformMcpToolTransport:
     def __init__(self, output_root: str | Path = "./assayer-output",
                  *, plugin_registry: PluginRegistry | None = None,
                  runtime_resolver: Any = None,
-                 capabilities_resolver: Any = None):
+                 capabilities_resolver: Any = None,
+                 store_root: str | None = None):
+        self._store_root = str(store_root) if store_root else None
+        self._store_digest = self._compute_store_digest()
         self._controller = InteractivePluginController(
             plugin_registry or installed_plugin_registry(), output_root,
             runtime_resolver=runtime_resolver,
@@ -639,9 +644,68 @@ class InteractivePlatformMcpToolTransport:
         self._active_run_id: str | None = self._controller.active_run_id
         self._terminal_run_id: str | None = self._controller.terminal_run_id
 
+    def _compute_store_digest(self) -> str | None:
+        """Digest the durable store so a change can be detected without polling.
+
+        The digest covers the ``index.json`` content *and* the content hash of
+        every installed plugin's active package.  ``index.json`` alone signals
+        lifecycle changes (install/upgrade/rollback), but a tampered package on
+        disk leaves it untouched; hashing the package content makes an in-place
+        modification invalidate the digest too, so ``start_plugin_run`` refuses
+        to keep running a modified plugin package.  Returns None when no store
+        root is configured or no index exists yet.
+        """
+        if self._store_root is None:
+            return None
+        store_path = Path(self._store_root).expanduser().resolve()
+        index_path = store_path / "index.json"
+        if not index_path.is_file():
+            return None
+        hasher = hashlib.sha256()
+        hasher.update(index_path.read_bytes())
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return hasher.hexdigest()
+        plugins = index.get("plugins", {})
+        if isinstance(plugins, dict):
+            for plugin_id in sorted(plugins):
+                entry = plugins[plugin_id]
+                if not isinstance(entry, dict):
+                    continue
+                history = entry.get("history")
+                active = history[-1] if isinstance(history, list) and history else None
+                versions = entry.get("versions")
+                record = versions.get(active) if isinstance(versions, dict) and active is not None else None
+                if not isinstance(record, dict):
+                    continue
+                package_root = store_path / record.get("packageRoot", "")
+                if record.get("checksum") and package_root.is_dir():
+                    hasher.update(plugin_id.encode("utf-8"))
+                    hasher.update(b"\0")
+                    hasher.update(package_checksum(package_root).encode("utf-8"))
+                    hasher.update(b"\0")
+        return hasher.hexdigest()
+
+    def _refresh_registry(self) -> None:
+        """Reload the store-backed registry when the store changed and no Run is active.
+
+        The controller keeps its run and terminal state in place; only the
+        plugin selection source is swapped, so a freshly installed plugin becomes
+        selectable in the same MCP process without a restart. Callers ensure no
+        active Run exists before invoking this.
+        """
+        if self._store_root is None:
+            return
+        digest = self._compute_store_digest()
+        if digest == self._store_digest:
+            return
+        self._controller.registry = store_backed_plugin_registry(self._store_root)
+        self._store_digest = digest
+
     def list_tools(self) -> list[dict]:
         descriptions = {
-            "start_plugin_run": "Start a domain-neutral interactive plugin Run using only plugin, Check, and business scope.",
+            "start_plugin_run": "Start a domain-neutral interactive plugin Run using only plugin, Check, and business scope. The response reports the resolved plugin identity (pluginId, version, platformApiVersion); confirm that version before submitting checkpoint payloads.",
             "resume_plugin_run": "Explicitly resume one durable plugin Run by the Run ID returned when it started; Host startup never resumes a Run implicitly.",
             "advance_plugin_run": "Drive Host-owned discovery, inspection, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal.",
             "get_plugin_result": "Read one bounded page from a terminal result; the complete result remains durably stored.",
@@ -649,14 +713,46 @@ class InteractivePlatformMcpToolTransport:
             "inspect_work_items": "Inspect selected WorkItems and return summary-first InvestigationPackets; set includeEvidence=true only when full payloads are required.",
             "expand_investigation": "Expand selected immutable Evidence for an inspected WorkItem when the indexed payload is required in full.",
             "expand_evidence_collection": "Read one bounded page from a plugin-declared immutable Evidence collection, with stable item IDs and optional mechanical groups; this never advances or mutates the Run.",
-            "checkpoint_review": "Durably checkpoint semantic-review progress for stable items in a declared Evidence collection.",
-            "submit_decisions": "Submit semantic DecisionProposals; the platform validates and commits them.",
+            "checkpoint_review": "Durably checkpoint semantic-review progress for stable items in a declared Evidence collection. First expand the Evidence collection that exposes the frozen source sections (its itemIdField is source_chunk_id) to read the sourceChunks; then build each evidence_refs entry by copying five fields verbatim from one matching sourceChunks entry: source_chunk_id, start_line, end_line, source_digest, document_path. Do NOT reference an EvidenceRecord evidenceId here: evidence_refs must point at sourceChunks, and evidenceId belongs to a different identifier namespace.",
+            "submit_decisions": "Submit the platform DecisionProposal skeleton (workItemId, result, findings, reason) and, for a review, its finalization and reviewCheckpointIds. Submit domain-level findings page-by-page through checkpoint_review instead; the plugin assembles the canonical envelope from those checkpoints.",
             "recover_work_item": "Record plugin/runtime recovery for one WorkItem.",
-            "get_plugin_progress": "Return progress for an active plugin Run.",
+            "get_plugin_progress": "Return progress for an active plugin Run, including the resolved plugin identity (pluginId, version).",
             "finish_plugin_run": "Finish an interactive plugin Run with completed, partial, or failed status.",
         }
-        return [{"name": name, "description": descriptions[name], "inputSchema": deepcopy(schema)}
-                for name, schema in self._SCHEMAS.items()]
+        contract = self._review_payload_contract_text()
+        if contract:
+            descriptions["checkpoint_review"] += " Checkpoint payload contract: " + contract
+            descriptions["advance_plugin_run"] += " Review checkpoint payload contract: " + contract
+        tools = []
+        for name, schema in self._SCHEMAS.items():
+            tool_schema = deepcopy(schema)
+            if contract:
+                if name == "checkpoint_review":
+                    tool_schema["properties"]["payload"]["description"] = contract
+                elif name == "advance_plugin_run":
+                    tool_schema["properties"]["reviewCheckpoint"]["properties"]["payload"]["description"] = contract
+            tools.append({"name": name, "description": descriptions[name], "inputSchema": tool_schema})
+        return tools
+
+    def _review_payload_contract_text(self) -> str:
+        """Collect every registered plugin's checkpoint payload contract.
+
+        The platform treats review checkpoints as opaque plugin semantics, so
+        the Agent never saw the accepted ``payload`` shape and guessed wrong.
+        Publishing each plugin's declared ``review_payload_schema`` onto the
+        ``checkpoint_review`` tool restores that contract to the Agent without
+        making the platform enforce plugin-specific payload validation.
+        """
+        parts = []
+        for registration in self._controller.registry.list():
+            schema = registration.review_payload_schema
+            if not schema:
+                continue
+            parts.append(
+                f"{registration.manifest.plugin_id} ({registration.manifest.version}): "
+                f"{json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
+            )
+        return "\n".join(parts)
 
     def call_tool(self, name: str, arguments: object) -> dict:
         if name not in self._SCHEMAS:
@@ -672,6 +768,7 @@ class InteractivePlatformMcpToolTransport:
                     raise self._controller.resume_error
                 if self._active_run_id is not None:
                     raise PlatformContractError("RUN_CONFLICT", "An interactive plugin Run is already active")
+                self._refresh_registry()
                 result = self._controller.start(
                     plugin_id=arguments["pluginId"], check_id=arguments["checkId"],
                     check_version=arguments.get("checkVersion"), scope=arguments["scope"],
@@ -847,6 +944,7 @@ def create_interactive_mcp_server(
         output_root, plugin_registry=plugin_registry,
         runtime_resolver=runtime_resolver,
         capabilities_resolver=capabilities_resolver,
+        store_root=store_root,
     )
     server._assayer_transport = adapter
 
@@ -879,7 +977,10 @@ def create_interactive_mcp_server(
                 registered.parameters = deepcopy(item["inputSchema"])
 
     register(adapter)
-    lifecycle = PluginLifecycleMcpToolTransport(store_root or str(default_store_root()))
+    lifecycle = PluginLifecycleMcpToolTransport(
+        store_root or str(default_store_root()),
+        active_run_guard=lambda: adapter._active_run_id is not None,
+    )
     server._assayer_lifecycle_transport = lifecycle
     register(lifecycle)
     return server

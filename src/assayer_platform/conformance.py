@@ -247,6 +247,25 @@ def inspect_plugin_registration(
                 "Set scope_schema.type to object and define the accepted business fields.",
             ))
 
+    review_schema = registration.review_payload_schema
+    if review_schema:
+        try:
+            Draft202012Validator.check_schema(dict(review_schema))
+        except SchemaError as error:
+            issues.append(_issue(
+                "PLUGIN_REVIEW_PAYLOAD_SCHEMA_INVALID",
+                "PCV1-REVIEW-PAYLOAD-SCHEMA",
+                f"The registration review payload schema is invalid: {error.message}",
+                "Correct the review payload schema before packaging the plugin.",
+            ))
+        if review_schema.get("type") != "object":
+            issues.append(_issue(
+                "PLUGIN_REVIEW_PAYLOAD_SCHEMA_INVALID",
+                "PCV1-REVIEW-PAYLOAD-SCHEMA",
+                "The registration review payload schema must describe a top-level object.",
+                "Set review_payload_schema.type to object and describe the accepted checkpoint payload.",
+            ))
+
     profile = manifest.execution_profile
     if profile.failure_splitting == "allowed" and not profile.can_split_failed_inspection:
         issues.append(_issue(

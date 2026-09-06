@@ -87,6 +87,29 @@ def _package_checksum(root: Path) -> str:
     return digest.hexdigest()
 
 
+def package_checksum(root: str | Path) -> str:
+    """Deterministic content hash over a package tree (source or materialized).
+
+    Public wrapper around the internal checksum so the host's lifecycle facade
+    and the interactive transport can fingerprint a package without reaching
+    into private platform internals.
+    """
+    return _package_checksum(Path(root).expanduser().resolve())
+
+
+def read_package_descriptor(package_root: str | Path) -> dict:
+    """Read and validate a plugin package's release descriptor, fail-closed.
+
+    Public wrapper around the private descriptor reader so the host lifecycle
+    facade can inspect a local package without importing its code or reaching
+    into private platform internals.  A missing package maps to
+    ``PLUGIN_PACKAGE_NOT_FOUND``; an unreadable or malformed descriptor (or one
+    missing ``pluginId`` / ``pluginVersion``) maps to
+    ``PLUGIN_RELEASE_DESCRIPTOR_INVALID``.
+    """
+    return _descriptor(package_root)
+
+
 def _copy_installer(package_root: Path, target: Path) -> None:
     shutil.copytree(
         package_root, target,
@@ -279,10 +302,14 @@ class PluginLifecycleManager:
                 f"Plugin is not installed: {plugin_id}",
             )
         if self._store.record(entry, version) is not None:
-            raise PlatformContractError(
-                "PLUGIN_VERSION_CONFLICT",
-                f"Plugin version is already installed: {plugin_id}@{version}",
-            )
+            active = self._store.active_version(entry)
+            if active is not None and _version_key(version) < _version_key(active):
+                raise PlatformContractError(
+                    "PLUGIN_DOWNGRADE_REQUIRED",
+                    f"Plugin target version {version} is older than the active version "
+                    f"{active}; use downgrade to move back.",
+                )
+            return self._reactivate(index, entry, plugin_id, version, "upgrade")
         active = self._store.active_version(entry)
         if active is not None and _version_key(version) < _version_key(active):
             raise PlatformContractError(
@@ -299,6 +326,45 @@ class PluginLifecycleManager:
         result["previousVersion"] = previous
         return result
 
+    def _reactivate(self, index: dict, entry: dict, plugin_id: str, version: str, operation: str) -> dict:
+        """Re-activate an already-materialized version without re-downloading it.
+
+        Used when the target version already lives in the store's ``versions``
+        table (for example, after a rollback or downgrade).  The existing
+        package is integrity-checked against its stored checksum before the
+        activation pointer moves, so a reactivated version is as trustworthy as
+        a freshly installed one.
+        """
+        record = self._store.record(entry, version)
+        if record is None:
+            raise PlatformContractError(
+                "PLUGIN_VERSION_UNAVAILABLE",
+                f"Plugin has no materialized version to re-activate: {plugin_id}@{version}",
+            )
+        package_root = Path(self._store.root) / record["packageRoot"]
+        checksum = record.get("checksum")
+        if checksum and _package_checksum(package_root) != checksum:
+            self._quarantine(index, plugin_id, "PLUGIN_CHECKSUM_MISMATCH")
+            return self._quarantined_result(operation, plugin_id, version, "PLUGIN_CHECKSUM_MISMATCH")
+        active = self._store.active_version(entry)
+        if version == active:
+            result = self._result(operation, plugin_id, version)
+            result["previousVersion"] = active
+            return result
+        # Mutate the authoritative entry inside the index; callers may pass a
+        # read-only shallow copy (``PluginInstallationStore.plugin``) which is
+        # shared only at the nested-structure level.
+        real_entry = index["plugins"][plugin_id]
+        history = self._store.version_history(real_entry)
+        real_entry["history"] = history + [version]
+        real_entry["activeVersion"] = version
+        real_entry["state"] = "installed"
+        real_entry.pop("stateReason", None)
+        self._store.save(index)
+        result = self._result(operation, plugin_id, version)
+        result["previousVersion"] = active
+        return result
+
     def downgrade(self, plugin_id: str, version: str) -> dict:
         index = self._store.load()
         entry = index["plugins"].get(plugin_id)
@@ -307,23 +373,12 @@ class PluginLifecycleManager:
                 "UNKNOWN_PLUGIN",
                 f"Plugin is not installed: {plugin_id}",
             )
-        history = self._store.version_history(entry)
-        if version not in history:
+        if self._store.record(entry, version) is None:
             raise PlatformContractError(
                 "PLUGIN_VERSION_UNAVAILABLE",
                 f"Plugin has no installed version to downgrade to: {plugin_id}@{version}",
             )
-        previous = history[-1]
-        if previous == version:
-            result = self._result("downgrade", plugin_id, version)
-            result["previousVersion"] = previous
-            return result
-        entry["history"] = history[: history.index(version) + 1]
-        entry["activeVersion"] = version
-        self._store.save(index)
-        result = self._result("downgrade", plugin_id, version)
-        result["previousVersion"] = previous
-        return result
+        return self._reactivate(index, entry, plugin_id, version, "downgrade")
 
     def rollback(self, plugin_id: str) -> dict:
         index = self._store.load()
@@ -339,13 +394,7 @@ class PluginLifecycleManager:
                 "ROLLBACK_UNAVAILABLE",
                 f"Plugin has no previous version to roll back to: {plugin_id}",
             )
-        rolled_back_from = history[-1]
-        entry["history"] = history[:-1]
-        entry["activeVersion"] = entry["history"][-1]
-        self._store.save(index)
-        result = self._result("rollback", plugin_id, entry["activeVersion"])
-        result["previousVersion"] = rolled_back_from
-        return result
+        return self._reactivate(index, entry, plugin_id, history[-2], "rollback")
 
     def uninstall(self, plugin_id: str) -> dict:
         index = self._store.load()
@@ -447,4 +496,6 @@ __all__ = [
     "PluginInstallationStore",
     "discover_plugin_registry",
     "load_registration",
+    "package_checksum",
+    "read_package_descriptor",
 ]

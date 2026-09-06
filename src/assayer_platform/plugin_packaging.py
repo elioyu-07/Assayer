@@ -38,7 +38,7 @@ def wheel_descriptor(source_descriptor: dict) -> dict:
     result = dict(source_descriptor)
     runtime_source = source_descriptor.get("runtimeSource", ".")
     if runtime_source not in {"", ".", "./"}:
-        for key in ("manifest", "scopeSchema"):
+        for key in ("manifest", "scopeSchema", "reviewPayloadSchema"):
             value = source_descriptor.get(key)
             if isinstance(value, str) and value.startswith(runtime_source.rstrip("/") + "/"):
                 result[key] = value[len(runtime_source):].lstrip("/")
