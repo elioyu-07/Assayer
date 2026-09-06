@@ -175,12 +175,14 @@ def resolve_intent(
 
     if operation in {"install", "upgrade"}:
         package = _extract_package(text, cwd)
-        if package is None or not Path(package).expanduser().is_dir():
+        if package is not None and Path(package).expanduser().is_dir():
+            return (IntentStep(operation, package=str(Path(package).expanduser().resolve())),)
+        if package is None:
             raise IntentResolutionError(
                 "INTENT_PACKAGE_UNRESOLVED",
-                f"{operation} needs a local package directory as its source.",
+                f"{operation} needs a plugin name or a local package directory.",
             )
-        return (IntentStep(operation, package=str(Path(package).expanduser().resolve())),)
+        return (IntentStep(operation, plugin_id=package),)
 
     if operation == "downgrade":
         version = _extract_version(text)

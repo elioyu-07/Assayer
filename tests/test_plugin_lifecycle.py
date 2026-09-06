@@ -160,6 +160,23 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             self.assertEqual(installed["stateReason"], "PLUGIN_PACKAGE_INVALID")
             self.assertIsNone(installed["activeVersion"])
 
+    def test_install_repairs_quarantined_plugin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = _FakePackage(Path(directory))
+            PluginLifecycleManager(
+                PluginInstallationStore(directory),
+                static_validator=lambda package: _failed_report(),
+                installer=_mkdir_installer,
+            ).install(package.root)
+            manager = self.manager(directory)
+            result = manager.install(package.root)
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["recoveredFrom"], "dirty")
+            installed = manager.get("fixture.lifecycle")
+            self.assertEqual(installed["state"], "installed")
+            self.assertIsNone(installed["stateReason"])
+            self.assertEqual(installed["activeVersion"], "1.0.0")
+
     def test_install_unreachable_source_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)
@@ -288,6 +305,28 @@ class PluginLifecycleManagerTest(unittest.TestCase):
                 "state": "installed",
                 "stateReason": None,
             }])
+
+    def test_upgradable_state_when_source_knows_newer_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory, latest_available=lambda plugin_id: "2.0.0")
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            view = manager.get("fixture.lifecycle")
+            self.assertEqual(view["state"], "upgradable")
+            self.assertEqual(view["upgradeTo"], "2.0.0")
+            self.assertEqual(manager.list()[0]["state"], "upgradable")
+
+    def test_installed_state_without_source_or_with_older_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory, latest_available=lambda plugin_id: "0.9.0")
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            self.assertEqual(manager.get("fixture.lifecycle")["state"], "installed")
+            self.assertNotIn("upgradeTo", manager.get("fixture.lifecycle"))
+
+    def test_installed_state_when_source_unknown(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory, latest_available=lambda plugin_id: None)
+            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+            self.assertEqual(manager.get("fixture.lifecycle")["state"], "installed")
 
 
 class DiscoveryTest(unittest.TestCase):

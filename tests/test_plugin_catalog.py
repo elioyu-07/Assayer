@@ -7,6 +7,7 @@ from assayer_platform import PlatformContractError
 from assayer_platform.plugin_catalog import (
     CATALOG_FILENAME,
     CATALOG_SCHEMA_VERSION,
+    latest_published,
     load_catalog,
     parse_catalog,
     resolve_version,
@@ -68,6 +69,18 @@ class PluginCatalogParseTests(unittest.TestCase):
         with self.assertRaises(PlatformContractError) as ctx:
             resolve_version(catalog, "nope")
         self.assertEqual(ctx.exception.code, "UNKNOWN_PLUGIN")
+
+    def test_latest_published_returns_newest_version(self):
+        catalog = parse_catalog(_catalog({
+            "1.1.0": _version(version="1.1.0"),
+            "1.2.0": _version(version="1.2.0"),
+            "1.10.0": _version(version="1.10.0"),
+        }))
+        self.assertEqual(latest_published(catalog, "test-minimal"), "1.10.0")
+
+    def test_latest_published_returns_none_for_unknown_plugin(self):
+        catalog = parse_catalog(_catalog())
+        self.assertIsNone(latest_published(catalog, "nope"))
 
     def test_rejects_missing_version(self):
         catalog = parse_catalog(_catalog())

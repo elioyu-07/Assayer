@@ -18,6 +18,7 @@ from assayer_platform.conformance import RELEASE_DESCRIPTOR
 from assayer_platform.plugin_catalog import (
     CATALOG_FILENAME,
     PluginCatalog,
+    latest_published,
     load_catalog,
     parse_catalog,
     resolve_version,
@@ -96,8 +97,10 @@ def _plugin_catalog(registry) -> list[dict]:
     return sorted(catalog, key=lambda item: item["pluginId"])
 
 
-def _lifecycle_manager(store_root: str) -> PluginLifecycleManager:
-    return PluginLifecycleManager(PluginInstallationStore(store_root))
+def _lifecycle_manager(store_root: str, latest_available=None) -> PluginLifecycleManager:
+    return PluginLifecycleManager(
+        PluginInstallationStore(store_root), latest_available=latest_available,
+    )
 
 
 def _download_bytes(url: str) -> bytes:
@@ -122,6 +125,25 @@ def _load_catalog(index: str) -> PluginCatalog:
             ) from error
         return parse_catalog(text)
     return load_catalog(index)
+
+
+# The public plugin catalog. ``plugins publish`` writes to this registry repo
+# (its ``--registry`` / ``--registry-path`` defaults) via pull request; ``add``
+# and by-name install read from it. Override with ``--index``.
+DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/elioyu-07/assayer-registry/main/plugins.json"
+
+
+def _add_from_catalog(plugin: str, *, version: str | None, index: str, store_root: str, operation: str = "install") -> dict:
+    """Download, verify, materialize, and install (or upgrade) a plugin by name."""
+    catalog = _load_catalog(index)
+    resolved = resolve_version(catalog, plugin, version)
+    data = _download_bytes(resolved.wheel_url)
+    manager = _lifecycle_manager(store_root)
+    with tempfile.TemporaryDirectory(prefix="assayer-add-") as tmp:
+        root = materialize_wheel(data, resolved.sha256, Path(tmp))
+        if operation == "upgrade":
+            return manager.upgrade(root)
+        return manager.install(root)
 
 
 def _build_plugin(source: str) -> dict:
@@ -271,12 +293,52 @@ def _store_registry(store_root: str):
     )
 
 
-def _store_index_entries(store_root: str) -> list[dict]:
+def _store_index_entries(store_root: str, latest_available=None) -> list[dict]:
     """Raw store index entries (including quarantined plugins) without imports."""
     store_path = Path(store_root).expanduser().resolve()
     if not (store_path / "index.json").is_file():
         return []
-    return _lifecycle_manager(store_path).list()
+    return _lifecycle_manager(store_path, latest_available).list()
+
+
+def _resolve_index(index: str | None) -> str | None:
+    """Best-effort resolve a version source: an explicit --index or a local plugins.json."""
+    if index:
+        return index
+    candidate = Path("./plugins.json")
+    return str(candidate) if candidate.is_file() else None
+
+
+def _latest_available_from(index: str | None):
+    """Build a ``latest_available`` callback from a catalog, or None without a source.
+
+    An unreachable or invalid source is treated as "no source" for read-only
+    ``upgradable`` markers: listing still succeeds, just without markers.
+    """
+    if not index:
+        return None
+    try:
+        catalog = _load_catalog(index)
+    except PlatformContractError:
+        return None
+
+    def latest(plugin_id: str) -> str | None:
+        return latest_published(catalog, plugin_id)
+
+    return latest
+
+
+def _annotate_upgradable(catalog: list[dict], entries: list[dict]) -> None:
+    upgradable = {
+        entry["pluginId"]: entry["upgradeTo"]
+        for entry in entries
+        if entry.get("state") == "upgradable" and entry.get("upgradeTo")
+    }
+    for plugin in catalog:
+        upgrade_to = upgradable.get(plugin["pluginId"])
+        if upgrade_to is not None:
+            plugin["state"] = "upgradable"
+            plugin["upgradeTo"] = upgrade_to
 
 
 def _print_json(value: dict) -> None:
@@ -304,9 +366,10 @@ def _known_plugin_ids(store_root: str) -> tuple[str, ...]:
     return tuple(ids)
 
 
-def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str]:
+def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str, str | None]:
     store = str(default_store_root())
     output_root = "./assayer-output"
+    index_arg: str | None = None
     yes = False
     words: list[str] = []
     index = 0
@@ -324,10 +387,15 @@ def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str]:
             index += 1
         elif arg.startswith("--output-root="):
             output_root = arg.split("=", 1)[1]
+        elif arg == "--index":
+            index_arg = argv[index + 1]
+            index += 1
+        elif arg.startswith("--index="):
+            index_arg = arg.split("=", 1)[1]
         else:
             words.append(arg)
         index += 1
-    return " ".join(words), store, yes, output_root
+    return " ".join(words), store, yes, output_root, index_arg
 
 
 def _mutation_step(args) -> dict:
@@ -342,15 +410,20 @@ def _mutation_step(args) -> dict:
     return step
 
 
-def _execute_intent_step(step: IntentStep, store_root: str, output_root: str) -> dict:
-    manager = _lifecycle_manager(store_root)
+def _execute_intent_step(
+    step: IntentStep,
+    store_root: str,
+    output_root: str,
+    latest_available=None,
+    catalog_index: str = DEFAULT_CATALOG_URL,
+) -> dict:
+    manager = _lifecycle_manager(store_root, latest_available)
     operation = step.operation
     if operation == "list":
         catalog = _plugin_catalog(_store_registry(store_root))
-        quarantined = [
-            entry for entry in _store_index_entries(store_root)
-            if entry.get("state") == "dirty"
-        ]
+        entries = _store_index_entries(store_root, latest_available)
+        _annotate_upgradable(catalog, entries)
+        quarantined = [entry for entry in entries if entry.get("state") == "dirty"]
         payload = {"operation": "list", "status": "completed", "plugins": catalog}
         if quarantined:
             payload["quarantined"] = quarantined
@@ -380,9 +453,20 @@ def _execute_intent_step(step: IntentStep, store_root: str, output_root: str) ->
         }
     try:
         if operation == "install":
-            result = manager.install(step.package)
+            if step.package is not None:
+                result = manager.install(step.package)
+            else:
+                result = _add_from_catalog(
+                    step.plugin_id, version=None, index=catalog_index, store_root=store_root,
+                )
         elif operation == "upgrade":
-            result = manager.upgrade(step.package)
+            if step.package is not None:
+                result = manager.upgrade(step.package)
+            else:
+                result = _add_from_catalog(
+                    step.plugin_id, version=None, index=catalog_index,
+                    store_root=store_root, operation="upgrade",
+                )
         elif operation == "downgrade":
             result = manager.downgrade(step.plugin_id, step.version)
         elif operation == "rollback":
@@ -395,7 +479,9 @@ def _execute_intent_step(step: IntentStep, store_root: str, output_root: str) ->
     return result
 
 
-def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, confirm) -> int:
+def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, confirm, index: str | None = None) -> int:
+    latest_available = _latest_available_from(_resolve_index(index))
+    catalog_index = index or DEFAULT_CATALOG_URL
     try:
         plan = resolve_intent(
             text, known_plugin_ids=_known_plugin_ids(store_root), cwd=Path.cwd(),
@@ -410,7 +496,10 @@ def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, conf
             _print_json({"plan": plan_payload, "status": "aborted",
                          "reason": "confirmation required"})
             return 0
-    results = [_execute_intent_step(step, store_root, output_root) for step in plan]
+    results = [
+        _execute_intent_step(step, store_root, output_root, latest_available, catalog_index)
+        for step in plan
+    ]
     _print_json({"plan": plan_payload, "results": results})
     completed = all(result.get("status") in {"completed", "quarantined"} for result in results)
     return 0 if completed else 1
@@ -471,7 +560,8 @@ def _plugins_command(args, *, confirm) -> int:
         _print_json(payload)
         return 0 if result.status in {"completed", "partial"} else 1
     if args.plugin_command == "info":
-        manager = _lifecycle_manager(args.store)
+        latest_available = _latest_available_from(_resolve_index(getattr(args, "index", None)))
+        manager = _lifecycle_manager(args.store, latest_available)
         entry = manager.get(args.plugin_id)
         if entry is None:
             _print_error("UNKNOWN_PLUGIN", f"Plugin is not installed: {args.plugin_id}")
@@ -494,13 +584,9 @@ def _plugins_command(args, *, confirm) -> int:
                          "reason": "confirmation required"})
             return 0
         try:
-            catalog = _load_catalog(args.index)
-            resolved = resolve_version(catalog, args.plugin, args.version)
-            data = _download_bytes(resolved.wheel_url)
-            manager = _lifecycle_manager(args.store)
-            with tempfile.TemporaryDirectory(prefix="assayer-add-") as tmp:
-                root = materialize_wheel(data, resolved.sha256, Path(tmp))
-                result = manager.install(root)
+            result = _add_from_catalog(
+                args.plugin, version=args.version, index=args.index, store_root=args.store,
+            )
         except PlatformContractError as error:
             _print_error(error.code, error.message)
             return 2
@@ -545,10 +631,10 @@ def _plugins_command(args, *, confirm) -> int:
         _print_json(result)
         return 0
     catalog = _plugin_catalog(_store_registry(args.store))
-    quarantined = [
-        entry for entry in _store_index_entries(args.store)
-        if entry.get("state") == "dirty"
-    ]
+    latest_available = _latest_available_from(_resolve_index(getattr(args, "index", None)))
+    entries = _store_index_entries(args.store, latest_available)
+    _annotate_upgradable(catalog, entries)
+    quarantined = [entry for entry in entries if entry.get("state") == "dirty"]
     if args.as_json:
         payload = {"plugins": catalog}
         if quarantined:
@@ -559,7 +645,10 @@ def _plugins_command(args, *, confirm) -> int:
             checks = ", ".join(
                 f"{item['checkId']}@{item['version']}" for item in plugin["checks"]
             )
-            print(f"{plugin['pluginId']} {plugin['version']} [{checks}]")
+            line = f"{plugin['pluginId']} {plugin['version']} [{checks}]"
+            if plugin.get("state") == "upgradable":
+                line += f" (upgradable -> {plugin['upgradeTo']})"
+            print(line)
         for entry in quarantined:
             print(f"{entry['pluginId']} (dirty: {entry.get('stateReason')})")
     return 0
@@ -568,8 +657,8 @@ def _plugins_command(args, *, confirm) -> int:
 def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] not in {"audit", "smoke", "serve", "plugins"} and not argv[0].startswith("-"):
-        text, store, yes, output_root = _split_intent_args(argv)
-        return _run_intent(text, store, yes=yes, output_root=output_root, confirm=confirm)
+        text, store, yes, output_root, index = _split_intent_args(argv)
+        return _run_intent(text, store, yes=yes, output_root=output_root, confirm=confirm, index=index)
     parser = argparse.ArgumentParser(prog="assayer", description="Run Assayer Agent audits and Host smoke checks")
     subparsers = parser.add_subparsers(dest="command", required=True)
     audit = subparsers.add_parser("audit", help="Run a formal Agent audit through the Codex Skill and dynamic MCP")
@@ -590,9 +679,13 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin_list = plugins_subparsers.add_parser("list", parents=[plugin_common],
                                                 help="List registered plugins and checks")
     plugin_list.add_argument("--json", action="store_true", dest="as_json")
+    plugin_list.add_argument("--index", default=None,
+                             help="Version source (http(s) URL or plugins.json path) to mark upgradable plugins")
     plugin_info = plugins_subparsers.add_parser("info", parents=[plugin_common],
                                                 help="Show one installed plugin's version and state")
     plugin_info.add_argument("plugin_id")
+    plugin_info.add_argument("--index", default=None,
+                             help="Version source (http(s) URL or plugins.json path) to mark an upgradable plugin")
     plugin_run = plugins_subparsers.add_parser("run", parents=[plugin_common],
                                                help="Run one registered plugin Check")
     plugin_run.add_argument("--plugin", required=True, dest="plugin_id")
@@ -612,7 +705,7 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
                                                help="Download, verify, and install a plugin from the catalog")
     plugin_add.add_argument("plugin", help="Plugin ID to resolve from the catalog")
     plugin_add.add_argument("--version", default=None, help="Pin a specific plugin version")
-    plugin_add.add_argument("--index", default="./plugins.json",
+    plugin_add.add_argument("--index", default=DEFAULT_CATALOG_URL,
                             help="Catalog location: an http(s) URL or a local plugins.json path")
     plugin_publish = plugins_subparsers.add_parser("publish", parents=[plugin_mutation_common],
                                                    help="Build, release, and register a plugin via a catalog PR")

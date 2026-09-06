@@ -235,6 +235,19 @@ def latest_version(catalog: PluginCatalog, plugin_id: str) -> CatalogVersion:
     return max(plugin.versions.values(), key=lambda item: _version_key(item.version))
 
 
+def latest_published(catalog: PluginCatalog, plugin_id: str) -> str | None:
+    """Return the highest published version string, or None when unknown.
+
+    Unlike :func:`latest_version`, this is non-raising and used for the read-only
+    ``upgradable`` check: the client asks "what is the newest version the source
+    knows" and compares it against the installed version locally.
+    """
+    plugin = catalog.plugin(plugin_id)
+    if plugin is None:
+        return None
+    return max(plugin.versions.values(), key=lambda item: _version_key(item.version)).version
+
+
 def resolve_version(catalog: PluginCatalog, plugin_id: str, version: str | None = None) -> CatalogVersion:
     """Resolve an exact version, or the latest when none is requested."""
     if version is None:

@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0-draft |
+| Document version | 1.0.0 |
 | Date | 2026-09-06 |
-| Status | Design converging |
+| Status | Implemented |
 | Owner | Assayer Maintainers |
 
 ## 1. Purpose
@@ -78,6 +78,15 @@ stateDiagram-v2
 be **visible but not runnable** — `info` explains why, `run` refuses — instead of
 silently failing at import time.
 
+`upgradable` is a **derived, read-time state**: it is computed on `list`/`info`
+by comparing the installed active version against the newest version a source
+knows (``PluginLifecycleManager.latest_available``). It is never persisted to the
+store, so a plugin does not become permanently "upgradable" — the marker reflects
+the source at check time. When no source is supplied, an installed plugin simply
+reports `installed`. The source is the remote plugin catalog
+(``plugins.json`` / ``plugin_catalog``), wired through the CLI ``--index`` option
+on `list`/`info` (or a local `plugins.json`).
+
 ## 4. Operations, boundaries, and failure states
 
 Every mutation is idempotent: a repeated request has a defined outcome and never
@@ -126,7 +135,7 @@ shape to carry the new `dirty` state.
   "plugins": {
     "assayer.ass-spec": {
       "activeVersion": "1.0.0",
-      "state": "installed",               // absent | installed | upgradable | dirty  (new)
+      "state": "installed",               // persisted: absent | installed | dirty; upgradable is derived at read time
       "stateReason": null,                // set when state == dirty  (new)
       "history": ["1.0.0"],
       "versions": {
@@ -142,8 +151,9 @@ shape to carry the new `dirty` state.
 ```
 
 `state`/`stateReason` are derived from gate results and checksum verification,
-not from user input; the store never invents them. `index.json` writes remain
-atomic (write `.tmp` then `replace`).
+not from user input; the store never invents them. `upgradable` is the one
+exception: it is derived at read time from a version-source check and is never
+persisted. `index.json` writes remain atomic (write `.tmp` then `replace`).
 
 ## 6. Error codes
 
@@ -175,8 +185,8 @@ existing `list`/`run` and gains the four mutations plus `info`.
 
 ```text
 assayer "…"                                   # NL intent -> plan -> confirm -> execute
-assayer plugins list   [--json]               # installed + upgradable markers
-assayer plugins info   <id>                   # version, source, gate results, state
+assayer plugins list   [--json] [--index <url|path>]   # installed + upgradable markers
+assayer plugins info   <id> [--index <url|path>]       # version, source, gate results, state
 assayer plugins run    <id> <check> <scope-file>  # file, not raw --scope-json
 assayer plugins install   <path|name|url> [--yes]
 assayer plugins upgrade   <id> [--yes]

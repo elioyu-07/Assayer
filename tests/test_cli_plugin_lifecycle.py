@@ -11,7 +11,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from assayer_host import cli
-from assayer_platform import PluginRegistry
+from assayer_platform import PlatformContractError, PluginRegistry
 from tests.helpers import config_quality_registration
 from unittest.mock import patch
 
@@ -149,6 +149,74 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(result["error"]["code"], "PLUGIN_EXECUTION_MODE_UNSUPPORTED")
 
+    def _catalog_file(self, directory: Path, version: str = "1.1.0") -> Path:
+        path = directory / "plugins.json"
+        path.write_text(json.dumps({
+            "schemaVersion": "1.0.0",
+            "plugins": {
+                PLUGIN_ID: {
+                    "pluginId": PLUGIN_ID,
+                    "name": "test-minimal",
+                    "description": "",
+                    "versions": {
+                        version: {
+                            "pluginId": PLUGIN_ID,
+                            "version": version,
+                            "platformApiVersion": "1.0.0",
+                            "wheelUrl": f"https://example.com/test_minimal-{version}.whl",
+                            "sha256": "a" * 64,
+                        },
+                    },
+                },
+            },
+        }), encoding="utf-8")
+        return path
+
+    def test_list_and_info_mark_upgradable_from_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            index = self._catalog_file(root, version="1.1.0")
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+
+            code, listing = _run([
+                "plugins", "list", "--json", "--store", str(store), "--index", str(index),
+            ])
+            self.assertEqual(code, 0)
+            spec = next(item for item in listing["plugins"] if item["pluginId"] == PLUGIN_ID)
+            self.assertEqual(spec["state"], "upgradable")
+            self.assertEqual(spec["upgradeTo"], "1.1.0")
+
+            code, info = _run([
+                "plugins", "info", PLUGIN_ID, "--store", str(store), "--index", str(index),
+            ])
+            self.assertEqual(code, 0)
+            self.assertEqual(info["state"], "upgradable")
+            self.assertEqual(info["upgradeTo"], "1.1.0")
+
+    def test_list_without_index_leaves_installed_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+            code, listing = _run(["plugins", "list", "--json", "--store", str(store)])
+            self.assertEqual(code, 0)
+            spec = next(item for item in listing["plugins"] if item["pluginId"] == PLUGIN_ID)
+            self.assertNotIn("state", spec)
+
+    def test_list_with_stale_or_unknown_index_keeps_installed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            self.assertEqual(_run(["plugins", "install", str(PACKAGE), "--store", str(store)])[0], 0)
+            code, listing = _run([
+                "plugins", "list", "--json", "--store", str(store),
+                "--index", str(root / "missing.json"),
+            ])
+            self.assertEqual(code, 0)
+            spec = next(item for item in listing["plugins"] if item["pluginId"] == PLUGIN_ID)
+            self.assertNotIn("state", spec)
+
     def _bad_package(self, directory: Path, plugin_id: str = "assayer.bad", version: str = "1.0.0") -> Path:
         root = directory / f"bad-{plugin_id}"
         root.mkdir()
@@ -256,13 +324,33 @@ class CliPluginLifecycleTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(info["results"][0]["activeVersion"], "1.0.0")
 
-    def test_nl_install_bare_name_fails_closed(self):
+    def test_nl_install_by_name_routes_to_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            code, result = _run(["install", "test-minimal", "--store", str(store), "--yes"])
-            self.assertEqual(code, 2)
-            self.assertEqual(result["error"]["code"], "INTENT_PACKAGE_UNRESOLVED")
+            with patch("assayer_host.cli._add_from_catalog", return_value={
+                "operation": "install", "status": "completed",
+                "pluginId": PLUGIN_ID, "version": "1.0.0",
+            }) as add:
+                code, result = _run(["install", "test-minimal", "--store", str(store), "--yes"])
+            self.assertEqual(code, 0)
+            self.assertEqual(result["plan"], [{"operation": "install", "pluginId": "test-minimal"}])
+            self.assertEqual(result["results"][0]["status"], "completed")
+            add.assert_called_once_with(
+                "test-minimal", version=None, index=cli.DEFAULT_CATALOG_URL, store_root=str(store),
+            )
+
+    def test_nl_install_by_name_download_failure_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "store"
+            with patch("assayer_host.cli._add_from_catalog", side_effect=PlatformContractError(
+                "PLUGIN_DOWNLOAD_FAILED", "boom",
+            )):
+                code, result = _run(["install", "test-minimal", "--store", str(store), "--yes"])
+            self.assertEqual(code, 1)
+            self.assertEqual(result["results"][0]["status"], "failed")
+            self.assertEqual(result["results"][0]["error"]["code"], "PLUGIN_DOWNLOAD_FAILED")
 
     def test_nl_run_without_check_asks_for_detail(self):
         with tempfile.TemporaryDirectory() as directory:

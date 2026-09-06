@@ -156,12 +156,14 @@ class PluginLifecycleManager:
         installer: Callable[[Path, Path], None] = _copy_installer,
         registration_loader: Callable[[Path], PluginRegistration] = load_registration,
         clock: Callable[[], float] = time.time,
+        latest_available: Callable[[str], str | None] | None = None,
     ) -> None:
         self._store = store
         self._static_validator = static_validator
         self._installer = installer
         self._loader = registration_loader
         self._clock = clock
+        self._latest_available = latest_available
 
     def _stage(self, plugin_id: str, version: str, package_root: Path) -> dict:
         report = self._static_validator(package_root)
@@ -250,7 +252,8 @@ class PluginLifecycleManager:
         descriptor = _descriptor(root)
         plugin_id, version = descriptor["pluginId"], descriptor["pluginVersion"]
         index = self._store.load()
-        if self._store.plugin(index, plugin_id) is not None:
+        entry = self._store.plugin(index, plugin_id)
+        if entry is not None and entry.get("state") != "dirty":
             raise PlatformContractError(
                 "PLUGIN_CONFLICT",
                 f"Plugin is already installed: {plugin_id}",
@@ -259,7 +262,10 @@ class PluginLifecycleManager:
         if not staged["passed"]:
             self._quarantine(index, plugin_id, staged["reason"])
             return self._quarantined_result("install", plugin_id, version, staged["reason"])
-        return self._persist(index, staged, operation="install")
+        result = self._persist(index, staged, operation="install")
+        if entry is not None:
+            result["recoveredFrom"] = "dirty"
+        return result
 
     def upgrade(self, package_root: str | Path) -> dict:
         root = self._source_root(package_root)
@@ -356,13 +362,24 @@ class PluginLifecycleManager:
         return self._result("uninstall", plugin_id, None)
 
     def _entry_view(self, plugin_id: str, entry: dict) -> dict:
-        return {
+        active = self._store.active_version(entry)
+        view = {
             "pluginId": plugin_id,
-            "activeVersion": self._store.active_version(entry),
+            "activeVersion": active,
             "history": self._store.version_history(entry),
             "state": entry.get("state", "installed"),
             "stateReason": entry.get("stateReason"),
         }
+        if (
+            view["state"] == "installed"
+            and active is not None
+            and self._latest_available is not None
+        ):
+            newest = self._latest_available(plugin_id)
+            if newest is not None and _version_key(newest) > _version_key(active):
+                view["state"] = "upgradable"
+                view["upgradeTo"] = newest
+        return view
 
     def list(self) -> list[dict]:
         index = self._store.load()

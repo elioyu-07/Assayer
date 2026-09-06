@@ -68,10 +68,11 @@ class PluginIntentResolutionTest(unittest.TestCase):
             resolve_intent("downgrade test-minimal", known_plugin_ids=KNOWN)
         self.assertEqual(ctx.exception.code, "INTENT_NEEDS_DETAIL")
 
-    def test_install_bare_name_is_unresolved(self):
-        with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("install test-minimal", known_plugin_ids=KNOWN)
-        self.assertEqual(ctx.exception.code, "INTENT_PACKAGE_UNRESOLVED")
+    def test_install_bare_name_resolves_by_name(self):
+        plan = resolve_intent("install test-minimal", known_plugin_ids=KNOWN)
+        self.assertEqual(plan[0].operation, "install")
+        self.assertEqual(plan[0].plugin_id, "test-minimal")
+        self.assertIsNone(plan[0].package)
 
     def test_empty_intent_fails_closed(self):
         with self.assertRaises(IntentResolutionError) as ctx:
