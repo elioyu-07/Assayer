@@ -24,7 +24,6 @@ from .recovery import RECOVERY_DIMENSIONS, RecoveryAdapter, RecoveryAttempt, Rec
 from .evidence import EvidenceAdapter, EvidenceSanitizer, UnavailableEvidenceAdapter, is_page_observation
 from .reporting import DerivedReportBuilder
 from .observability import render_observability, render_performance_bill
-from .frontend_canonical_result import render_frontend_canonical_result
 from .resources import default_rules_root, default_schema_root
 from .store import SQLiteStore
 from .platform_store import SQLitePlatformLedgerStore
@@ -201,13 +200,9 @@ class HostCore:
                 ledger, events, scan["outputDir"]
             )
             self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
-            canonical_bytes, _canonical = render_frontend_canonical_result(
-                ledger, ledger_bytes=ledger_bytes, performance_bill=bill,
-            )
             replacements.update({
                 "performance-bill.json": performance_json,
                 "performance-bill.md": performance_markdown,
-                "canonical-result.json": canonical_bytes,
             })
         self._replace_observability_artifacts(scan["outputDir"], replacements)
 
@@ -2191,15 +2186,11 @@ class HostCore:
             ledger, runtime_events, scan["outputDir"]
         )
         self._validate_entity(self._performance_bill_validator, bill, "PerformanceBill")
-        canonical_bytes, _canonical = render_frontend_canonical_result(
-            ledger, ledger_bytes=ledger_bytes, performance_bill=bill,
-        )
         artifacts.update({
             "runtime-events.jsonl": event_stream,
             "observability-manifest.json": manifest_bytes,
             "performance-bill.json": performance_json,
             "performance-bill.md": performance_markdown,
-            "canonical-result.json": canonical_bytes,
         })
         self._publish_artifacts(scan["outputDir"], artifacts)
         return sorted(artifacts)

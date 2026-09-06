@@ -86,14 +86,14 @@ store is left unchanged.
 
 | Operation | NL example | Success landing | Failure states (fail-closed) |
 |---|---|---|---|
-| install | "install spec-quality" | absent -> installed | already installed (idempotent "already at latest"); gate failure -> `dirty` (quarantined, not landed); unreachable source; dependency conflict; corrupted package / checksum mismatch |
+| install | "install ass-spec" | absent -> installed | already installed (idempotent "already at latest"); gate failure -> `dirty` (quarantined, not landed); unreachable source; dependency conflict; corrupted package / checksum mismatch |
 | discover / list | "what plugins do I have" | read store | empty store -> "no plugins installed" hint |
-| info | "tell me about spec-quality" | read metadata (version, source, gate results, checksum, state) | not installed -> hint to install; `dirty` -> show reason |
-| run | "review spec.md with spec-quality" | structured result | not installed; missing scope file; unknown check id; `dirty` -> refuse with reason |
-| upgrade | "upgrade spec-quality" | installed -> installed (newer) | not installed; already latest; target older than current -> require explicit downgrade |
-| downgrade | "pin spec-quality to 0.9.0" | installed -> installed (older) | not installed; version not present in history |
+| info | "tell me about ass-spec" | read metadata (version, source, gate results, checksum, state) | not installed -> hint to install; `dirty` -> show reason |
+| run | "review spec.md with ass-spec" | structured result | not installed; missing scope file; unknown check id; `dirty` -> refuse with reason |
+| upgrade | "upgrade ass-spec" | installed -> installed (newer) | not installed; already latest; target older than current -> require explicit downgrade |
+| downgrade | "pin ass-spec to 0.9.0" | installed -> installed (older) | not installed; version not present in history |
 | rollback | "undo the last update" | revert to previous history entry | not installed; no history (`ROLLBACK_UNAVAILABLE`) |
-| uninstall | "remove spec-quality" | installed -> absent, `installedCount = 0` | not installed; residual package left after removal |
+| uninstall | "remove ass-spec" | installed -> absent, `installedCount = 0` | not installed; residual package left after removal |
 
 ### 4.1 Downgrade vs upgrade
 
@@ -124,7 +124,7 @@ shape to carry the new `dirty` state.
 {
   "schemaVersion": "1.0.0",
   "plugins": {
-    "assayer.spec-quality": {
+    "assayer.ass-spec": {
       "activeVersion": "1.0.0",
       "state": "installed",               // absent | installed | upgradable | dirty  (new)
       "stateReason": null,                // set when state == dirty  (new)
@@ -132,7 +132,7 @@ shape to carry the new `dirty` state.
       "versions": {
         "1.0.0": {
           "installedAt": 1725580000,
-          "packageRoot": "packages/assayer.spec-quality/1.0.0",
+          "packageRoot": "packages/assayer.ass-spec/1.0.0",
           "conformance": { /* gate report */ }
         }
       }

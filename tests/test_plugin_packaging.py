@@ -55,19 +55,17 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertEqual(data_files["share/assayer/schemas/protocol"], ["schemas/protocol/*.json"])
         self.assertIn("rules/registry.json", data_files["share/assayer/rules"])
 
-    def test_distribution_includes_builtin_plugin_manifest(self):
+    def test_distribution_includes_frontend_plugin_manifest(self):
         setuptools = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
         package_data = setuptools["package-data"]
-        self.assertIn("manifest.json", package_data["assayer_platform.builtin_plugins.frontend_audit"])
-        self.assertNotIn("assayer_platform.builtin_plugins.config_quality", package_data)
-        self.assertNotIn("assayer_platform.builtin_plugins.spec_quality", package_data)
-        self.assertTrue((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "frontend_audit" / "manifest.json").is_file())
-        self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "config_quality").exists())
-        self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins" / "spec_quality").exists())
+        self.assertIn("manifest.json", package_data["assayer_frontend_audit"])
+        self.assertNotIn("assayer_platform.builtin_plugins", package_data)
+        self.assertTrue((ROOT / "src" / "assayer_frontend_audit" / "manifest.json").is_file())
+        self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins").exists())
 
     def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
         source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
-        validation = source.index("_validate_builtin_plugin_releases()", source.index("def build("))
+        validation = source.index("_validate_plugin_releases()", source.index("def build("))
         wheel = source.index('"wheel"', source.index("def build("))
         self.assertLess(validation, wheel)
 

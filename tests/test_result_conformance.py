@@ -16,7 +16,7 @@ from assayer_platform import (
     JsonPlatformLedgerStore,
     inspect_result_conformance,
 )
-from assayer_platform.testing.config_quality import (
+from tests.helpers.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )

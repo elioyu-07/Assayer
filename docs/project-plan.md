@@ -423,7 +423,7 @@ does not claim timing measurements that were not captured.
 
 **Deliverables**
 
-- Move the Spec-quality implementation and its policy resources into an
+- Move the `ass-spec` implementation and its policy resources into an
   independently buildable distribution.
 - Register it through the `assayer.plugins` entry-point mechanism.
 - Support independent install, discovery, upgrade, rollback, and uninstall.
@@ -592,7 +592,7 @@ silently broaden the selected rule boundary.
 | M1 Vertical user journey | J04-J05 implementation and J06b recovery complete | J04-J05 owner acceptance, J07 clean CLI, and J08 lifecycle evidence |
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
 | M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted; multi-window ownership defect designed | Implement multi-window Run isolation, then collect measured owner workloads and remaining clean-CLI evidence |
-| M4 External Spec plugin | Complete; Spec-quality is an independent `plugins/spec-quality` distribution (static + isolated-install + lifecycle gates), the built-in `builtin_plugins/spec_quality` is removed with its tests migrated to the external package, and `scripts/spec_plugin_external_acceptance.py` records the full install → discover → run → upgrade → rollback → uninstall CLI journey | M5 starts on a proven external plugin lifecycle |
+| M4 External Spec plugin | Complete; `ass-spec` is an independent external distribution (static + isolated-install + lifecycle gates), the built-in `builtin_plugins/spec_quality` is removed with its tests migrated to the external package, and the full install → discover → run → upgrade → rollback → uninstall CLI journey was validated (the acceptance script and its test moved to the `ass-spec` repository with the plugin) | M5 starts on a proven external plugin lifecycle |
 | M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
 | M7 Ecosystem expansion | Deferred | Requires evidence from at least two real plugin use cases |
@@ -743,11 +743,12 @@ silently broaden the selected rule boundary.
    plugin-owned.
 5. Externalize the Spec plugin and complete its independent lifecycle,
    including persistent install, upgrade, rollback, and uninstall. Complete:
-   the independent `plugins/spec-quality` distribution passes the static,
+   the independent `ass-spec` distribution passes the static,
    isolated-install, and durable lifecycle gates; the built-in
    `builtin_plugins/spec_quality` is removed with its tests migrated to the
-   external package; and `scripts/spec_plugin_external_acceptance.py` records
-   the full install → discover → run → upgrade → rollback → uninstall journey.
+   external package; and the full install → discover → run → upgrade →
+   rollback → uninstall journey is validated (the acceptance script and its
+   test moved to the `ass-spec` repository with the plugin).
 6. Resume the deferred Frontend Alpha J04-J07 journey closure. Existing
    frontend implementation and regression coverage remain maintained, but this
    acceptance is not in the current active sequence.

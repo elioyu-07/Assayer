@@ -10,10 +10,8 @@ requires-python = ">=3.11"
 dependencies = ["jsonschema==4.26.0"]
 
 [project.optional-dependencies]
-browser = ["playwright==1.62.0"]
 mcp = ["mcp==1.27.0"]
 test = [
-  "playwright==1.62.0",
   "mcp==1.27.0",
 ]
 
@@ -33,10 +31,13 @@ assayer-provider-install-check = "assayer_platform.provider_installation_conform
 [project.entry-points."assayer.providers"]
 markdown = "assayer_document_navigation:markdown_registration"
 
+[project.entry-points."assayer.plugins"]
+"assayer.frontend-audit" = "assayer_frontend_audit:registration"
+
 [tool.setuptools.data-files]
 "share/assayer/schemas" = ["schemas/*.json"]
 "share/assayer/schemas/protocol" = ["schemas/protocol/*.json"]
 "share/assayer/rules" = ["rules/*.md", "rules/registry.json"]
 
 [tool.setuptools.package-data]
-"assayer_platform.builtin_plugins.frontend_audit" = ["manifest.json"]
+"assayer_frontend_audit" = ["manifest.json"]

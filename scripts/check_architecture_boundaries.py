@@ -52,7 +52,9 @@ def _role_for(path: Path) -> str | None:
     if not parts:
         return None
     if parts[0] == "assayer_platform":
-        return "platform_plugin_bundle" if len(parts) > 1 and parts[1] == "builtin_plugins" else "platform"
+        return "platform"
+    if parts[0] == "assayer_frontend_audit":
+        return "plugin"
     if parts[0] == "assayer_host":
         return "host"
     if parts[0] == "assayer_agent":
@@ -71,18 +73,17 @@ def _reason(role: str, module: str, path: Path) -> str | None:
         return "platform kernel must not depend on browser implementation"
     if role == "platform" and _starts_with(module, "mcp"):
         return "platform kernel must not depend on transport SDK"
-    if role == "platform" and _starts_with(module, "assayer_platform.builtin_plugins"):
-        # The package root is a documented built-in registry compatibility
-        # bridge.  No other platform module may import a concrete plugin.
-        if path.resolve() != (SRC / "assayer_platform" / "__init__.py").resolve():
-            return "platform kernel must not depend on concrete plugin implementation"
-    if role == "platform_plugin_bundle" and _starts_with(module, "assayer_host"):
+    if role == "platform" and _starts_with(module, "assayer_frontend_audit"):
+        return "platform kernel must not depend on concrete plugin implementation"
+    if role == "platform" and _starts_with(module, "assayer_document_navigation"):
+        return "platform kernel must not depend on concrete capability provider implementation"
+    if role == "plugin" and _starts_with(module, "assayer_host"):
         return "plugin must not depend on Host private implementation"
-    if role == "platform_plugin_bundle" and _starts_with(module, "mcp"):
+    if role == "plugin" and _starts_with(module, "mcp"):
         return "plugin must not depend on transport SDK"
-    if role == "platform_plugin_bundle" and _starts_with(module, "playwright"):
+    if role == "plugin" and _starts_with(module, "playwright"):
         return "plugin must not depend on browser implementation"
-    if role == "platform_plugin_bundle" and any(_starts_with(module, prefix) for prefix in (
+    if role == "plugin" and any(_starts_with(module, prefix) for prefix in (
         "assayer_platform.ledger", "assayer_platform.canonical_result",
         "assayer_platform.reporting", "assayer_platform.observability",
         "assayer_platform.interactive", "assayer_platform.result_delivery",
@@ -90,7 +91,7 @@ def _reason(role: str, module: str, path: Path) -> str | None:
         return "plugin must use platform layer interfaces instead of owning delivery or lifecycle"
     if role == "capability_provider" and _starts_with(module, "assayer_host"):
         return "capability provider must not depend on Host implementation"
-    if role == "capability_provider" and _starts_with(module, "assayer_platform.builtin_plugins"):
+    if role == "capability_provider" and _starts_with(module, "assayer_frontend_audit"):
         return "capability provider must not depend on domain plugin"
     if role == "agent" and _starts_with(module, "assayer_host"):
         return "Agent adapter must not mutate or import Host implementation"

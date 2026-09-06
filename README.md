@@ -45,9 +45,9 @@ lifecycle is not yet a delivered ecosystem feature.
 | `assayer.frontend-audit` | Usable Alpha | Audits anonymous test or staging web interfaces in Chromium with safe interactions and DOM/visual evidence; currently ships the FUA-10 filter-action check. |
 | `ass-spec` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point quality policy with Agent semantic judgment. Lives in its own repository (`ass-spec`) and is installed as an external distribution. |
 
-A deterministic, non-browser configuration reference lives in
-`assayer_platform.testing` for exercising the generic kernel in tests; it is not
-a shipped plugin and never appears in the plugin catalog.
+A deterministic, non-browser configuration reference lives in `tests/helpers`
+for exercising the generic kernel in tests; it is not a shipped plugin and never
+appears in the plugin catalog.
 
 Every plugin publishes the same portable `canonical-result.json`. A plugin may
 also publish richer domain reports, but those reports cannot redefine the formal
@@ -78,7 +78,9 @@ source and installed through a personal Codex marketplace; a stable public
 installation and lifecycle flow is not yet available.
 
 For the current delivery evidence, see [installation](docs/j01-install-delivery.md)
-and [activation and discovery](docs/j02-activation-and-discovery.md).
+and [activation and discovery](docs/j02-activation-and-discovery.md). For a
+step-by-step specification review walkthrough, see
+[spec review getting started](docs/spec-review-getting-started.md).
 
 ## How it works
 
@@ -201,12 +203,14 @@ stage gates and sequencing.
 
 ## Develop Assayer
 
-Create an environment with the real browser and MCP dependencies:
+Create an environment with the MCP SDK, a locally installed Playwright driver,
+and a Chromium-family browser (Google Chrome or Microsoft Edge).  Playwright and
+the browser are user-supplied prerequisites, not bundled dependencies:
 
 ```bash
 python3 -m venv .venv
 uv pip install --python .venv/bin/python -e '.[test]'
-.venv/bin/python -m playwright install chromium
+.venv/bin/python -m pip install playwright
 ```
 
 Run the deterministic development gate:
@@ -215,8 +219,8 @@ Run the deterministic development gate:
 .venv/bin/python scripts/run_tests.py fast
 ```
 
-Run the full gate, which launches Chromium, exercises the MCP SDK, and rejects
-skipped tests:
+Run the full gate, which launches a local Chromium-family browser, exercises the
+MCP SDK, and rejects skipped tests:
 
 ```bash
 .venv/bin/python scripts/run_tests.py full

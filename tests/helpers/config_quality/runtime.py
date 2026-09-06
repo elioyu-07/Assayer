@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from ...contract import (
+from assayer_platform.contract import (
     CheckContract,
     DecisionProposal,
     DimensionObservation,
@@ -23,8 +23,8 @@ from ...contract import (
     PluginManifest,
     WorkItem,
 )
-from ...registry import load_plugin_manifest
-from ...evidence_graph import (
+from assayer_platform.registry import load_plugin_manifest
+from assayer_platform.evidence_graph import (
     build_candidate_evidence_graph, render_candidate_evidence_graph,
     validate_candidate_evidence_graph_projection,
 )

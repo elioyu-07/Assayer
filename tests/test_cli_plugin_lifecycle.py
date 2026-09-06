@@ -12,7 +12,7 @@ from pathlib import Path
 
 from assayer_host import cli
 from assayer_platform import PluginRegistry
-from assayer_platform.testing import config_quality_registration
+from tests.helpers import config_quality_registration
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]

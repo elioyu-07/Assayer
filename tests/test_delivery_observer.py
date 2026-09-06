@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from assayer_platform import PlatformDeliveryObserver, PlatformRunner, PluginRegistry
-from assayer_platform.testing import config_quality_registration
+from tests.helpers import config_quality_registration
 
 
 class DeliveryObserverTest(unittest.TestCase):

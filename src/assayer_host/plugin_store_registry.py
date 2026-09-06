@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from assayer_platform import PluginInstallationStore, PluginRegistry, discover_plugin_registry
-from assayer_platform.builtin_plugins import installed_plugin_registry
+from assayer_platform import installed_plugin_registry
 
 
 def default_store_root() -> Path:

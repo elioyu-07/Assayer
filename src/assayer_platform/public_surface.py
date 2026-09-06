@@ -2,8 +2,7 @@
 
 This module is the single source of truth for which ``assayer_platform``
 modules and symbols a plugin may import. It is the enforceable form of the
-Platform--Plugin Boundary Contract v1 section 5 ("Platform Public Surface"),
-converged from the reference plugin ``ass-spec``.
+Platform--Plugin Boundary Contract v1 section 5 ("Platform Public Surface").
 
 A name becomes public only after it has a documented ownership, a version,
 and a conformance test. To widen this surface, update the mapping below and
@@ -39,7 +38,6 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     }),
     "assayer_platform.registry": frozenset({"load_plugin_manifest"}),
     "assayer_platform.actionable_result": frozenset({"build_actionable_result"}),
-    "assayer_platform.navigation": frozenset({"MarkdownNavigationAdapter"}),
     "assayer_platform.review_protocol": frozenset({"validate_review_submission"}),
     "assayer_platform.evidence_graph": frozenset({
         "build_candidate_evidence_graph",

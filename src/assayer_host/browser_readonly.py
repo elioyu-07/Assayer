@@ -34,8 +34,60 @@ class ReadonlyBrowserContext(Protocol):
     def new_page(self) -> ReadonlyBrowserPage: ...
 
 
+LOCAL_BROWSER_CHANNELS = ("chrome", "msedge")
+_MIN_PLAYWRIGHT_VERSION = (1, 40, 0)
+
+
+def _load_sync_playwright():
+    """Import Playwright lazily and enforce a supported version floor.
+
+    Playwright is a user-supplied environment prerequisite, never a declared
+    dependency.  A missing or too-old installation fails here with an
+    actionable message instead of surfacing later as a launch error.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as error:
+        raise RuntimeError(
+            "Playwright is not installed; a real browser cannot be started. "
+            "Install it locally with: pip install playwright"
+        ) from error
+    try:
+        from importlib.metadata import version
+    except ImportError:  # pragma: no cover - requires-python >= 3.11
+        version = None
+    if version is not None:
+        try:
+            installed = tuple(int(part) for part in version("playwright").split(".")[:3])
+        except Exception:  # metadata can be unavailable in unusual environments
+            installed = None
+        if installed is not None and installed < _MIN_PLAYWRIGHT_VERSION:
+            raise RuntimeError(
+                "Playwright is too old for the browser backend; "
+                f"install playwright >= {'.'.join(map(str, _MIN_PLAYWRIGHT_VERSION))}"
+            )
+    return sync_playwright
+
+
+def launch_local_chromium(playwright, *, headless: bool = True, timeout_ms: int = 30_000) -> object:
+    """Launch a locally installed Chromium-family browser (Chrome then Edge).
+
+    Never downloads a bundled Chromium; the user must have Google Chrome or
+    Microsoft Edge installed on the machine.
+    """
+    last_error = None
+    for channel in LOCAL_BROWSER_CHANNELS:
+        try:
+            return playwright.chromium.launch(headless=headless, channel=channel, timeout=timeout_ms)
+        except Exception as error:
+            last_error = error
+    raise RuntimeError(
+        "No local Chromium-based browser found; install Google Chrome or Microsoft Edge"
+    ) from last_error
+
+
 class PlaywrightBrowserBackend:
-    """Launch only the allow-listed Chromium context from ``BrowserProfile``."""
+    """Launch a locally installed Chromium-family browser from ``BrowserProfile``."""
 
     def __init__(self):
         self._playwright = None
@@ -43,16 +95,11 @@ class PlaywrightBrowserBackend:
 
     def launch(self, profile: BrowserProfile) -> object:
         profile.validate()
+        self._playwright = _load_sync_playwright()().start()
         try:
-            from playwright.sync_api import sync_playwright
-        except ImportError as error:
-            raise RuntimeError("Playwright is not installed; a real browser cannot be started") from error
-        self._playwright = sync_playwright().start()
-        try:
-            # The fixed Chromium channel uses the modern headless implementation
-            # and avoids a second, separate headless-shell binary.
-            self._browser = self._playwright.chromium.launch(
-                headless=profile.headless, channel="chromium", timeout=max(profile.operation_timeout_ms, 1_000),
+            self._browser = launch_local_chromium(
+                self._playwright, headless=profile.headless,
+                timeout_ms=max(profile.operation_timeout_ms, 1_000),
             )
             context = self._browser.new_context(
                 viewport={"width": profile.viewport_width, "height": profile.viewport_height},

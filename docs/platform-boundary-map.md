@@ -100,7 +100,7 @@ This map records which current Assayer modules are reusable platform-kernel mate
 The recommended second plugin is a read-only specification or configuration quality checker. It should use file/repository input and structured Evidence, while exercising the same Run, WorkItem, Check, Finding, Decision, checkpoint, diagnostics, and performance contracts. Its implementation must not require changes to browser runtime modules.
 
 This milestone is complete: the frontend compatibility plugin and the
-non-browser configuration and Spec-quality plugins pass the same kernel
+non-browser configuration and `ass-spec` plugins pass the same kernel
 conformance suite. The production-facing transport checkpoints frontend
 lifecycle in the generic ledger, exposes `run_plugin` for registered batch
 Checks, and now also exposes the domain-neutral interactive lifecycle without

@@ -21,9 +21,9 @@ from assayer_platform import (
     WorkItem,
     load_plugin_manifest,
 )
-from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.testing import config_quality_registration
-from assayer_platform.testing.config_quality import (
+from assayer_platform import installed_plugin_registry
+from tests.helpers import config_quality_registration
+from tests.helpers.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )
@@ -89,14 +89,14 @@ def installed_fixture_registration():
 
 
 class PluginRegistryTest(unittest.TestCase):
-    def test_builtin_plugins_are_selected_by_domain_and_check(self):
-        registry = builtin_plugin_registry()
+    def test_installed_plugins_are_selected_by_domain_and_check(self):
+        registry = installed_plugin_registry()
 
         frontend = registry.select(domain="frontend-audit")
         self.assertEqual(frontend.manifest.plugin_id, "assayer.frontend-audit")
 
         with_fixture = PluginRegistry((
-            *builtin_plugin_registry().list(),
+            *installed_plugin_registry().list(),
             config_quality_registration(),
         ))
         config = with_fixture.select(check_ref=("CFG-001", "1.0.0"))
@@ -117,7 +117,7 @@ class PluginRegistryTest(unittest.TestCase):
 
     def test_ambiguous_selection_fails_closed(self):
         registry = PluginRegistry((
-            *builtin_plugin_registry().list(),
+            *installed_plugin_registry().list(),
             config_quality_registration(),
         ))
 
@@ -215,7 +215,7 @@ class PluginRegistryTest(unittest.TestCase):
         registration = PluginRegistration(
             ConfigQualityPlugin.manifest,
             plugin_factory=lambda: type("Substitute", (), {
-                "manifest": builtin_plugin_registry().select(
+                "manifest": installed_plugin_registry().select(
                     plugin_id="assayer.frontend-audit",
                 ).manifest,
             })(),

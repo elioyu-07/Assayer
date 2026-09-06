@@ -49,6 +49,7 @@ from .interactive import (
 from .registry import load_plugin_manifest, validate_plugin_manifest
 from .evaluation import load_evaluation_corpus, validate_evaluation_corpus
 from .plugin_registry import PluginRegistration, PluginRegistry
+from .plugin_discovery import builtin_plugin_registry, installed_plugin_registry
 from .plugin_installation import PluginInstallationStore
 from .plugin_lifecycle import (
     PluginLifecycleManager,
@@ -112,7 +113,6 @@ from .layers import (
     DeliveryObserver, EvidenceCollectionProvider, NavigationProvider,
     ReviewProtocol,
 )
-from .navigation import MarkdownNavigationAdapter
 from .evidence_collection import EvidenceCollectionPager
 from .review_protocol import REVIEW_DISPOSITIONS, build_review_task, validate_review_submission
 from .delivery_observer import PlatformDeliveryObserver
@@ -183,6 +183,8 @@ __all__ = [
     "validate_evaluation_corpus",
     "PluginRegistration",
     "PluginRegistry",
+    "builtin_plugin_registry",
+    "installed_plugin_registry",
     "PluginInstallationStore",
     "PluginLifecycleManager",
     "discover_plugin_registry",
@@ -241,7 +243,6 @@ __all__ = [
     "EvidenceCollectionProvider",
     "ReviewProtocol",
     "DeliveryObserver",
-    "MarkdownNavigationAdapter",
     "EvidenceCollectionPager",
     "REVIEW_DISPOSITIONS",
     "build_review_task",

@@ -20,7 +20,7 @@ from assayer_platform import (
     discover_plugin_registry,
     load_registration,
 )
-from assayer_platform.builtin_plugins import builtin_plugin_registry
+from assayer_platform import installed_plugin_registry
 
 
 def _manifest(plugin_id="fixture.lifecycle", version="1.0.0"):
@@ -273,7 +273,7 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             manager.install(_FakePackage(Path(directory)).root)
             manager.uninstall("fixture.lifecycle")
             self.assertEqual(
-                builtin_plugin_registry().select(plugin_id="assayer.frontend-audit").manifest.plugin_id,
+                installed_plugin_registry().select(plugin_id="assayer.frontend-audit").manifest.plugin_id,
                 "assayer.frontend-audit",
             )
 
@@ -302,7 +302,7 @@ class DiscoveryTest(unittest.TestCase):
             manager.install(_FakePackage(Path(directory)).root)
             registry = discover_plugin_registry(
                 PluginInstallationStore(directory),
-                builtins=builtin_plugin_registry().list(),
+                builtins=installed_plugin_registry().list(),
                 loader=lambda package: _registration(),
             )
             self.assertEqual(registry.select(plugin_id="fixture.lifecycle").manifest.plugin_id, "fixture.lifecycle")
@@ -353,12 +353,12 @@ class DiscoveryTest(unittest.TestCase):
                 installed_at=1, conformance={},
             )
             store.save(index)
-            builtin = builtin_plugin_registry().select(plugin_id="assayer.frontend-audit")
+            builtin = installed_plugin_registry().select(plugin_id="assayer.frontend-audit")
             _assert_error_code(
                 self, "PLUGIN_CONFLICT",
                 lambda: discover_plugin_registry(
                     store,
-                    builtins=builtin_plugin_registry().list(),
+                    builtins=installed_plugin_registry().list(),
                     loader=lambda package: builtin,
                 ),
             )

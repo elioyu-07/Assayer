@@ -1,15 +1,18 @@
-# Layer Convergence L2 — Markdown Navigation Adapter
+# Layer Convergence L2 — Markdown Navigation Adapter (removed)
 
-Status: implemented
+Status: superseded
 
-The platform now exposes `MarkdownNavigationAdapter` through the generic
-`NavigationProvider` seam. It delegates only deterministic parsing and stable
-source-unit production to the standalone Markdown capability provider.
+The original L2 slice exposed `MarkdownNavigationAdapter` through the generic
+`NavigationProvider` seam, delegating parsing to the standalone Markdown
+capability provider.
 
-Spec now consumes this platform adapter for source facts and navigation maps;
-its chapter rules, candidate semantics, and review policy remain in the Spec
-plugin. Existing parser output and unit identities are preserved.
+This was removed because it violated the Platform--Plugin Boundary Contract:
+the platform must be the neutral hub and must not consume the pluggable
+capability layer. A platform-owned navigation adapter that routes into a
+provider made the platform a capability consumer and embedded Markdown domain
+semantics into the platform.
 
-The adapter is intentionally stateless and read-only. Source rereads that
-need a target are explicit, so later pagination and evidence migration cannot
-silently use stale content.
+Navigation facts are now produced by the platform's own domain-neutral source
+chunking (`source_chunking.py`), which performs heading-aware splitting without
+importing any provider. The Markdown document-navigation capability remains an
+installable provider for plugins that need it.

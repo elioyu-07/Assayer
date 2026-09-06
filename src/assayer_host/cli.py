@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
-from assayer_platform.builtin_plugins import builtin_plugin_registry, installed_plugin_registry
+from assayer_platform import installed_plugin_registry
 from assayer_platform.conformance import RELEASE_DESCRIPTOR
 from assayer_platform.plugin_catalog import (
     CATALOG_FILENAME,

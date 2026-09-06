@@ -1,5 +1,9 @@
 # Implementation Slice 086 — Remove Built-in Spec and Prove the External CLI Journey
 
+> **Naming note:** this plugin was later renamed `ass-spec` and moved to its own
+> repository; it no longer lives at `plugins/spec-quality/`. The name
+> "Spec-quality" below is the historical name at the time of this slice.
+
 Status: implemented
 
 M4 is now closed out. The Spec-quality plugin is no longer a platform built-in;

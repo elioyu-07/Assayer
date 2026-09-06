@@ -67,7 +67,8 @@ def preflight_full(tests: list[unittest.TestCase]) -> None:
         names = ", ".join(missing)
         raise RuntimeError(
             f"full verification dependencies are missing: {names}; "
-            "install with: python -m pip install -e '.[test]'"
+            "install the Python dependencies with: python -m pip install -e '.[test]' "
+            "and Playwright with: pip install playwright"
         )
 
     normalized_ids = [test.id().removeprefix("tests.") for test in tests]
@@ -81,10 +82,11 @@ def preflight_full(tests: list[unittest.TestCase]) -> None:
         raise RuntimeError("full verification did not discover the real MCP SDK test")
 
     from playwright.sync_api import sync_playwright
+    from assayer_host.browser_readonly import launch_local_chromium
 
     try:
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(channel="chromium", headless=True, timeout=30_000)
+            browser = launch_local_chromium(playwright, headless=True, timeout_ms=30_000)
             try:
                 page = browser.new_page()
                 page.set_content("<title>Assayer full verification</title>")
@@ -94,8 +96,8 @@ def preflight_full(tests: list[unittest.TestCase]) -> None:
                 browser.close()
     except Exception as error:
         raise RuntimeError(
-            "full verification cannot launch Playwright Chromium; "
-            "install it with: python -m playwright install chromium"
+            "full verification cannot launch a local Chromium-family browser; "
+            "install Google Chrome or Microsoft Edge"
         ) from error
 
 

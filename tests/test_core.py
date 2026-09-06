@@ -1373,7 +1373,7 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(ledger["scan"]["status"], "completed")
             self.assertEqual(ledger["scan"]["coverageProof"]["processedObjectRefs"], [object_id])
             self.assertEqual(len(ledger["assessments"]), 1)
-            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log", "runtime-events.jsonl", "observability-manifest.json", "performance-bill.json", "performance-bill.md", "canonical-result.json"}
+            expected = {"audit-ledger.json", "issues.json", "page-element-judgement.json", "run-diagnostics.json", "audit-summary.md", "run-diagnostics.md", "audit.log", "runtime-events.jsonl", "observability-manifest.json", "performance-bill.json", "performance-bill.md"}
             self.assertEqual(set(result["result"]["artifactPaths"]), expected)
             self.assertTrue(all((Path(tmp) / name).exists() for name in expected))
             self.assertFalse(any(path.suffix == ".html" for path in Path(tmp).iterdir()))
@@ -1388,14 +1388,6 @@ class HostCoreTest(unittest.TestCase):
             self.assertEqual(performance["activity"]["decisionsCommitted"], 1)
             self.assertGreaterEqual(performance["measurement"]["totalDurationMs"], 0)
             self.assertIn("# Performance Bill", (Path(tmp) / "performance-bill.md").read_text())
-            canonical = json.loads((Path(tmp) / "canonical-result.json").read_text())
-            self.assertEqual(canonical["run"]["pluginId"], "assayer.frontend-audit")
-            self.assertEqual(canonical["status"], "completed")
-            self.assertEqual(canonical["outcomes"][0]["result"], "scanned_no_issue")
-            self.assertEqual(
-                canonical["trace"]["ledgerDigest"],
-                hashlib.sha256((Path(tmp) / "audit-ledger.json").read_bytes()).hexdigest(),
-            )
             self.assertEqual(DerivedReportBuilder().render(ledger), DerivedReportBuilder().render(ledger))
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])

@@ -20,8 +20,8 @@ from assayer_platform import (
     build_canonical_result,
     validate_canonical_result,
 )
-from assayer_platform.testing import config_quality_registration
-from assayer_platform.testing.config_quality import (
+from tests.helpers import config_quality_registration
+from tests.helpers.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )

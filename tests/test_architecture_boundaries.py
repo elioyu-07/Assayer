@@ -8,8 +8,6 @@ from scripts.check_architecture_boundaries import find_violations, scan_file
 from assayer_platform import (
     DeliveryObserver, EvidenceCollectionProvider, NavigationProvider,
     ReviewProtocol,
-    MarkdownNavigationAdapter,
-    PlatformContext,
 )
 
 
@@ -25,15 +23,6 @@ class ArchitectureBoundaryTest(unittest.TestCase):
             self.assertTrue(getattr(interface, "_is_runtime_protocol", False))
             self.assertTrue(getattr(interface, "_is_protocol", False))
 
-    def test_platform_navigation_adapter_returns_stable_units(self):
-        adapter = MarkdownNavigationAdapter()
-        units = adapter.discover_units(
-            {"raw": "# Title\n\nBody\n", "path": "doc.md"},
-            PlatformContext("run-navigation", frozenset()),
-        )
-        self.assertEqual([item["kind"] for item in units], ["heading", "paragraph"])
-        self.assertEqual(units[0]["startLine"], 1)
-
     def test_repository_has_no_unapproved_import_direction_violations(self):
         self.assertEqual(find_violations(ROOT), ())
 
@@ -43,7 +32,7 @@ class ArchitectureBoundaryTest(unittest.TestCase):
             path.write_text("from assayer_host.core import HostCore\n", encoding="utf-8")
             # Place the fixture under the role's source path so the checker
             # exercises the same AST rule as a real plugin file.
-            plugin_path = ROOT / "src" / "assayer_platform" / "builtin_plugins" / "_boundary_fixture.py"
+            plugin_path = ROOT / "src" / "assayer_frontend_audit" / "_boundary_fixture.py"
             try:
                 plugin_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
                 violations = scan_file(plugin_path)
@@ -66,7 +55,7 @@ class ArchitectureBoundaryTest(unittest.TestCase):
             self.assertIn("browser implementation", violations[0].reason)
 
     def test_plugin_delivery_import_is_rejected(self):
-        plugin_path = ROOT / "src" / "assayer_platform" / "builtin_plugins" / "_boundary_fixture.py"
+        plugin_path = ROOT / "src" / "assayer_frontend_audit" / "_boundary_fixture.py"
         try:
             plugin_path.write_text("from assayer_platform.canonical_result import build_canonical_result\n", encoding="utf-8")
             violations = scan_file(plugin_path)

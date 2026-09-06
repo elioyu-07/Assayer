@@ -10,8 +10,9 @@ from pathlib import Path
 
 from assayer_host import (BrowserHostRuntime, BrowserProfile, BrowserSession, BrowserSessionFailure, CredentialVault,
                           HostCore, HostError, LoginResult, LoginSecret,
-                          PlaywrightBrowserBackend, ProductMcpToolTransport, RuntimeRouter,
+                          PlaywrightBrowserBackend, RuntimeRouter,
                           create_recoverable_browser_adapter_bundle)
+from assayer_host.browser_readonly import launch_local_chromium
 
 
 PAGE = b"""<!doctype html><html lang='zh-CN'><head><title>Orders</title></head>
@@ -144,18 +145,13 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
             from playwright.sync_api import sync_playwright
         except ImportError:
             raise unittest.SkipTest("Playwright optional dependency is not installed")
-        with sync_playwright() as playwright:
-            executable = Path(playwright.chromium.executable_path)
-            if executable.is_file():
+        try:
+            with sync_playwright() as playwright:
                 # Complete one real browser lifecycle before leaving Playwright.
-                # Merely reading executable_path and stopping immediately can
-                # leave Playwright 1.62's connection initializer pending.
-                browser = playwright.chromium.launch(
-                    channel="chromium", headless=True, timeout=30_000,
-                )
+                browser = launch_local_chromium(playwright, headless=True, timeout_ms=30_000)
                 browser.close()
-        if not executable.is_file():
-            raise unittest.SkipTest("Playwright Chromium is not installed")
+        except RuntimeError:
+            raise unittest.SkipTest("No local Chromium-family browser is installed")
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), SiteHandler)
         SiteHandler.server_port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -305,30 +301,6 @@ class PlaywrightReadonlyIntegrationTest(unittest.TestCase):
                 router.close()
             state = router.protocol_state(started["scanId"], started["runId"])
             self.assertEqual(state["scanStatus"], "failed")
-
-    def test_product_mcp_facade_starts_real_browser_from_url_only(self):
-        origin = f"http://127.0.0.1:{self.server.server_port}"
-        with tempfile.TemporaryDirectory() as output_root:
-            router = RuntimeRouter(output_root, lease_timeout_seconds=60)
-            adapter = ProductMcpToolTransport(router)
-            try:
-                started = adapter.call_tool("start_audit", {
-                    "url": f"{origin}/orders",
-                    "decisionReason": "Start the requested anonymous frontend audit.",
-                })["structuredContent"]
-                self.assertEqual(started["status"], "ok")
-                self.assertNotIn("protocolVersion", started)
-                self.assertNotIn("scanId", started["result"])
-                page = adapter.call_tool("inspect_page", {
-                    "pageStateId": started["result"]["currentPageStateId"],
-                    "include": ["route", "objects"],
-                    "decisionReason": "Inspect the current page and discover objects.",
-                })["structuredContent"]
-                self.assertEqual(page["status"], "ok")
-                self.assertEqual(page["result"]["route"], "/orders")
-                self.assertEqual(len(page["result"]["candidateRefs"]), 1)
-            finally:
-                adapter.close()
 
     def test_real_router_lease_expiry_fails_scan_without_partial_or_ledger(self):
         origin = f"http://127.0.0.1:{self.server.server_port}"

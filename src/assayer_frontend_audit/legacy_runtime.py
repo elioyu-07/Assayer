@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Protocol
 
-from ...contract import (
+from assayer_platform.contract import (
     CheckContract,
     CommitReceipt,
     DecisionProposal,

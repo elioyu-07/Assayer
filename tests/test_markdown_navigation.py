@@ -98,14 +98,14 @@ class MarkdownNavigationTest(unittest.TestCase):
         report = inspect_provider_registration(markdown_registration(), construct_implementation=True)
         self.assertTrue(report.passed, report.as_dict())
 
-    def test_platform_catalog_exposes_markdown_provider_without_concrete_imports(self):
-        registry = builtin_provider_registry()
+    def test_builtin_provider_registry_ships_no_bundled_providers(self):
+        self.assertEqual(builtin_provider_registry().list(), ())
+        self.assertIsNot(builtin_provider_registry(), builtin_provider_registry())
+
+    def test_installed_catalog_discovers_markdown_via_entry_point(self):
+        registry = installed_provider_registry()
         registration = registry.select(provider_id="assayer.document-navigation")
         self.assertEqual(registration.descriptor.capabilities[0].name, "document_navigation")
-        self.assertIsNot(registry, builtin_provider_registry())
-
-    def test_installed_catalog_deduplicates_assayers_built_in_entry_point(self):
-        registry = installed_provider_registry()
         self.assertEqual(
             [item.descriptor.provider_id for item in registry.list()],
             ["assayer.document-navigation"],

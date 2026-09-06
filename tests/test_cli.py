@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from assayer_host import cli
 from assayer_platform import PluginRegistry
-from assayer_platform.testing import config_quality_registration
+from tests.helpers import config_quality_registration
 
 
 class CliTest(unittest.TestCase):

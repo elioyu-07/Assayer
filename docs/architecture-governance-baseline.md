@@ -173,8 +173,8 @@ plugin.
 
 The following must not move into the generic kernel merely for convenience:
 
-- the meaning of a Spec-quality defect;
-- the 18 Spec dimensions and their semantic thresholds;
+- the meaning of an `ass-spec` defect;
+- the 18 `ass-spec` dimensions and their semantic thresholds;
 - frontend FUA applicability and object semantics;
 - domain severity and remediation language;
 - cross-document Spec interpretation when that work is resumed;

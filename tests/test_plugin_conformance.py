@@ -17,17 +17,8 @@ from assayer_platform import (
     load_plugin_manifest,
     validate_candidate_evidence_graph_projection,
 )
-from assayer_platform.testing.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
-from assayer_platform.builtin_plugins.frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, FrontendLedgerCommitter, ProductFrontendRuntime
-from assayer_host import (
-    DeterministicEvidenceAdapter,
-    DeterministicLoginAdapter,
-    DeterministicObjectIdentityAdapter,
-    DeterministicPageAdapter,
-    DeterministicRecoveryAdapter,
-    HostCore,
-)
-from assayer_host.transport import ProductMcpToolTransport
+from tests.helpers.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
+from assayer_frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, ProductFrontendRuntime
 
 
 class RecordPlugin:
@@ -133,35 +124,6 @@ class CrossPluginConformanceTest(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.decisions[0].result, "needs_review")
         self.assertEqual(result.decisions[0].work_item_id, "frontend:candidate-1")
-
-    def test_actual_deterministic_frontend_facade_reaches_platform_kernel(self):
-        core = HostCore(
-            login_adapter=DeterministicLoginAdapter(),
-            page_adapter=DeterministicPageAdapter(),
-            object_identity_adapter=DeterministicObjectIdentityAdapter(),
-            evidence_adapter=DeterministicEvidenceAdapter(),
-            recovery_adapter=DeterministicRecoveryAdapter(),
-        )
-        caller = ProductMcpToolTransport(core)
-        try:
-            caller.call_tool("start_audit", {"url": "https://test.example.com"})
-            plugin = FrontendAuditPlugin(ProductFrontendRuntime(caller))
-            result = PlatformKernel().run(
-                plugin, {}, "FUA-10", FrontendDecisionProvider(),
-                PlatformContext("platform-run", frozenset({"structured_read", "visual_read"})),
-                committer=FrontendLedgerCommitter(caller),
-            )
-            self.assertEqual(result.status, "completed")
-            self.assertEqual(result.decisions[0].result, "needs_review")
-            self.assertEqual(result.metrics["inspectionBatches"], 1)
-            self.assertEqual(result.metrics["durableCommits"], 1)
-            self.assertEqual(result.receipts[0].durability, "durable")
-            self.assertEqual(result.ledger.decision_authority, "platform")
-            self.assertEqual(result.receipts[0].authority, "platform")
-            self.assertTrue(result.receipts[0].metadata["hostAssessmentId"])
-            self.assertNotEqual(result.receipts[0].commit_id, result.receipts[0].metadata["hostAssessmentId"])
-        finally:
-            caller.close()
 
     def test_independent_plugins_share_completed_and_issue_semantics(self):
         with tempfile.TemporaryDirectory() as directory:

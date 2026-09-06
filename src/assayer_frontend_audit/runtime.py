@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
-from ...contract import (
+from assayer_platform.contract import (
     CheckContract,
     DecisionProposal,
     DimensionObservation,
@@ -22,7 +22,7 @@ from ...contract import (
     PluginManifest,
     WorkItem,
 )
-from ...registry import load_plugin_manifest
+from assayer_platform.registry import load_plugin_manifest
 
 
 class FrontendRuntime(Protocol):

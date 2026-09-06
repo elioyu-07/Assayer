@@ -17,8 +17,8 @@ from assayer_platform import (
     inspect_plugin_registration,
     load_plugin_manifest,
 )
-from assayer_platform.builtin_plugins import builtin_plugin_registry
-from assayer_platform.testing.config_quality import (
+from assayer_platform import installed_plugin_registry
+from tests.helpers.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )
@@ -176,10 +176,10 @@ registration = PluginRegistration(
 '''
         (package / "src" / "fixture_plugin" / "plugin.py").write_text(source)
 
-    def test_all_builtins_pass_the_same_registration_gate(self):
+    def test_installed_plugins_pass_the_same_registration_gate(self):
         reports = tuple(
             inspect_plugin_registration(registration)
-            for registration in builtin_plugin_registry().list()
+            for registration in installed_plugin_registry().list()
         )
         self.assertTrue(reports)
         self.assertTrue(all(report.passed for report in reports))
@@ -294,7 +294,7 @@ registration = PluginRegistration(
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             status = main([
-                "assayer_platform.builtin_plugins:builtin_plugin_registry",
+                "assayer_platform.plugin_discovery:installed_plugin_registry",
             ])
         payload = json.loads(output.getvalue())
         self.assertEqual(status, 0)

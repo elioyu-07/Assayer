@@ -21,20 +21,20 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_SOURCE = ROOT / "plugins" / "assayer"
 
 
-def _validate_builtin_plugin_releases() -> None:
+def _validate_plugin_releases() -> None:
     source_root = str(ROOT / "src")
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from assayer_platform.builtin_plugins import builtin_plugin_registry
+    from assayer_platform import installed_plugin_registry
     from assayer_platform.conformance import inspect_plugin_registrations
 
     reports = inspect_plugin_registrations(
-        builtin_plugin_registry().list(), construct_implementations=True,
+        installed_plugin_registry().list(), construct_implementations=True,
     )
     failed = [report.as_dict() for report in reports if not report.passed]
     if failed:
         raise SystemExit(
-            "built-in plugin conformance failed: "
+            "installed plugin conformance failed: "
             + json.dumps(failed, sort_keys=True)
         )
 
@@ -59,7 +59,7 @@ def _run(command: list[str]) -> None:
 
 
 def build(output: Path, *, python: str) -> tuple[Path, Path]:
-    _validate_builtin_plugin_releases()
+    _validate_plugin_releases()
     package_version, plugin_version = _versions(PLUGIN_SOURCE)
     release_root = output / f"assayer-plugin-{plugin_version}"
     archive = output / f"assayer-plugin-{plugin_version}.zip"

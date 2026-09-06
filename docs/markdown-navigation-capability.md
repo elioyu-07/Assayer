@@ -7,7 +7,7 @@ documents. The capability locates document structure and returns immutable,
 line-addressable units for domain plugins. It does not decide whether content
 is correct, complete, ambiguous, or compliant.
 
-This slice is intentionally limited to Markdown so the Spec Quality journey
+This slice is intentionally limited to Markdown so the `ass-spec` journey
 can be validated before additional document formats are considered.
 
 ## Boundary
@@ -32,10 +32,10 @@ The Host owns provider discovery, capability negotiation, source identity,
 Evidence persistence, pagination, checkpointing, and coverage accounting.
 
 Platform callers obtain the capability through
-`assayer_platform.builtin_provider_registry()` (or
-`installed_provider_registry()` for entry-point extensions). This keeps
-provider selection at the platform boundary and gives each caller a fresh,
-isolated registry.
+`assayer_platform.installed_provider_registry()`, which discovers the provider
+through the `assayer.providers` entry-point group. This keeps provider
+selection at the platform boundary and gives each caller a fresh, isolated
+registry without importing a concrete provider implementation.
 
 ## Provider contract (MVP)
 

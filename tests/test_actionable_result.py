@@ -9,7 +9,7 @@ from assayer_platform import (
     PlatformKernel,
     extract_result_delivery,
 )
-from assayer_platform.testing.config_quality import (
+from tests.helpers.config_quality import (
     ConfigQualityPlugin,
     ConfigurationDecisionProvider,
 )

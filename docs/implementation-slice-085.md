@@ -1,5 +1,9 @@
 # Implementation Slice 085 — External Spec-quality Distribution
 
+> **Naming note:** this plugin was later renamed `ass-spec` and moved to its own
+> repository; it no longer lives at `plugins/spec-quality/`. The name
+> "Spec-quality" below is the historical name at the time of this slice.
+
 Status: implemented
 
 The Spec-quality audit domain is now an independently buildable distribution
