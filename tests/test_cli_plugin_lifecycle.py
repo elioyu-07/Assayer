@@ -328,7 +328,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            with patch("assayer_host.cli._add_from_catalog", return_value={
+            with patch("assayer_host.plugin_lifecycle_ops.add_from_catalog", return_value={
                 "operation": "install", "status": "completed",
                 "pluginId": PLUGIN_ID, "version": "1.0.0",
             }) as add:
@@ -344,7 +344,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            with patch("assayer_host.cli._add_from_catalog", side_effect=PlatformContractError(
+            with patch("assayer_host.plugin_lifecycle_ops.add_from_catalog", side_effect=PlatformContractError(
                 "PLUGIN_DOWNLOAD_FAILED", "boom",
             )):
                 code, result = _run(["install", "test-minimal", "--store", str(store), "--yes"])
@@ -374,7 +374,7 @@ class CliPluginLifecycleTest(unittest.TestCase):
                 }]
             }), encoding="utf-8")
             registry = PluginRegistry((config_quality_registration(),))
-            with patch("assayer_host.cli.installed_plugin_registry", return_value=registry):
+            with patch("assayer_host.plugin_lifecycle_ops.installed_plugin_registry", return_value=registry):
                 code, result = _run([
                     "plugins", "run", "--plugin", "test.config-quality",
                     "--check", "CFG-001", "--scope", str(scope_file),

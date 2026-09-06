@@ -8,30 +8,30 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
-from assayer_platform import installed_plugin_registry
+from assayer_platform import PlatformContractError, PlatformRunner
 from assayer_platform.conformance import RELEASE_DESCRIPTOR
-from assayer_platform.plugin_catalog import (
-    CATALOG_FILENAME,
-    PluginCatalog,
-    latest_published,
-    load_catalog,
-    parse_catalog,
-    resolve_version,
-    upsert_catalog_version,
-)
-from assayer_platform.plugin_distribution import materialize_wheel
-from assayer_platform.plugin_installation import PluginInstallationStore
-from assayer_platform.plugin_lifecycle import PluginLifecycleManager
+from assayer_platform.plugin_catalog import CATALOG_FILENAME, upsert_catalog_version
 from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha256_hex
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
-from .plugin_intent import IntentResolutionError, IntentStep, resolve_intent
+from .plugin_intent import IntentResolutionError, resolve_intent
+from .plugin_lifecycle_ops import (
+    DEFAULT_CATALOG_URL,
+    add_from_catalog as _add_from_catalog,
+    annotate_upgradable as _annotate_upgradable,
+    execute_intent_step as _execute_intent_step,
+    known_plugin_ids as _known_plugin_ids,
+    latest_available_from as _latest_available_from,
+    lifecycle_manager as _lifecycle_manager,
+    load_scope as _load_scope,
+    plugin_catalog as _plugin_catalog,
+    store_index_entries as _store_index_entries,
+    store_registry as _store_registry,
+)
 from .plugin_store_registry import default_store_root
 from .runtime_router import RuntimeRouter
 from .transport import JsonLineTransport
@@ -73,77 +73,6 @@ def _run_agent_audit(url: str, output_root: Path) -> int:
                          ensure_ascii=False, indent=2, sort_keys=True))
         return 2
     return completed.returncode
-
-
-def _plugin_catalog(registry) -> list[dict]:
-    catalog = []
-    for registration in registry.list():
-        manifest = registration.manifest
-        catalog.append({
-            "pluginId": manifest.plugin_id,
-            "version": manifest.version,
-            "platformApiVersion": manifest.platform_api_version,
-            "domains": list(manifest.domains),
-            "subjectKinds": list(manifest.subject_kinds),
-            "capabilities": sorted(registration.capabilities),
-            "executionModes": sorted(registration.execution_modes),
-            "supportsCommit": registration.committer_factory is not None,
-            "scopeSchema": dict(registration.scope_schema),
-            "checks": [
-                {"checkId": check.check_id, "version": check.version}
-                for check in manifest.checks
-            ],
-        })
-    return sorted(catalog, key=lambda item: item["pluginId"])
-
-
-def _lifecycle_manager(store_root: str, latest_available=None) -> PluginLifecycleManager:
-    return PluginLifecycleManager(
-        PluginInstallationStore(store_root), latest_available=latest_available,
-    )
-
-
-def _download_bytes(url: str) -> bytes:
-    try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            return response.read()
-    except OSError as error:
-        raise PlatformContractError(
-            "PLUGIN_DOWNLOAD_FAILED",
-            f"The plugin could not be downloaded from {url}: {error}",
-        ) from error
-
-
-def _load_catalog(index: str) -> PluginCatalog:
-    if index.startswith(("http://", "https://")):
-        try:
-            text = _download_bytes(index).decode("utf-8")
-        except UnicodeError as error:
-            raise PlatformContractError(
-                "PLUGIN_CATALOG_INVALID",
-                f"The catalog is not valid UTF-8: {error}",
-            ) from error
-        return parse_catalog(text)
-    return load_catalog(index)
-
-
-# The public plugin catalog. ``plugins publish`` writes to this registry repo
-# (its ``--registry`` / ``--registry-path`` defaults) via pull request; ``add``
-# and by-name install read from it. Override with ``--index``.
-DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/elioyu-07/assayer-registry/main/plugins.json"
-
-
-def _add_from_catalog(plugin: str, *, version: str | None, index: str, store_root: str, operation: str = "install") -> dict:
-    """Download, verify, materialize, and install (or upgrade) a plugin by name."""
-    catalog = _load_catalog(index)
-    resolved = resolve_version(catalog, plugin, version)
-    data = _download_bytes(resolved.wheel_url)
-    manager = _lifecycle_manager(store_root)
-    with tempfile.TemporaryDirectory(prefix="assayer-add-") as tmp:
-        root = materialize_wheel(data, resolved.sha256, Path(tmp))
-        if operation == "upgrade":
-            return manager.upgrade(root)
-        return manager.install(root)
 
 
 def _build_plugin(source: str) -> dict:
@@ -278,67 +207,12 @@ def _publish_plugin(source, *, plugin_repo, registry, registry_path, base, yes, 
     }
 
 
-def _store_registry(store_root: str):
-    """Built-ins plus every plugin installed in the durable store.
-
-    Falls back to the entry-point registry when no store index exists so that
-    read-only commands never create a store directory as a side effect.
-    """
-    store_path = Path(store_root).expanduser().resolve()
-    if not (store_path / "index.json").is_file():
-        return installed_plugin_registry()
-    return discover_plugin_registry(
-        PluginInstallationStore(store_path),
-        builtins=installed_plugin_registry().list(),
-    )
-
-
-def _store_index_entries(store_root: str, latest_available=None) -> list[dict]:
-    """Raw store index entries (including quarantined plugins) without imports."""
-    store_path = Path(store_root).expanduser().resolve()
-    if not (store_path / "index.json").is_file():
-        return []
-    return _lifecycle_manager(store_path, latest_available).list()
-
-
 def _resolve_index(index: str | None) -> str | None:
     """Best-effort resolve a version source: an explicit --index or a local plugins.json."""
     if index:
         return index
     candidate = Path("./plugins.json")
     return str(candidate) if candidate.is_file() else None
-
-
-def _latest_available_from(index: str | None):
-    """Build a ``latest_available`` callback from a catalog, or None without a source.
-
-    An unreachable or invalid source is treated as "no source" for read-only
-    ``upgradable`` markers: listing still succeeds, just without markers.
-    """
-    if not index:
-        return None
-    try:
-        catalog = _load_catalog(index)
-    except PlatformContractError:
-        return None
-
-    def latest(plugin_id: str) -> str | None:
-        return latest_published(catalog, plugin_id)
-
-    return latest
-
-
-def _annotate_upgradable(catalog: list[dict], entries: list[dict]) -> None:
-    upgradable = {
-        entry["pluginId"]: entry["upgradeTo"]
-        for entry in entries
-        if entry.get("state") == "upgradable" and entry.get("upgradeTo")
-    }
-    for plugin in catalog:
-        upgrade_to = upgradable.get(plugin["pluginId"])
-        if upgrade_to is not None:
-            plugin["state"] = "upgradable"
-            plugin["upgradeTo"] = upgrade_to
 
 
 def _print_json(value: dict) -> None:
@@ -355,15 +229,6 @@ def _prompt_confirmation(plan: list[dict]) -> bool:
     except EOFError:
         return False
     return answer in {"y", "yes"}
-
-
-def _known_plugin_ids(store_root: str) -> tuple[str, ...]:
-    ids = [registration.manifest.plugin_id for registration in installed_plugin_registry().list()]
-    for entry in _store_index_entries(store_root):
-        plugin_id = entry.get("pluginId")
-        if plugin_id and plugin_id not in ids:
-            ids.append(plugin_id)
-    return tuple(ids)
 
 
 def _split_intent_args(argv: list[str]) -> tuple[str, str, bool, str, str | None]:
@@ -410,75 +275,6 @@ def _mutation_step(args) -> dict:
     return step
 
 
-def _execute_intent_step(
-    step: IntentStep,
-    store_root: str,
-    output_root: str,
-    latest_available=None,
-    catalog_index: str = DEFAULT_CATALOG_URL,
-) -> dict:
-    manager = _lifecycle_manager(store_root, latest_available)
-    operation = step.operation
-    if operation == "list":
-        catalog = _plugin_catalog(_store_registry(store_root))
-        entries = _store_index_entries(store_root, latest_available)
-        _annotate_upgradable(catalog, entries)
-        quarantined = [entry for entry in entries if entry.get("state") == "dirty"]
-        payload = {"operation": "list", "status": "completed", "plugins": catalog}
-        if quarantined:
-            payload["quarantined"] = quarantined
-        return payload
-    if operation == "info":
-        entry = manager.get(step.plugin_id)
-        if entry is None:
-            return {"operation": "info", "status": "failed",
-                    "error": {"code": "UNKNOWN_PLUGIN",
-                              "message": f"Plugin is not installed: {step.plugin_id}"}}
-        return {"operation": "info", "status": "completed", **entry}
-    if operation == "run":
-        try:
-            scope = _load_scope(None, step.scope_file)
-            result = PlatformRunner(_store_registry(store_root), output_root).run(
-                plugin_id=step.plugin_id, check_id=step.check_id,
-                check_version=None, scope=scope,
-            )
-        except PlatformContractError as error:
-            return {"operation": "run", "status": "failed",
-                    "error": {"code": error.code, "message": error.message}}
-        return {
-            "operation": "run",
-            "status": "completed" if result.status in {"completed", "partial"} else "failed",
-            "runId": result.run_id,
-            "decisions": [decision.result for decision in result.decisions],
-        }
-    try:
-        if operation == "install":
-            if step.package is not None:
-                result = manager.install(step.package)
-            else:
-                result = _add_from_catalog(
-                    step.plugin_id, version=None, index=catalog_index, store_root=store_root,
-                )
-        elif operation == "upgrade":
-            if step.package is not None:
-                result = manager.upgrade(step.package)
-            else:
-                result = _add_from_catalog(
-                    step.plugin_id, version=None, index=catalog_index,
-                    store_root=store_root, operation="upgrade",
-                )
-        elif operation == "downgrade":
-            result = manager.downgrade(step.plugin_id, step.version)
-        elif operation == "rollback":
-            result = manager.rollback(step.plugin_id)
-        else:
-            result = manager.uninstall(step.plugin_id)
-    except PlatformContractError as error:
-        return {"operation": operation, "status": "failed",
-                "error": {"code": error.code, "message": error.message}}
-    return result
-
-
 def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, confirm, index: str | None = None) -> int:
     latest_available = _latest_available_from(_resolve_index(index))
     catalog_index = index or DEFAULT_CATALOG_URL
@@ -503,22 +299,6 @@ def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, conf
     _print_json({"plan": plan_payload, "results": results})
     completed = all(result.get("status") in {"completed", "quarantined"} for result in results)
     return 0 if completed else 1
-
-
-def _load_scope(scope_json: str | None, scope_file: str | None):
-    if scope_file is not None:
-        try:
-            return json.loads(
-                Path(scope_file).expanduser().resolve().read_text(encoding="utf-8")
-            )
-        except (OSError, UnicodeError, json.JSONDecodeError):
-            raise PlatformContractError(
-                "INVALID_SCOPE", "Plugin scope file must contain valid JSON",
-            )
-    try:
-        return json.loads(scope_json)
-    except json.JSONDecodeError:
-        raise PlatformContractError("INVALID_SCOPE", "Plugin scope must be valid JSON")
 
 
 def _plugins_command(args, *, confirm) -> int:

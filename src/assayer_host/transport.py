@@ -24,6 +24,7 @@ from jsonschema import Draft202012Validator
 
 from .core import HostCore, TOOL_KINDS
 from .errors import HostError
+from .plugin_lifecycle_mcp import PluginLifecycleMcpToolTransport
 from .plugin_store_registry import default_store_root, store_backed_plugin_registry
 from .resources import default_schema_root
 from assayer_platform import (
@@ -829,12 +830,16 @@ def create_interactive_mcp_server(
     plugin_registry: PluginRegistry | None = None,
     runtime_resolver: Any = None,
     capabilities_resolver: Any = None,
+    store_root: str | None = None,
 ):
-    """Create a browser-independent MCP server for interactive plugins.
+    """Create a browser-independent MCP server for interactive plugins and lifecycle.
 
     Runtime adapters are intentionally injected by the embedding product.  A
     plain server created here can run non-browser interactive fixtures and will
-    never start Chromium as a side effect of tool discovery.
+    never start Chromium as a side effect of tool discovery.  Plugin lifecycle
+    management tools (install/upgrade/uninstall/list/info/downgrade/rollback)
+    are registered alongside the interactive Run tools so a single ``assayer-mcp``
+    process serves the full natural-language plugin journey.
     """
     FastMCP = _load_fast_mcp()
     server = FastMCP("Assayer Interactive Plugins")
@@ -845,10 +850,10 @@ def create_interactive_mcp_server(
     )
     server._assayer_transport = adapter
 
-    def make_invoke(tool_name: str, input_schema: dict):
+    def make_invoke(transport, tool_name: str, input_schema: dict):
         def invoke(**kwargs: Any) -> dict:
             arguments = {key: value for key, value in kwargs.items() if value is not None}
-            return adapter.call_tool(tool_name, arguments)
+            return transport.call_tool(tool_name, arguments)
 
         invoke.__name__ = f"assayer_{tool_name}"
         properties = input_schema.get("properties", {})
@@ -863,12 +868,20 @@ def create_interactive_mcp_server(
         ])
         return invoke
 
-    for item in adapter.list_tools():
-        name = item["name"]
-        server.tool(name=name, description=item["description"])(make_invoke(name, item["inputSchema"]))
-        registered = server._tool_manager.get_tool(name)
-        if registered is not None:
-            registered.parameters = deepcopy(item["inputSchema"])
+    def register(transport):
+        for item in transport.list_tools():
+            name = item["name"]
+            server.tool(name=name, description=item["description"])(
+                make_invoke(transport, name, item["inputSchema"])
+            )
+            registered = server._tool_manager.get_tool(name)
+            if registered is not None:
+                registered.parameters = deepcopy(item["inputSchema"])
+
+    register(adapter)
+    lifecycle = PluginLifecycleMcpToolTransport(store_root or str(default_store_root()))
+    server._assayer_lifecycle_transport = lifecycle
+    register(lifecycle)
     return server
 
 
@@ -882,6 +895,7 @@ def mcp_main(argv: list[str] | None = None) -> int:
     server = create_interactive_mcp_server(
         output_root=args.output_root,
         plugin_registry=store_backed_plugin_registry(args.store),
+        store_root=args.store,
     )
     try:
         server.run(transport="stdio")

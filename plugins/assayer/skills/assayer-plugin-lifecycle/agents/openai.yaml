@@ -1,0 +1,14 @@
+interface:
+  display_name: "Assayer Plugin Lifecycle"
+  short_description: "Install, upgrade, or remove Assayer plugins"
+  default_prompt: "Use $assayer-plugin-lifecycle to manage Assayer plugins on my request."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "assayer"
+      description: "Local Assayer stdio MCP server"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

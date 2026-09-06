@@ -18,6 +18,7 @@
     "defaultPrompt": [
       "Audit this web URL for frontend issues: <URL>",
       "Run the installed plugin for this input and produce an evidence-backed report.",
+      "Install the ass-spec plugin.",
       "Continue the Assayer audit and explain the current progress.",
       "Explain the Assayer result and what I should do next."
     ]

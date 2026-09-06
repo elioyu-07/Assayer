@@ -84,7 +84,7 @@ class CliTest(unittest.TestCase):
             registry = PluginRegistry((config_quality_registration(),))
 
             with redirect_stdout(output), \
-                 patch("assayer_host.cli.installed_plugin_registry", return_value=registry), \
+                 patch("assayer_host.plugin_lifecycle_ops.installed_plugin_registry", return_value=registry), \
                  patch("assayer_host.cli.BrowserHostRuntime") as browser_runtime:
                 result = cli.main([
                     "plugins", "run", "--plugin", "test.config-quality",

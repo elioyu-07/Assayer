@@ -37,8 +37,10 @@ rebuilding the trust model around it.
 ## Plugins
 
 The current plugins are built-in implementations. They exercise the same generic
-contracts intended for independently packaged plugins, but the external plugin
-lifecycle is not yet a delivered ecosystem feature.
+contracts intended for independently packaged plugins. Independently packaged
+plugins are installed, upgraded, and removed through the agent-first lifecycle
+in natural language ("install ass-spec", "what plugins do i have"); see
+[the agent-first plugin lifecycle](docs/agent-first-plugin-lifecycle-design.md).
 
 | Plugin | Status | What it does |
 |---|---|---|
@@ -74,8 +76,9 @@ state. The user supplies the audit intent and the target.
 
 The current Alpha bundle is validated on macOS arm64 with CPython 3.13. Python
 and Chromium are external prerequisites. The release is currently built from
-source and installed through a personal Codex marketplace; a stable public
-installation and lifecycle flow is not yet available.
+source and installed through a personal Codex marketplace. Plugin installation,
+upgrade, and removal are expressed as natural language in Codex and resolved by
+the agent into a deterministic, fail-closed plan.
 
 For the current delivery evidence, see [installation](docs/j01-install-delivery.md)
 and [activation and discovery](docs/j02-activation-and-discovery.md). For a

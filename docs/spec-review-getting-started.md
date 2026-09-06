@@ -4,11 +4,11 @@ This guide walks a new user from zero to a completed specification review. It is
 the shortest path for the `ass-spec` journey: install the platform, install the
 `ass-spec` plugin, and ask for a review in a fresh Codex task.
 
-> **Status:** `ass-spec` is Usable Alpha. The flow below works end-to-end today,
-> but the plugin is currently built from source and installed through a personal
-> Codex marketplace. A stable public installation and lifecycle flow is not yet
-> delivered. The main acceptance evidence in this repository is the anonymous URL
-> audit; the spec journey is the second cross-domain reference.
+> **Status:** `ass-spec` is Usable Alpha. The flow below works end-to-end today.
+> The plugin is built from source and installed through a personal Codex
+> marketplace, then installed and managed in natural language inside Codex. The
+> main acceptance evidence in this repository is the anonymous URL audit; the
+> spec journey is the second cross-domain reference.
 
 ## 1. Prerequisites
 
@@ -33,10 +33,27 @@ Spec review is **not** built into the platform. `ass-spec` is an independent
 distribution that lives in its own repository and is installed separately, then
 discovered through the `assayer.plugins` entry point.
 
-- Today this means installing it from source through a personal marketplace, the
-  same way as the platform. A public, one-command install flow is still open work.
-- Once installed, `installed_plugin_registry()` discovers it automatically; you
-  never point the platform at a path or write an entry point by hand.
+Once the Assayer Plugin is enabled, install `ass-spec` in a fresh Codex task by
+asking in natural language:
+
+```text
+install ass-spec
+```
+
+The Agent resolves the intent, shows the plan, and drives the deterministic
+install (download → checksum verification → conformance gate → materialize).
+You never point the platform at a path or write an entry point by hand.
+
+The same natural-language path covers the rest of the lifecycle:
+
+```text
+what plugins do i have
+upgrade ass-spec
+remove ass-spec
+```
+
+For the deterministic substrate and its error codes, see the
+[agent-first plugin lifecycle](agent-first-plugin-lifecycle-design.md).
 
 ## 4. Open a fresh Codex CLI task
 
