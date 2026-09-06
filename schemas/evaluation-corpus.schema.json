@@ -59,8 +59,9 @@
           "recovery": { "$ref": "#/$defs/recovery" },
           "expected": {
             "type": "object",
-            "additionalProperties": false,
-            "required": ["candidates", "suppressions", "merges", "unverified", "findings", "readiness"],
+            "additionalProperties": true,
+            "description": "Generic semantic outcome envelope. Plugins may extend this object with domain-specific keys (for example readiness or context assertions) that the owning plugin's schema constrains.",
+            "required": ["candidates", "suppressions", "merges", "unverified", "findings"],
             "properties": {
               "candidates": { "type": "array", "items": { "$ref": "#/$defs/candidate" } },
               "suppressions": { "type": "array", "items": { "$ref": "#/$defs/disposition" } },
@@ -71,8 +72,6 @@
                 "type": "array",
                 "items": { "$ref": "#/$defs/relationshipReview" }
               },
-              "contextAssertions": { "$ref": "#/$defs/contextAssertions" },
-              "readiness": { "enum": ["READY", "REWORK", "ESCALATE", "UNVERIFIED"] },
               "notes": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
             }
           }
@@ -165,40 +164,6 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "common.schema.json#/$defs/entityId" }
-        }
-      }
-    },
-    "contextAssertions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["documentType", "requiredIdentifiers", "requiredStatementKinds", "checklistResults"],
-      "properties": {
-        "documentType": {
-          "enum": ["feature_spec", "shared_contract", "data_model", "interface_contract", "rfc_prd", "other"]
-        },
-        "requiredIdentifiers": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "$ref": "common.schema.json#/$defs/entityId" }
-        },
-        "requiredStatementKinds": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "enum": ["no_migration", "not_applicable", "delegation", "authority"] }
-        },
-        "checklistResults": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["checkId", "applicability", "status"],
-            "properties": {
-              "checkId": { "pattern": "^CHK-(0[1-9]|1[0-8])$" },
-              "applicability": { "enum": ["APPLICABLE", "NOT_APPLICABLE", "CONDITIONAL", "UNVERIFIED"] },
-              "status": { "enum": ["PASS", "REWORK", "ESCALATE", "UNVERIFIED"] }
-            }
-          }
         }
       }
     },
