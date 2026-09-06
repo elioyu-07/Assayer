@@ -1,5 +1,5 @@
 {
-  "pluginId": "assayer.config-quality",
+  "pluginId": "test.config-quality",
   "version": "1.0.0",
   "platformApiVersion": "1.0.0",
   "domains": ["configuration-quality"],

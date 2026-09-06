@@ -1,4 +1,9 @@
-"""A deterministic, read-only JSON configuration quality plugin."""
+"""A deterministic, read-only JSON configuration reference for kernel tests.
+
+This module is test scaffolding: it exercises the generic platform kernel
+(discover -> inspect -> decide plus the evidence graph) without a browser or an
+Agent. It is intentionally not a shipped plugin and is not registered as one.
+"""
 
 from __future__ import annotations
 
