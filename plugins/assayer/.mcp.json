@@ -6,6 +6,7 @@
       "cwd": ".",
       "env_vars": [
         "ASSAYER_OUTPUT_ROOT",
+        "ASSAYER_STORE",
         "ASSAYER_PYTHON",
         "HOME",
         "PATH",

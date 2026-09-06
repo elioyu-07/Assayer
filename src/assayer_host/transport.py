@@ -13,6 +13,7 @@ import hashlib
 import inspect
 import json
 import logging
+import os
 import re
 import sys
 import threading
@@ -28,6 +29,7 @@ from .core import HostCore, TOOL_KINDS
 from .errors import HostError
 from .lifecycle import InstallationStatusBuilder
 from .lifecycle_product import LifecycleProductController, LifecycleProductToolTransport
+from .plugin_store_registry import store_backed_plugin_registry
 from .resources import default_rules_root, default_schema_root
 from assayer_platform import (
     DecisionProposal, DimensionObservation, EvidenceRecord, PlatformRunner,
@@ -2326,12 +2328,14 @@ def create_product_mcp_server(
     *,
     output_root: str | Path = "./assayer-output",
     lifecycle_controller: LifecycleProductController | None = None,
+    plugin_registry: PluginRegistry | None = None,
 ):
     """Create the generic plugin MCP server with frontend compatibility tools."""
     FastMCP = _load_fast_mcp()
     server = FastMCP("Assayer")
     adapter = FrontendProductMcpToolTransport(
         core, output_root=output_root, lifecycle_controller=lifecycle_controller,
+        plugin_registry=plugin_registry,
     )
     server._assayer_transport = adapter
 
@@ -2378,13 +2382,18 @@ ProductMcpToolTransport = FrontendProductMcpToolTransport
 def mcp_main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Assayer plugin MCP stdio server")
     parser.add_argument("--output-root", default="./assayer-output", help="Fixed parent directory for all Scan output directories")
+    parser.add_argument("--store", default=os.environ.get("ASSAYER_STORE", "./.assayer/plugins"),
+                        help="Plugin installation store directory (defaults to $ASSAYER_STORE)")
     parser.add_argument("--max-runtimes", type=int, default=4)
     parser.add_argument("--lease-timeout", type=float, default=300.0)
     args = parser.parse_args(argv)
     from .runtime_router import RuntimeRouter
     core = RuntimeRouter(args.output_root, max_runtimes=args.max_runtimes,
                          lease_timeout_seconds=args.lease_timeout)
-    server = create_product_mcp_server(core, output_root=args.output_root)
+    server = create_product_mcp_server(
+        core, output_root=args.output_root,
+        plugin_registry=store_backed_plugin_registry(args.store),
+    )
     try:
         server.run(transport="stdio")
     finally:

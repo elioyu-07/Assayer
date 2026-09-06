@@ -23,6 +23,7 @@ from assayer_platform.plugin_lifecycle import (
     discover_plugin_registry,
     load_registration,
 )
+from assayer_host.plugin_store_registry import store_backed_plugin_registry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +101,31 @@ class ExternalPluginPackageTest(unittest.TestCase):
             uninstalled = manager.uninstall("test-minimal")
             self.assertEqual(uninstalled["status"], "completed")
             self.assertEqual(manager.list(), [])
+
+    def test_store_backed_registry_merges_store_and_builtins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = PluginInstallationStore(Path(directory))
+            manager = PluginLifecycleManager(store)
+            manager.install(PACKAGE)
+
+            registry = store_backed_plugin_registry(store.root)
+            plugin_ids = [item.manifest.plugin_id for item in registry.list()]
+
+        self.assertIn("test-minimal", plugin_ids)
+        self.assertIn("assayer.frontend-audit", plugin_ids)
+
+    def test_store_backed_registry_falls_back_to_entry_points_without_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = store_backed_plugin_registry(Path(directory))
+            plugin_ids = [item.manifest.plugin_id for item in registry.list()]
+
+        self.assertIn("assayer.frontend-audit", plugin_ids)
+        self.assertNotIn("test-minimal", plugin_ids)
+
+    def test_store_backed_registry_none_store_is_entry_points(self):
+        registry = store_backed_plugin_registry(None)
+        plugin_ids = [item.manifest.plugin_id for item in registry.list()]
+        self.assertIn("assayer.frontend-audit", plugin_ids)
 
     def test_install_rejects_duplicate_identity(self):
         with tempfile.TemporaryDirectory() as directory:
