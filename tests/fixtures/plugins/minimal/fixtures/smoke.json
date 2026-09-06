@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixtureId": "test-minimal.smoke",
+  "checkId": "TST-001",
+  "description": "A JSON configuration missing a required key yields a deterministic issue_found result.",
+  "scope": { "files": [{"path": "fixtures/sample.json", "requiredKeys": ["name"]}] },
+  "expected": {
+    "terminalStatus": "completed",
+    "decisionResults": ["issue_found"]
+  }
+}

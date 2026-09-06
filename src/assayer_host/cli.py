@@ -7,12 +7,23 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 from pathlib import Path
 
 from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
 from assayer_platform.builtin_plugins import builtin_plugin_registry, installed_plugin_registry
+from assayer_platform.conformance import RELEASE_DESCRIPTOR
+from assayer_platform.plugin_catalog import (
+    PluginCatalog,
+    load_catalog,
+    parse_catalog,
+    resolve_version,
+)
+from assayer_platform.plugin_distribution import materialize_wheel
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.plugin_lifecycle import PluginLifecycleManager
+from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha256_hex
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
@@ -83,6 +94,71 @@ def _plugin_catalog(registry) -> list[dict]:
 
 def _lifecycle_manager(store_root: str) -> PluginLifecycleManager:
     return PluginLifecycleManager(PluginInstallationStore(store_root))
+
+
+def _download_bytes(url: str) -> bytes:
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read()
+    except OSError as error:
+        raise PlatformContractError(
+            "PLUGIN_DOWNLOAD_FAILED",
+            f"The plugin could not be downloaded from {url}: {error}",
+        ) from error
+
+
+def _load_catalog(index: str) -> PluginCatalog:
+    if index.startswith(("http://", "https://")):
+        try:
+            text = _download_bytes(index).decode("utf-8")
+        except UnicodeError as error:
+            raise PlatformContractError(
+                "PLUGIN_CATALOG_INVALID",
+                f"The catalog is not valid UTF-8: {error}",
+            ) from error
+        return parse_catalog(text)
+    return load_catalog(index)
+
+
+def _build_plugin(source: str) -> dict:
+    source_path = Path(source).expanduser().resolve()
+    descriptor_path = source_path / RELEASE_DESCRIPTOR
+    if not descriptor_path.is_file():
+        raise PlatformContractError(
+            "PLUGIN_PACKAGE_NOT_FOUND",
+            f"No release descriptor found in {source_path}",
+        )
+    try:
+        source_descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PlatformContractError(
+            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
+            f"The release descriptor could not be read: {error}",
+        ) from error
+    completed = subprocess.run(
+        ["uv", "build"], cwd=source_path, capture_output=True, text=True,
+    )
+    if completed.returncode != 0:
+        raise PlatformContractError(
+            "PLUGIN_BUILD_FAILED",
+            (completed.stderr or "uv build failed").strip(),
+        )
+    wheels = sorted((source_path / "dist").glob("*.whl"))
+    if not wheels:
+        raise PlatformContractError("PLUGIN_BUILD_FAILED", "uv build produced no wheel")
+    if len(wheels) != 1:
+        raise PlatformContractError("PLUGIN_BUILD_FAILED", "uv build produced multiple wheels")
+    wheel = wheels[0]
+    final_bytes = assemble_self_contained_wheel(
+        wheel.read_bytes(), source_path, source_descriptor,
+    )
+    wheel.write_bytes(final_bytes)
+    return {
+        "wheel": str(wheel),
+        "sha256": sha256_hex(final_bytes),
+        "pluginId": source_descriptor.get("pluginId"),
+        "pluginVersion": source_descriptor.get("pluginVersion"),
+    }
 
 
 def _store_registry(store_root: str):
@@ -307,6 +383,34 @@ def _plugins_command(args, *, confirm) -> int:
             return 2
         _print_json(entry)
         return 0
+    if args.plugin_command == "build":
+        try:
+            result = _build_plugin(args.source)
+        except PlatformContractError as error:
+            _print_error(error.code, error.message)
+            return 2
+        _print_json(result)
+        return 0
+    if args.plugin_command == "add":
+        if not args.yes and not confirm([
+            {"operation": "add", "plugin": args.plugin, "version": args.version},
+        ]):
+            _print_json({"operation": "add", "status": "aborted",
+                         "reason": "confirmation required"})
+            return 0
+        try:
+            catalog = _load_catalog(args.index)
+            resolved = resolve_version(catalog, args.plugin, args.version)
+            data = _download_bytes(resolved.wheel_url)
+            manager = _lifecycle_manager(args.store)
+            with tempfile.TemporaryDirectory(prefix="assayer-add-") as tmp:
+                root = materialize_wheel(data, resolved.sha256, Path(tmp))
+                result = manager.install(root)
+        except PlatformContractError as error:
+            _print_error(error.code, error.message)
+            return 2
+        _print_json(result)
+        return 0 if result.get("status") in {"completed", "quarantined"} else 1
     if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
         if not args.yes and not confirm([_mutation_step(args)]):
             _print_json({"operation": args.plugin_command, "status": "aborted",
@@ -390,6 +494,15 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin_mutation_common = argparse.ArgumentParser(add_help=False)
     plugin_mutation_common.add_argument("--yes", action="store_true", dest="yes",
                                         help="Skip the stop-and-confirm prompt for dangerous operations")
+    plugin_build = plugins_subparsers.add_parser("build", parents=[plugin_common],
+                                                 help="Build a self-contained distributable plugin wheel")
+    plugin_build.add_argument("source", help="Plugin source directory")
+    plugin_add = plugins_subparsers.add_parser("add", parents=[plugin_common, plugin_mutation_common],
+                                               help="Download, verify, and install a plugin from the catalog")
+    plugin_add.add_argument("plugin", help="Plugin ID to resolve from the catalog")
+    plugin_add.add_argument("--version", default=None, help="Pin a specific plugin version")
+    plugin_add.add_argument("--index", default="./plugins.json",
+                            help="Catalog location: an http(s) URL or a local plugins.json path")
     plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common, plugin_mutation_common],
                                                    help="Install a plugin package into the store")
     plugin_install.add_argument("package")

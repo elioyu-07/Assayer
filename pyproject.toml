@@ -25,6 +25,7 @@ assayer = "assayer_host.cli:main"
 assayer-plugin-check = "assayer_platform.conformance:main"
 assayer-plugin-package-check = "assayer_platform.package_conformance:main"
 assayer-plugin-install-check = "assayer_platform.installation_conformance:main"
+assayer-plugin-surface-check = "assayer_platform.surface_conformance:main"
 assayer-provider-check = "assayer_platform.provider_conformance:main"
 assayer-provider-package-check = "assayer_platform.provider_package_conformance:main"
 assayer-provider-install-check = "assayer_platform.provider_installation_conformance:main"
@@ -38,5 +39,4 @@ markdown = "assayer_document_navigation:markdown_registration"
 "share/assayer/rules" = ["rules/*.md", "rules/registry.json"]
 
 [tool.setuptools.package-data]
-"assayer_platform.builtin_plugins.config_quality" = ["manifest.json"]
 "assayer_platform.builtin_plugins.frontend_audit" = ["manifest.json"]

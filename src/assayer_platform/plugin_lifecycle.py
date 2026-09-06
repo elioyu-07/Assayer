@@ -70,9 +70,17 @@ def _descriptor(package_root: str | Path) -> dict:
 
 
 def _package_checksum(root: Path) -> str:
-    """Deterministic content hash over every file in a materialized package."""
+    """Deterministic content hash over every source file in a materialized package.
+
+    Python bytecode caches (``__pycache__`` and ``*.pyc``) are excluded because
+    they are regenerated on import and would make the checksum unstable across
+    otherwise identical installs.
+    """
     digest = hashlib.sha256()
-    for path in sorted((item for item in root.rglob("*") if item.is_file())):
+    for path in sorted(
+        item for item in root.rglob("*")
+        if item.is_file() and "__pycache__" not in item.parts and item.suffix != ".pyc"
+    ):
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
         digest.update(b"\0")
         digest.update(hashlib.sha256(path.read_bytes()).digest())
@@ -80,7 +88,10 @@ def _package_checksum(root: Path) -> str:
 
 
 def _copy_installer(package_root: Path, target: Path) -> None:
-    shutil.copytree(package_root, target)
+    shutil.copytree(
+        package_root, target,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
 
 
 def load_registration(package_root: str | Path) -> PluginRegistration:

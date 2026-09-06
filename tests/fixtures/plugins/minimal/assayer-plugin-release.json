@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0.0",
+  "pluginId": "test-minimal",
+  "pluginVersion": "1.0.0",
+  "platformApiVersion": "1.0.0",
+  "registration": "minimal_plugin:registration",
+  "manifest": "src/minimal_plugin/manifest.json",
+  "scopeSchema": "src/minimal_plugin/scope.schema.json",
+  "runtimeSource": "src",
+  "semanticReview": "semantic-review.md",
+  "fixtures": ["fixtures/smoke.json"],
+  "packageMetadata": "pyproject.toml",
+  "conformance": { "contractVersion": "1.0.0" }
+}

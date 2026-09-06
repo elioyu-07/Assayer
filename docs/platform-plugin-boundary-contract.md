@@ -4,7 +4,7 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-05 |
-| Status | Proposed; implementation not started |
+| Status | Adopted; public-surface import gate implemented (see §5) |
 | Authority | Derived from Platform Constitution v1 and Plugin Contract v1 |
 | Scope | Module ownership, dependency direction, compatibility bridges, and governance gates |
 
@@ -86,6 +86,15 @@ Plugins may depend only on the following stable surfaces:
 Plugins must not import private modules solely because they contain a useful
 helper. A helper becomes public only after it has a documented ownership,
 version, and conformance test.
+
+The concrete, enforceable form of this surface is the symbol-level whitelist
+in `assayer_platform.public_surface` (`PUBLIC_SURFACE`, versioned by
+`PUBLIC_SURFACE_VERSION`). It is converged from the reference plugin
+`ass-spec` and is checked by `assayer-plugin-surface-check`
+(`assayer_platform.surface_conformance`). A plugin may import only the
+modules and symbols listed there; widening the surface requires updating the
+whitelist and this contract together and adding a conformance fixture for the
+newly public symbol.
 
 ## 6. Plugin Responsibilities and Limits
 
@@ -214,7 +223,9 @@ The first implementation slice should enforce only the highest-risk rules:
 2. plugins cannot import `assayer_host` private modules or mutate Host stores;
 3. generic result publication does not require frontend canonical code;
 4. each schema and provider declares ownership;
-5. a non-browser plugin completes through the generic path.
+5. a non-browser plugin completes through the generic path;
+6. plugins cannot import `assayer_platform` modules or symbols outside the
+   public surface whitelist (enforced by `assayer-plugin-surface-check`).
 
 This slice does not move files, remove built-in plugins, redesign browser
 runtime behavior, or add cross-document semantic analysis.

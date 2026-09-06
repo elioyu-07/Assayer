@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test-minimal"
+version = "1.0.0"
+description = "Minimal deterministic Assayer plugin used as a platform test fixture."
+requires-python = ">=3.11"
+dependencies = ["assayer>=0.1.0,<0.2.0"]
+
+[project.entry-points."assayer.plugins"]
+test-minimal = "minimal_plugin:registration"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+minimal_plugin = ["*.json", "*.md"]
