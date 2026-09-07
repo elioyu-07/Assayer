@@ -1,9 +1,14 @@
-# Assayer Plugin Development Contract
+# Assayer Plugin Development Guide
 
 The normative contract is [Audit Plugin Contract v1](plugin-contract-v1.md),
-governed by the [Platform Constitution v1](platform-constitution-v1.md). This
+governed by the [Platform Constitution v1](platform-constitution-v1.md).
+Interactive Agent inputs, fail-fast validation, error ownership, and release
+gates are governed by the
+[Plugin Development Standard v1](plugin-development-standard-v1.md). This
 document is the implementation guide for the current Python registration and
-interactive lifecycle.
+interactive lifecycle; where current behavior differs from that standard, the
+standard defines the target and the difference is migration debt, not a plugin
+permission.
 
 This document defines how an independently packaged plugin is discovered and
 run by the Assayer platform.  A plugin owns domain facts and semantic rules;
@@ -26,9 +31,75 @@ The registration must provide a validated `PluginManifest` and factories for
 the plugin runtime and semantic decision provider.  A committer factory is
 optional for in-memory or caller-owned durable commit paths.
 
-Registrations should also publish a JSON-compatible `scope_schema`. The generic
+Registrations must also publish a JSON-compatible `scope_schema`. The generic
 `list_plugins` MCP tool exposes this schema before `run_plugin` is called, so
 an Agent can discover required business inputs instead of guessing them.
+
+Each interactive Check that accepts Agent input must also publish a versioned
+`AgentContractBundle`. It maps each review-required Evidence `collectionId` to
+the exact checkpoint-page schema, declares the finalization schema, binds the
+semantic-review instructions, and is frozen by digest for the Run. A prompt,
+example, or Python validator cannot introduce a field that is absent from this
+bundle.
+
+```python
+from assayer_platform import AgentContractBundle, PluginRegistration
+
+review_contract = AgentContractBundle(
+    contract_id="dev.example.my-quality.review",
+    contract_version="1.0.0",
+    check_id="MY-001",
+    check_version="1.0.0",
+    checkpoint_payload_schemas={
+        "candidate-findings": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["decisions"],
+            "properties": {"decisions": {"type": "array", "minItems": 1}},
+        },
+    },
+    finalization_schema={
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string", "minLength": 1}},
+    },
+    semantic_instructions_path="semantic-review.md",
+    semantic_instructions_sha256="<64 lowercase hex characters>",
+)
+
+registration = PluginRegistration(
+    manifest=MyPlugin.manifest,
+    plugin_factory=lambda runtime=None: MyPlugin(runtime),
+    execution_modes=frozenset({"interactive"}),
+    scope_schema={"type": "object"},
+    agent_contracts=(review_contract,),
+)
+```
+
+Registration copies the schemas into canonical JSON and computes an immutable
+`sha256:` contract digest. The current migration window still accepts a legacy
+interactive registration without `agent_contracts`; such a registration does
+not conform to the new standard and will be rejected after its plugin migration
+and the release-enforcement slice are complete. Registrations that declare a
+bundle already use the strict Host boundary.
+
+Interactive protocol 1.2 adds `agentContract` to strict semantic tasks and
+accepts `contractDigest` in checkpoint and Decision envelopes. The generic
+transport keeps the field optional only so legacy registrations can complete
+their bounded migration; the Host requires an exact digest whenever the active
+Run froze a bundle.
+
+Strict-boundary errors follow
+[`plugin-agent-error.schema.json`](../schemas/plugin-agent-error.schema.json).
+They identify the error owner and retry disposition, remain non-automatically
+retryable, and permit at most one explicit Agent correction per durable
+WorkItem semantic boundary. A second rejection closes the Run `partial` and
+places the WorkItem in the terminal review queue without manufacturing a
+`needs_review` Decision. Plugin and platform contract defects have zero Agent
+correction budget.
 
 Every manifest declares `platformApiVersion`. Assayer rejects a plugin that
 requires another platform major version or a newer unsupported minor version
@@ -110,6 +181,24 @@ Run timeouts. They are independently configurable with
 not permanently install, upgrade, roll back, sign, or publish a plugin. It is
 also process isolation for reproducibility, not an operating-system sandbox for
 hostile code; only reviewed source packages should enter this developer gate.
+
+The release-facing CI entry point is the single complete command, run against
+the exact wheel that would be published:
+
+```text
+assayer-plugin-release-check --source ./my-plugin-release \
+  ./dist/my_plugin-1.0.0-py3-none-any.whl
+```
+
+Under the Plugin Development Standard, this command must compose static,
+installed-artifact, public-surface, executable Agent-contract, full interactive
+lifecycle, and fail-fast error-path gates. Its report names each executed stage
+and the exact artifact SHA-256. An interactive plugin with an executable Agent
+contract must also declare `releaseAcceptance` and export the same callable in
+the `assayer.release_acceptance` entry-point group. The callable supplies only
+domain-valid Agent proposals through a platform-owned transport; the platform
+validates its collection coverage, terminal ledgers, resume, replay, and result
+publication evidence.
 
 ## Runtime boundary
 
@@ -203,14 +292,25 @@ coverage and cannot be checkpointed.
 An interactive plugin may implement
 `assemble_review_checkpoints(checkpoints, finalization, packet, check, context)`
 to support incremental semantic review. The platform treats each checkpoint
-payload as opaque plugin data, but validates its WorkItem, Check, declared
-collection, stable item IDs, replay identity, and non-overlapping coverage.
-Before assembly it requires the referenced checkpoints to cover every
-non-empty `reviewRequired=true` collection exactly once. This lets a plugin
-declare separate required queues, such as candidate dispositions and final
-dimension reviews, without allowing either queue to be bypassed. The plugin
-hook returns ordinary Decision `details`; existing decision and committer gates
-remain authoritative.
+payload's domain meaning as plugin-owned, but its structure is not opaque. The
+Host must validate the payload against the Run-frozen schema selected by the
+current `collectionId`, then validate WorkItem, Check, stable item IDs, replay
+identity, and non-overlapping coverage before calling plugin code. Before
+assembly it validates the declared finalization schema and requires the
+referenced checkpoints to cover every non-empty `reviewRequired=true`
+collection exactly once. This lets a plugin declare separate required queues,
+such as candidate dispositions and final dimension reviews, without allowing
+either queue to be bypassed. The plugin hook returns ordinary Decision
+`details`; existing decision and committer gates remain authoritative.
+
+Malformed envelopes, stale contract digests, and schema-invalid payloads fail
+before a plugin hook or ledger write. A schema-valid payload that a plugin
+rejects because it expects undeclared structure is
+`PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH`: the WorkItem is blocked and the
+plugin must be fixed. It is not an instruction for the Agent to keep guessing.
+Only an error explicitly classified as `agent_correction` may receive one
+bounded correction attempt; deterministic contract, platform, and plugin
+errors are never automatically retried.
 
 The transport-independent reference implementation is
 `InteractivePluginController`.  MCP and CLI adapters should delegate to it

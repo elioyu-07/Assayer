@@ -18,10 +18,16 @@ PLATFORM_API_VERSION = "1.0.0"
 class PlatformContractError(ValueError):
     """A plugin or Agent result violated the platform contract."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(
+        self, code: str, message: str, *,
+        errors: tuple[Mapping[str, Any], ...] = (),
+        work_item_id: str | None = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
+        self.errors = tuple(_mapping(item) for item in errors)
+        self.work_item_id = work_item_id
 
 
 def _freeze(value: Any) -> Any:

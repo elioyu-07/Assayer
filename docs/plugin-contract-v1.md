@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
-| Date | 2026-09-03 |
-| Status | Frozen for M2; conformance enforcement tracked by M3 |
+| Document version | 1.0.2 |
+| Date | 2026-09-07 |
+| Status | Frozen for M2; executable Agent-boundary enforcement is active for declared bundles and pending legacy-plugin migration |
 | Owner | Assayer maintainers |
 
 ## 1. Contract surface
@@ -43,6 +43,14 @@ Every registration also publishes its supported execution modes, factories,
 capability set, and a JSON-compatible `scopeSchema` used to validate business
 input. Registration metadata is platform packaging data and does not expand
 the manifest's safety authority.
+
+An interactive release claiming conformance to the
+[Plugin Development Standard v1](plugin-development-standard-v1.md) also
+publishes one versioned, machine-readable Agent contract bundle per interactive
+Check. The bundle maps every review-required Evidence `collectionId` to its
+checkpoint payload schema and declares the finalization schema. The Host
+freezes its identity and digest for the Run. Prose or runtime validation cannot
+add an undeclared required field.
 
 The manifest is a declaration, not a permission grant. A plugin cannot request
 credentials, writes, or a capability that the platform and user scope have not
@@ -120,23 +128,41 @@ At a decision or finalization boundary, the Host includes a compact
 reloading the full Evidence payload.
 
 Long semantic reviews may be persisted as `ReviewCheckpoint` records. Each
-checkpoint binds opaque plugin review data to one WorkItem, Check version,
-declared Evidence collection, and a non-empty set of stable item IDs. The
-platform rejects unknown IDs and overlapping coverage, makes identical retries
-idempotent, and calls the plugin's required `validate_review_checkpoint` hook
-before any checkpoint mutation or ledger write. The hook receives the proposed
-checkpoint, its selected immutable collection items, earlier accepted
-checkpoints for that WorkItem and collection, the InvestigationPacket, Check,
-and PlatformContext. It must reject malformed domain Findings, unknown or
-incomplete domain references, and Evidence that does not trace to the selected
-items. A plugin without this hook cannot persist semantic checkpoints. A
-rejected checkpoint leaves no checkpoint, operation, or decision record in the
-ledger. The platform checkpoints only accepted fragments. A final decision
-may reference checkpoints only when they cover every non-empty collection
-whose `reviewRequired` value is `true`, with every item covered exactly once.
-Reference collections are excluded. The plugin assembles domain details
-through its declared hook, after which the normal decision and commit gates
-still apply without exception.
+checkpoint binds plugin-owned domain semantics to one WorkItem, Check version,
+declared Evidence collection, and a non-empty set of stable item IDs. Domain
+meaning remains opaque to the platform; payload structure does not. Under the
+[Plugin Development Standard v1](plugin-development-standard-v1.md), the Host
+must validate the checkpoint against the Run-frozen schema for that exact
+`collectionId` before plugin code runs.
+
+The platform rejects stale contract identity, malformed payload structure,
+unknown IDs, and overlapping coverage, makes identical accepted replays
+idempotent, and only then calls the plugin's required
+`validate_review_checkpoint` hook for declared domain invariants. The hook
+receives the proposed checkpoint, its selected immutable collection items,
+earlier accepted checkpoints for that WorkItem and collection, the
+InvestigationPacket, Check, and PlatformContext. It must reject malformed
+domain Findings, unknown or incomplete domain references, and Evidence that
+does not trace to the selected items. It must not require structure absent from
+the executable schema. A plugin without this hook cannot persist semantic
+checkpoints. A rejected checkpoint leaves no checkpoint, operation, decision,
+receipt, or revision change in the ledger.
+
+A final decision may reference checkpoints only when they cover every
+non-empty collection whose `reviewRequired` value is `true`, with every item
+covered exactly once. Reference collections are excluded. The Host validates
+the declared finalization schema before the plugin assembles domain details;
+the normal decision and commit gates then apply without exception. A
+schema-valid payload rejected for undeclared structure is a plugin contract
+implementation mismatch and is never an Agent retry condition.
+
+Strict boundary failures use the structured
+[`plugin-agent-error.schema.json`](../schemas/plugin-agent-error.schema.json)
+contract. An Agent-owned structural failure allows one explicit correction at
+that durable semantic boundary, never an automatic retry. A second rejection
+records the unresolved WorkItem and closes the Run `partial`; plugin- or
+platform-owned contract failures have no Agent correction budget. This
+terminalization does not create a synthetic `needs_review` Decision.
 
 An accepted checkpoint is immutable. Before its WorkItem Decision is
 committed, a reviewer may append a correction with
@@ -212,11 +238,20 @@ An optional plugin summary is a domain explanation derived from the canonical
 result. It cannot add a new terminal state, override a decision, hide
 unverified scope, or mutate the ledger. A release must include the manifest,
 runtime source, scope schema, semantic-review instructions, deterministic
-fixtures, and conformance metadata. The first M3 gate validates registrations,
-manifest compatibility, capability declarations, scope schemas, execution
-profiles, and constructed runtime interfaces before publication. Package
-resource completeness and independent installer enforcement remain mandatory
-follow-up gates for built-in and external packages alike.
+fixtures, conformance metadata, and every executable Agent schema required by
+its interactive Checks. The first M3 gate validates registrations, manifest
+compatibility, capability declarations, scope schemas, execution profiles,
+Agent contract completeness, and constructed runtime interfaces before
+publication. Package resource completeness and independent installer
+enforcement remain mandatory gates for built-in and external packages alike.
+
+The complete release gate must run against the exact built artifact and prove
+schema/runtime equivalence, pre-plugin rejection of malformed payloads,
+page-compatible checkpoint validation, finalization, replay, resume, and
+terminal publication. Deterministic contract failures fail fast and cannot be
+hidden by Agent retry. The complete requirements and staged implementation are
+defined by the
+[Plugin Development Standard v1](plugin-development-standard-v1.md).
 
 Every isolated release fixture also passes the shared terminal result
 conformance gate. The gate validates ledger/result identity, terminal-event

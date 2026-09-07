@@ -177,6 +177,27 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             self.assertIsNone(installed["stateReason"])
             self.assertEqual(installed["activeVersion"], "1.0.0")
 
+    def test_install_refuses_to_repair_dirty_record_with_older_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manager = self.manager(directory)
+            manager.install(_FakePackage(Path(directory), version="2.0.0").root)
+            store = PluginInstallationStore(directory)
+            index = store.load()
+            index["plugins"]["fixture.lifecycle"]["state"] = "dirty"
+            index["plugins"]["fixture.lifecycle"]["stateReason"] = "PLUGIN_CHECKSUM_MISMATCH"
+            store.save(index)
+
+            _assert_error_code(
+                self,
+                "PLUGIN_DOWNGRADE_REQUIRED",
+                lambda: manager.install(
+                    _FakePackage(Path(directory), version="1.0.0").root,
+                ),
+            )
+            installed = manager.get("fixture.lifecycle")
+            self.assertEqual(installed["state"], "dirty")
+            self.assertEqual(installed["activeVersion"], "2.0.0")
+
     def test_install_unreachable_source_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)

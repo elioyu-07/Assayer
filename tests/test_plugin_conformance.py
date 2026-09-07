@@ -13,9 +13,12 @@ from assayer_platform import (
     InvestigationPacket,
     PlatformContext,
     PlatformKernel,
+    PluginRegistration,
+    ReviewCheckpoint,
     WorkItem,
     load_plugin_manifest,
     validate_candidate_evidence_graph_projection,
+    inspect_plugin_lifecycle,
 )
 from tests.helpers.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
 from assayer_frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, ProductFrontendRuntime
@@ -69,6 +72,38 @@ class RecordDecisionProvider:
 
 
 class CrossPluginConformanceTest(unittest.TestCase):
+    def test_generic_lifecycle_gate_accepts_a_registered_plugin(self):
+        from tests.helpers import config_quality_registration
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            registration = config_quality_registration()
+            report = inspect_plugin_lifecycle(
+                registration, {"files": [{"path": str(path)}]}, "CFG-001",
+                PlatformContext("generic-gate", frozenset({"structured_read"})),
+                decision_provider=ConfigurationDecisionProvider(),
+                review_builder=lambda result: result.decisions,
+            )
+            self.assertTrue(report.passed, report.as_dict())
+
+    def test_generic_lifecycle_gate_rejects_overlapping_checkpoint_items(self):
+        from tests.helpers import config_quality_registration
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            checkpoints = (
+                ReviewCheckpoint("cp-1", "item", "CFG-001", "1.0.0", "review", ("a",), {}),
+                ReviewCheckpoint("cp-2", "item", "CFG-001", "1.0.0", "review", ("a",), {}),
+            )
+            report = inspect_plugin_lifecycle(
+                config_quality_registration(), {"files": [{"path": str(path)}]}, "CFG-001",
+                PlatformContext("generic-gate-checkpoint", frozenset({"structured_read"})),
+                decision_provider=ConfigurationDecisionProvider(), checkpoints=checkpoints,
+                expected_checkpoint_items=("a",),
+            )
+            self.assertFalse(report.passed)
+            self.assertIn("DUPLICATE_REVIEW_ITEM", {item.code for item in report.issues})
+
     def test_config_plugin_can_publish_platform_evidence_graph(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"

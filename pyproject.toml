@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "assayer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Protocol and operation core for Assayer Host"
 requires-python = ">=3.11"
 dependencies = ["jsonschema==4.26.0"]
@@ -23,6 +23,7 @@ assayer = "assayer_host.cli:main"
 assayer-plugin-check = "assayer_platform.conformance:main"
 assayer-plugin-package-check = "assayer_platform.package_conformance:main"
 assayer-plugin-install-check = "assayer_platform.installation_conformance:main"
+assayer-plugin-release-check = "assayer_platform.release_conformance:main"
 assayer-plugin-surface-check = "assayer_platform.surface_conformance:main"
 assayer-provider-check = "assayer_platform.provider_conformance:main"
 assayer-provider-package-check = "assayer_platform.provider_package_conformance:main"

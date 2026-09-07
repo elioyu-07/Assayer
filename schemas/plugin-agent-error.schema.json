@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-agent-error.schema.json",
+  "title": "AssayerPluginAgentBoundaryError",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable",
+    "requiredNextStep",
+    "owner",
+    "retryDisposition",
+    "requestId"
+  ],
+  "properties": {
+    "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" },
+    "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "retryable": { "const": false },
+    "requiredNextStep": { "type": "string", "minLength": 1 },
+    "owner": {
+      "enum": ["agent_input", "contract_state", "plugin", "platform"]
+    },
+    "retryDisposition": {
+      "enum": ["agent_correction", "refresh_boundary", "none"]
+    },
+    "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "contractDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "errors": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pointer", "keyword", "message"],
+        "properties": {
+          "pointer": { "type": "string", "pattern": "^/" },
+          "keyword": { "type": "string", "minLength": 1 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "correctionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maximumCorrections",
+        "correctionsUsed",
+        "correctionsRemaining",
+        "exhausted"
+      ],
+      "properties": {
+        "maximumCorrections": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "correctionsUsed": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "correctionsRemaining": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "exhausted": { "type": "boolean" }
+      }
+    },
+    "terminalStatus": { "const": "partial" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "retryDisposition": { "const": "agent_correction" } },
+        "required": ["retryDisposition"]
+      },
+      "then": {
+        "required": ["contractDigest", "errors", "correctionBudget"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "terminalStatus": { "const": "partial" } },
+        "required": ["terminalStatus"]
+      },
+      "then": {
+        "properties": { "retryDisposition": { "const": "none" } }
+      }
+    }
+  ]
+}

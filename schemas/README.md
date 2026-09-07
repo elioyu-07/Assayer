@@ -35,6 +35,7 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
   stable section references, and result-bound delta pages.
 - `plugin-manifest.schema.json`: domain-neutral plugin checks, evidence requirements, capabilities, and performance/recovery constraints.
 - `plugin-conformance.schema.json`: package-time plugin registration results, violated contract identifiers, and required next actions.
+- `plugin-release-acceptance.schema.json`: installed-wheel interactive acceptance evidence for Check coverage, paging, resume, replay, and terminal publication.
 - `plugin-release.schema.json`: static, import-free plugin package layout, registration metadata, policy resources, and deterministic fixture declarations.
 - `plugin-fixture.schema.json`: deterministic package fixture input and expected terminal decision or failure outcomes.
 - `plugin-progress.schema.json`: compact generic phase, waiting ownership, completed and remaining counts, and next-action guidance for interactive plugin Runs.

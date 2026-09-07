@@ -347,12 +347,16 @@ class InteractiveProtocolTest(unittest.TestCase):
         transport.call_tool("finish_plugin_run", {"status": "partial"})
 
     def test_result_pages_require_a_terminal_run(self):
-        transport = InteractivePlatformMcpToolTransport(
-            plugin_registry=PluginRegistry((registration(),)),
-        )
-        with self.assertRaises(HostError) as unavailable:
-            transport.call_tool("get_plugin_result", {"sectionId": "result:missing:0001"})
-        self.assertEqual(unavailable.exception.code, "RESULT_NOT_AVAILABLE")
+        with tempfile.TemporaryDirectory() as directory:
+            transport = InteractivePlatformMcpToolTransport(
+                Path(directory) / "output",
+                plugin_registry=PluginRegistry((registration(),)),
+            )
+            with self.assertRaises(HostError) as unavailable:
+                transport.call_tool(
+                    "get_plugin_result", {"sectionId": "result:missing:0001"},
+                )
+            self.assertEqual(unavailable.exception.code, "RESULT_NOT_AVAILABLE")
 
     def test_two_processes_cannot_resume_the_same_run_concurrently(self):
         registry = PluginRegistry((registration(),))

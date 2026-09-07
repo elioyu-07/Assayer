@@ -96,6 +96,156 @@ def _manifest_payload(manifest: PluginManifest) -> dict[str, Any]:
     }
 
 
+def _schema_refs(value: Any) -> Iterable[str]:
+    if isinstance(value, dict):
+        reference = value.get("$ref")
+        if isinstance(reference, str):
+            yield reference
+        for item in value.values():
+            yield from _schema_refs(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _schema_refs(item)
+
+
+def _inspect_agent_boundary_schema(
+    schema: dict[str, Any], *, label: str,
+) -> list[PluginConformanceIssue]:
+    issues: list[PluginConformanceIssue] = []
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        issues.append(_issue(
+            "PLUGIN_AGENT_CONTRACT_SCHEMA_INVALID",
+            "PDSV1-AGENT-CONTRACT-SCHEMA",
+            f"The {label} is not a valid Draft 2020-12 JSON Schema: {error.message}",
+            "Correct the boundary schema before registering or packaging the plugin.",
+        ))
+        return issues
+    if schema.get("type") != "object":
+        issues.append(_issue(
+            "PLUGIN_AGENT_CONTRACT_SCHEMA_INVALID",
+            "PDSV1-AGENT-CONTRACT-SCHEMA",
+            f"The {label} must explicitly describe a top-level object.",
+            "Set the boundary schema type to object and declare its accepted fields.",
+        ))
+    resolver = RefResolver.from_schema(schema)
+    for reference in sorted(set(_schema_refs(schema))):
+        if not reference.startswith("#"):
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_SCHEMA_REFERENCE_INVALID",
+                "PDSV1-AGENT-CONTRACT-SCHEMA",
+                f"The {label} contains a non-bundled schema reference: {reference}",
+                "Resolve package-local references into the registered bundle and remove remote references.",
+            ))
+            continue
+        try:
+            resolver.resolve(reference)
+        except Exception:
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_SCHEMA_REFERENCE_INVALID",
+                "PDSV1-AGENT-CONTRACT-SCHEMA",
+                f"The {label} contains an unresolved local schema reference: {reference}",
+                "Define the referenced fragment inside the same boundary schema.",
+            ))
+    return issues
+
+
+def _inspect_agent_contracts(registration: Any) -> list[PluginConformanceIssue]:
+    contracts = registration.agent_contracts
+    if not contracts:
+        return []
+    issues: list[PluginConformanceIssue] = []
+    if "interactive" not in registration.execution_modes:
+        issues.append(_issue(
+            "PLUGIN_AGENT_CONTRACT_MODE_INVALID",
+            "PDSV1-AGENT-CONTRACT-BUNDLE",
+            "The registration publishes Agent contracts without interactive execution mode.",
+            "Declare interactive execution mode or remove the Agent contract bundles.",
+        ))
+    if registration.review_payload_schema:
+        issues.append(_issue(
+            "PLUGIN_AGENT_CONTRACT_CONFLICT",
+            "PDSV1-ONE-EXECUTABLE-CONTRACT",
+            "The registration publishes both Agent contract bundles and the legacy review payload schema.",
+            "Remove review_payload_schema after mapping every Check to one AgentContractBundle.",
+        ))
+
+    declared_refs = {check.ref for check in registration.manifest.checks}
+    contract_refs = [contract.check_ref for contract in contracts]
+    seen_refs: set[tuple[str, str]] = set()
+    seen_ids: set[str] = set()
+    bundle_validator = _schema_validator("plugin-agent-contract.schema.json")
+    for contract in contracts:
+        payload = contract.as_dict()
+        envelope_errors = sorted(
+            bundle_validator.iter_errors(payload),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
+        for error in envelope_errors:
+            location = "/".join(str(part) for part in error.absolute_path) or "root"
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_INVALID",
+                "PDSV1-AGENT-CONTRACT-BUNDLE",
+                f"Agent contract {contract.contract_id or '<missing>'} is invalid at {location}: {error.message}",
+                "Correct the versioned Agent contract bundle before registration.",
+            ))
+        if contract.check_ref in seen_refs:
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_DUPLICATE",
+                "PDSV1-AGENT-CONTRACT-COVERAGE",
+                f"More than one Agent contract targets {contract.check_id}@{contract.check_version}.",
+                "Publish exactly one Agent contract bundle per interactive Check.",
+            ))
+        seen_refs.add(contract.check_ref)
+        if contract.contract_id in seen_ids:
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_DUPLICATE",
+                "PDSV1-AGENT-CONTRACT-BUNDLE",
+                f"The Agent contract ID is duplicated: {contract.contract_id}",
+                "Assign one globally namespaced contractId to each Check bundle.",
+            ))
+        seen_ids.add(contract.contract_id)
+        if contract.check_ref not in declared_refs:
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_CHECK_UNKNOWN",
+                "PDSV1-AGENT-CONTRACT-COVERAGE",
+                f"Agent contract references an undeclared Check: {contract.check_id}@{contract.check_version}",
+                "Bind each Agent contract to a Check declared by the plugin manifest.",
+            ))
+        for collection_id, schema in sorted(contract.checkpoint_payload_schemas.items()):
+            issues.extend(_inspect_agent_boundary_schema(
+                schema,
+                label=(
+                    f"checkpoint schema for {contract.check_id}@{contract.check_version} "
+                    f"collection {collection_id}"
+                ),
+            ))
+        if contract.checkpoint_payload_schemas and contract.finalization_schema is None:
+            issues.append(_issue(
+                "PLUGIN_AGENT_CONTRACT_FINALIZATION_MISSING",
+                "PDSV1-AGENT-CONTRACT-FINALIZATION",
+                f"Agent contract {contract.contract_id} has checkpoint schemas but no finalization schema.",
+                "Publish a strict finalization schema for every checkpoint-based interactive Check.",
+            ))
+        if contract.finalization_schema is not None:
+            issues.extend(_inspect_agent_boundary_schema(
+                contract.finalization_schema,
+                label=f"finalization schema for {contract.check_id}@{contract.check_version}",
+            ))
+
+    missing_refs = sorted(declared_refs - set(contract_refs))
+    if missing_refs:
+        issues.append(_issue(
+            "PLUGIN_AGENT_CONTRACT_CHECK_COVERAGE_INCOMPLETE",
+            "PDSV1-AGENT-CONTRACT-COVERAGE",
+            "Agent contracts do not cover declared Checks: "
+            + ", ".join(f"{check_id}@{version}" for check_id, version in missing_refs),
+            "Publish exactly one AgentContractBundle for every Check in the interactive registration.",
+        ))
+    return issues
+
+
 def inspect_plugin_registration(
     registration: Any, *, construct_implementations: bool = False,
 ) -> PluginConformanceReport:
@@ -266,6 +416,8 @@ def inspect_plugin_registration(
                 "Set review_payload_schema.type to object and describe the accepted checkpoint payload.",
             ))
 
+    issues.extend(_inspect_agent_contracts(registration))
+
     profile = manifest.execution_profile
     if profile.failure_splitting == "allowed" and not profile.can_split_failed_inspection:
         issues.append(_issue(
@@ -312,6 +464,126 @@ def require_plugin_registration_conformance(
             f"{first.message} Contract: {first.invariant}. Next action: {first.next_action}",
         )
     return report
+
+
+def inspect_plugin_lifecycle(
+    registration: Any,
+    scope: Any,
+    check_id: str,
+    context: Any,
+    *,
+    check_version: str | None = None,
+    decision_provider: Any = None,
+    committer: Any = None,
+    checkpoints: Iterable[Any] | None = None,
+    expected_checkpoint_items: Iterable[str] | None = None,
+    review_builder: Any = None,
+) -> PluginConformanceReport:
+    """Run the domain-neutral plugin lifecycle gate.
+
+    This deliberately validates only platform invariants.  Domain semantics
+    remain owned by the plugin's own tests and schemas.
+    """
+    base = inspect_plugin_registration(registration, construct_implementations=True)
+    if not base.passed:
+        return base
+    from .kernel import PlatformKernel
+    from .plugin_registry import PluginRegistry
+    from .result_conformance import inspect_result_conformance
+
+    registry = PluginRegistry((registration,))
+    scope_error = next(Draft202012Validator(dict(registration.scope_schema)).iter_errors(scope), None)
+    if scope_error is not None:
+        return PluginConformanceReport(registration.manifest.plugin_id, (_issue(
+            "INVALID_SCOPE",
+            "PCV1-LIFECYCLE-SCOPE",
+            f"The lifecycle fixture does not satisfy the registered scope schema: {scope_error.message}",
+            "Provide a valid business scope fixture for the plugin lifecycle gate.",
+        ),))
+    kernel = PlatformKernel()
+    result = kernel.run_registered(
+        registry, scope, check_id, context, plugin_id=registration.manifest.plugin_id,
+        check_version=check_version, decision_provider=decision_provider,
+        committer=committer,
+    )
+    result_report = inspect_result_conformance(result)
+    issues = list(base.issues)
+    if review_builder is not None:
+        if not callable(review_builder):
+            issues.append(_issue(
+                "INVALID_REVIEW_BUILDER", "PCV1-LIFECYCLE-REVIEW",
+                "The lifecycle review_builder is not callable.",
+                "Provide a callable that returns the assembled platform decisions.",
+            ))
+        else:
+            try:
+                assembled = tuple(review_builder(result))
+            except Exception as error:
+                issues.append(_issue(
+                    "REVIEW_ASSEMBLY_FAILED", "PCV1-LIFECYCLE-REVIEW",
+                    f"The review builder failed for the terminal result: {error}",
+                    "Make review assembly deterministic and return platform DecisionProposal objects.",
+                ))
+            else:
+                if assembled != tuple(result.decisions):
+                    issues.append(_issue(
+                        "REVIEW_ASSEMBLY_MISMATCH", "PCV1-LIFECYCLE-REVIEW",
+                        "Assembled review decisions differ from decisions committed by the platform run.",
+                        "Commit exactly the decisions produced by the review assembly stage.",
+                    ))
+    replay = kernel.run_registered(
+        registry, scope, check_id, context, plugin_id=registration.manifest.plugin_id,
+        check_version=check_version, decision_provider=decision_provider,
+        committer=committer,
+    )
+    replay_report = inspect_result_conformance(replay)
+    if replay.status != result.status or tuple(replay.failures) != tuple(result.failures):
+        issues.append(_issue(
+            "LIFECYCLE_REPLAY_MISMATCH", "PCV1-LIFECYCLE-REPLAY",
+            "Replaying the same Run input produced a different status or failure set.",
+            "Make discovery, inspection, decision, and commit replay deterministic and idempotent.",
+        ))
+    if len(replay.receipts) != len(result.receipts):
+        issues.append(_issue(
+            "LIFECYCLE_REPLAY_RECEIPT_MISMATCH", "PCV1-LIFECYCLE-REPLAY",
+            "Replaying the same Run input produced a different receipt count.",
+            "Return the original commit receipts for an idempotent replay.",
+        ))
+    issues.extend(_issue(
+        item.code, item.invariant, item.message, item.next_action,
+    ) for item in replay_report.issues)
+    if checkpoints is not None:
+        checkpoint_items = tuple(checkpoints)
+        checkpoint_ids = [getattr(item, "checkpoint_id", None) for item in checkpoint_items]
+        if any(not isinstance(value, str) or not value for value in checkpoint_ids):
+            issues.append(_issue(
+                "INVALID_REVIEW_CHECKPOINT", "PCV1-LIFECYCLE-CHECKPOINT-IDENTITY",
+                "A lifecycle checkpoint is missing its checkpoint identity.",
+                "Construct every checkpoint with a stable non-empty checkpoint_id.",
+            ))
+        if len(checkpoint_ids) != len(set(checkpoint_ids)):
+            issues.append(_issue(
+                "DUPLICATE_REVIEW_CHECKPOINT", "PCV1-LIFECYCLE-CHECKPOINT-IDENTITY",
+                "The lifecycle fixture contains duplicate checkpoint IDs.",
+                "Use one checkpoint identity per persisted checkpoint record.",
+            ))
+        item_ids = [item_id for item in checkpoint_items for item_id in getattr(item, "item_ids", ())]
+        if len(item_ids) != len(set(item_ids)):
+            issues.append(_issue(
+                "DUPLICATE_REVIEW_ITEM", "PCV1-LIFECYCLE-CHECKPOINT-COVERAGE",
+                "Review item IDs are handled more than once across checkpoints.",
+                "Partition checkpoint item IDs without overlap.",
+            ))
+        if expected_checkpoint_items is not None and tuple(item_ids) != tuple(expected_checkpoint_items):
+            issues.append(_issue(
+                "INCOMPLETE_REVIEW_CHECKPOINT", "PCV1-LIFECYCLE-CHECKPOINT-COVERAGE",
+                "Checkpoint item coverage differs from the declared expected item IDs.",
+                "Cover every declared review item exactly once and preserve order.",
+            ))
+    issues.extend(_issue(
+        item.code, item.invariant, item.message, item.next_action,
+    ) for item in result_report.issues)
+    return PluginConformanceReport(registration.manifest.plugin_id, tuple(issues))
 
 
 def inspect_plugin_registrations(
@@ -520,6 +792,19 @@ def inspect_plugin_package(package_root: str | Path) -> PluginConformanceReport:
                 f"The registration module is absent from runtimeSource: {module_name}",
                 "Package the module named by the registration entry point.",
             ))
+        acceptance_spec = descriptor.get("releaseAcceptance")
+        if acceptance_spec:
+            acceptance_module = acceptance_spec.partition(":")[0]
+            acceptance_path = runtime_root.joinpath(*acceptance_module.split("."))
+            if (
+                not acceptance_path.with_suffix(".py").is_file()
+                and not (acceptance_path / "__init__.py").is_file()
+            ):
+                issues.append(_package_issue(
+                    "PLUGIN_RELEASE_ACCEPTANCE_SOURCE_MISSING",
+                    f"The release-acceptance module is absent from runtimeSource: {acceptance_module}",
+                    "Package the module named by releaseAcceptance in the built wheel.",
+                ))
 
     semantic_review = paths["semanticReview"]
     if semantic_review is None or not semantic_review.is_file():
@@ -593,7 +878,8 @@ def inspect_plugin_package(package_root: str | Path) -> PluginConformanceReport:
     else:
         try:
             project = tomllib.loads(metadata.read_text(encoding="utf-8"))["project"]
-            entry_points = project["entry-points"]["assayer.plugins"]
+            entry_point_groups = project["entry-points"]
+            entry_points = entry_point_groups["assayer.plugins"]
             if not isinstance(project, dict) or not isinstance(entry_points, dict):
                 raise TypeError("project and assayer.plugins entry points must be TOML tables")
         except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError, AttributeError) as error:
@@ -625,6 +911,17 @@ def inspect_plugin_package(package_root: str | Path) -> PluginConformanceReport:
                     "PLUGIN_ENTRY_POINT_MISSING",
                     "Python package metadata does not export the declared registration.",
                     "Add the declared registration to the assayer.plugins entry-point group.",
+                ))
+            acceptance_spec = descriptor.get("releaseAcceptance")
+            acceptance_entries = entry_point_groups.get("assayer.release_acceptance", {})
+            if acceptance_spec and (
+                not isinstance(acceptance_entries, dict)
+                or tuple(acceptance_entries.values()).count(acceptance_spec) != 1
+            ):
+                issues.append(_package_issue(
+                    "PLUGIN_RELEASE_ACCEPTANCE_ENTRY_POINT_MISSING",
+                    "Python package metadata does not export the declared release acceptance driver exactly once.",
+                    "Add releaseAcceptance to [project.entry-points.\"assayer.release_acceptance\"].",
                 ))
 
     return PluginConformanceReport(plugin_id, tuple(issues))

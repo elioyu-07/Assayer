@@ -14,6 +14,7 @@ from importlib import metadata
 import inspect
 from typing import Any, Callable, Iterable
 
+from .agent_contract import AgentContractBundle
 from .contract import CheckContract, PlatformContractError, PluginManifest
 
 
@@ -36,6 +37,7 @@ class PluginRegistration:
     execution_modes: frozenset[str] = frozenset({"batch"})
     scope_schema: Mapping[str, Any] = field(default_factory=dict)
     review_payload_schema: Mapping[str, Any] = field(default_factory=dict)
+    agent_contracts: tuple[AgentContractBundle, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
@@ -61,6 +63,18 @@ class PluginRegistration:
                 "INVALID_PLUGIN_REGISTRATION", "Plugin review payload schema must be an object",
             )
         object.__setattr__(self, "review_payload_schema", dict(self.review_payload_schema))
+        try:
+            agent_contracts = tuple(self.agent_contracts)
+        except TypeError as error:
+            raise PlatformContractError(
+                "INVALID_PLUGIN_REGISTRATION", "Plugin Agent contracts must be an array",
+            ) from error
+        if any(not isinstance(item, AgentContractBundle) for item in agent_contracts):
+            raise PlatformContractError(
+                "INVALID_PLUGIN_REGISTRATION",
+                "Every plugin Agent contract must be an AgentContractBundle",
+            )
+        object.__setattr__(self, "agent_contracts", agent_contracts)
 
     @staticmethod
     def _invoke(factory: Callable[..., Any], runtime: Any) -> Any:
@@ -99,6 +113,15 @@ class PluginRegistration:
         if self.committer_factory is None:
             return None
         return self._invoke(self.committer_factory, runtime)
+
+    def agent_contract_for(
+        self, check_ref: tuple[str, str],
+    ) -> AgentContractBundle | None:
+        """Return the executable Agent contract for a Check when declared."""
+        return next(
+            (item for item in self.agent_contracts if item.check_ref == check_ref),
+            None,
+        )
 
 
 class PluginRegistry:

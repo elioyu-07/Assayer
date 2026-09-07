@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 from importlib import metadata
 import json
@@ -22,8 +23,10 @@ from .conformance import (
     PluginConformanceIssue,
     PluginConformanceReport,
     _package_issue,
+    _schema_validator,
     inspect_plugin_package,
     inspect_plugin_registration,
+    inspect_plugin_lifecycle,
 )
 from .contract import (
     CheckContract,
@@ -34,6 +37,7 @@ from .contract import (
     PlatformContractError,
 )
 from .kernel import PlatformKernel
+from .interactive import InteractivePluginController
 from .plugin_registry import PluginRegistration, PluginRegistry
 from .registry import load_plugin_manifest
 from .result_conformance import inspect_result_conformance
@@ -144,6 +148,286 @@ def _entry_point_registration(
     return value, issues
 
 
+def _entry_point_release_acceptance(
+    target: Path, acceptance_spec: str, plugin_version: str,
+) -> tuple[Any | None, list[PluginConformanceIssue]]:
+    candidates = [
+        entry
+        for distribution in metadata.distributions(path=[str(target)])
+        for entry in distribution.entry_points
+        if entry.group == "assayer.release_acceptance"
+    ]
+    if len(candidates) != 1 or candidates[0].value != acceptance_spec:
+        return None, [_package_issue(
+            "PLUGIN_INSTALLED_RELEASE_ACCEPTANCE_INVALID",
+            f"Expected one installed assayer.release_acceptance entry point for {acceptance_spec}; found {len(candidates)} total.",
+            "Publish exactly one matching release-acceptance entry point in the wheel.",
+        )]
+    if candidates[0].dist is None or candidates[0].dist.version != plugin_version:
+        return None, [_package_issue(
+            "PLUGIN_INSTALLED_RELEASE_ACCEPTANCE_VERSION_MISMATCH",
+            "The installed release-acceptance driver belongs to a different distribution version.",
+            "Publish the acceptance driver in the same wheel as the plugin registration.",
+        )]
+    module_name = acceptance_spec.partition(":")[0]
+    spec = importlib.util.find_spec(module_name)
+    origin = Path(spec.origin).resolve() if spec and spec.origin else None
+    try:
+        if origin is None:
+            raise ValueError("module origin is unavailable")
+        origin.relative_to(target)
+    except ValueError:
+        return None, [_package_issue(
+            "PLUGIN_INSTALLED_RELEASE_ACCEPTANCE_SOURCE_MISMATCH",
+            "The release-acceptance module did not resolve from the isolated wheel target.",
+            "Package the declared acceptance module in the same wheel as the plugin.",
+        )]
+    try:
+        value = candidates[0].load()
+    except Exception as error:
+        return None, [_package_issue(
+            "PLUGIN_INSTALLED_RELEASE_ACCEPTANCE_LOAD_FAILED",
+            f"The installed release-acceptance driver could not be loaded: {error}",
+            "Fix the packaged acceptance driver imports before publication.",
+        )]
+    if not callable(value):
+        return None, [_package_issue(
+            "PLUGIN_INSTALLED_RELEASE_ACCEPTANCE_INVALID",
+            "The installed release-acceptance entry point is not callable.",
+            "Export a callable release-acceptance driver.",
+        )]
+    return value, []
+
+
+class _ReleaseAcceptanceTransport:
+    """Small platform-only adapter used by installed release fixtures."""
+
+    def __init__(
+        self, root: Path, registry: PluginRegistry, tracker: dict[str, Any],
+    ) -> None:
+        self._controller = InteractivePluginController(registry, root)
+        self._active_run_id: str | None = None
+        self._terminal_run_id = self._controller.terminal_run_id
+        self._tracker = tracker
+
+    @staticmethod
+    def _response(result: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "structuredContent": {"status": "ok", "result": result},
+            "content": [{"type": "text", "text": json.dumps(result, sort_keys=True)}],
+            "isError": False,
+        }
+
+    def call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if name == "start_plugin_run":
+            if self._active_run_id is not None:
+                raise PlatformContractError("RUN_CONFLICT", "A release acceptance Run is already active")
+            result = self._controller.start(
+                plugin_id=str(arguments["pluginId"]),
+                check_id=str(arguments["checkId"]),
+                check_version=arguments.get("checkVersion"),
+                scope=arguments["scope"],
+            )
+            self._active_run_id = result["runId"]
+            self._terminal_run_id = None
+        elif name == "resume_plugin_run":
+            result = self._controller.resume(str(arguments["runId"]))
+            self._tracker["resumed"].add(result["runId"])
+            if result.get("status") in {"completed", "partial", "failed"}:
+                self._terminal_run_id = result["runId"]
+            else:
+                self._active_run_id = result["runId"]
+                self._terminal_run_id = None
+        elif name == "advance_plugin_run":
+            if self._active_run_id is None:
+                if self._terminal_run_id is None:
+                    raise PlatformContractError("RUN_NOT_STARTED", "No release acceptance Run is active")
+                if any(key in arguments for key in ("reviewCheckpoint", "decision", "closeout")):
+                    raise PlatformContractError("RUN_TERMINAL", "The release acceptance Run is terminal")
+                result = self._controller.terminal_status(self._terminal_run_id)
+                self._tracker["replayed"].add(self._terminal_run_id)
+            else:
+                result = self._controller.advance(
+                    self._active_run_id,
+                    review_checkpoint=arguments.get("reviewCheckpoint"),
+                    decision=arguments.get("decision"),
+                    closeout=arguments.get("closeout"),
+                    page_size=arguments.get("pageSize"),
+                )
+                if result.get("status") in {"completed", "partial", "failed"}:
+                    self._terminal_run_id = result["runId"]
+                    self._active_run_id = None
+        elif name == "expand_evidence_collection":
+            if self._active_run_id is None:
+                raise PlatformContractError("RUN_NOT_STARTED", "No release acceptance Run is active")
+            result = self._controller.expand_evidence_collection(
+                self._active_run_id,
+                str(arguments["workItemId"]),
+                str(arguments["collectionId"]),
+                cursor=arguments.get("cursor"),
+                page_size=arguments.get("pageSize"),
+                group_key=arguments.get("groupKey"),
+            )
+        elif name == "get_plugin_result":
+            if self._terminal_run_id is None:
+                raise PlatformContractError("RESULT_NOT_AVAILABLE", "No terminal release result is available")
+            result = self._controller.get_result(
+                self._terminal_run_id,
+                str(arguments["sectionId"]),
+                cursor=arguments.get("cursor"),
+                page_size=arguments.get("pageSize"),
+            )
+            self._tracker["resultPaged"].add(self._terminal_run_id)
+        else:
+            raise PlatformContractError(
+                "UNKNOWN_RELEASE_ACCEPTANCE_OPERATION",
+                f"Release acceptance cannot invoke {name}",
+            )
+        return self._response(result)
+
+    def close(self) -> None:
+        self._controller.close()
+        self._active_run_id = None
+
+
+def _run_release_acceptance(
+    registration: PluginRegistration, descriptor: Mapping[str, Any], target: Path,
+    output_root: Path,
+) -> list[PluginConformanceIssue]:
+    acceptance_spec = descriptor.get("releaseAcceptance")
+    if not acceptance_spec:
+        return [_fixture_issue(
+            "PLUGIN_INTERACTIVE_RELEASE_ACCEPTANCE_MISSING",
+            "An interactive plugin with Agent contracts does not declare releaseAcceptance.",
+            "Publish an installed acceptance driver that completes paging, finalization, resume, replay, and terminal publication.",
+        )]
+    driver, issues = _entry_point_release_acceptance(
+        target, acceptance_spec, descriptor["pluginVersion"],
+    )
+    if issues or driver is None:
+        return issues
+    output_root.mkdir(parents=True, exist_ok=True)
+    try:
+        registry = PluginRegistry((registration,))
+        tracker: dict[str, Any] = {
+            "resumed": set(), "replayed": set(), "resultPaged": set(),
+        }
+        result = driver(
+            registration=registration,
+            output_root=output_root,
+            transport_factory=lambda root: _ReleaseAcceptanceTransport(
+                root, registry, tracker,
+            ),
+        )
+    except Exception as error:
+        return [_fixture_issue(
+            "PLUGIN_RELEASE_ACCEPTANCE_EXECUTION_FAILED",
+            f"The installed release-acceptance driver failed: {error}",
+            "Make the installed acceptance journey deterministic and satisfy every strict lifecycle assertion.",
+        )]
+    errors = sorted(
+        _schema_validator("plugin-release-acceptance.schema.json").iter_errors(result),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if errors:
+        location = "/".join(str(part) for part in errors[0].absolute_path) or "root"
+        return [_fixture_issue(
+            "PLUGIN_RELEASE_ACCEPTANCE_RESULT_INVALID",
+            f"The release-acceptance result is invalid at {location}: {errors[0].message}",
+            "Return the frozen plugin-release-acceptance result contract.",
+        )]
+
+    expected = {contract.check_ref: contract for contract in registration.agent_contracts}
+    actual = {
+        (item["checkId"], item["checkVersion"]): item
+        for item in result["checks"]
+    }
+    if set(actual) != set(expected) or len(actual) != len(result["checks"]):
+        return [_fixture_issue(
+            "PLUGIN_RELEASE_ACCEPTANCE_COVERAGE_INCOMPLETE",
+            "The release-acceptance result does not cover every Agent contract exactly once.",
+            "Return one acceptance record for every interactive Check and contract version.",
+        )]
+    ledger_validator = _schema_validator("platform-ledger.schema.json")
+    for check_ref, contract in expected.items():
+        item = actual[check_ref]
+        declared_collections = set(contract.checkpoint_payload_schemas)
+        if set(item["reviewedCollections"]) != declared_collections:
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_COLLECTION_COVERAGE_INCOMPLETE",
+                f"Acceptance coverage for {check_ref[0]}@{check_ref[1]} differs from its declared checkpoint collections.",
+                "Drive at least one page for every declared checkpoint collection.",
+            )]
+        ledger_collections: set[str] = set()
+        ledger_run_ids: set[str] = set()
+        checkpoint_pages = 0
+        for relative in item["ledgerPaths"]:
+            ledger_path = (output_root / relative).resolve()
+            try:
+                ledger_path.relative_to(output_root)
+                ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            except (ValueError, OSError, UnicodeError, json.JSONDecodeError) as error:
+                return [_fixture_issue(
+                    "PLUGIN_RELEASE_ACCEPTANCE_LEDGER_INVALID",
+                    f"An acceptance ledger is unavailable or unsafe: {error}",
+                    "Return only relative ledger paths created inside the assigned output root.",
+                )]
+            ledger_error = next(ledger_validator.iter_errors(ledger), None)
+            if ledger_error is not None or ledger.get("status") != "completed":
+                return [_fixture_issue(
+                    "PLUGIN_RELEASE_ACCEPTANCE_LEDGER_INVALID",
+                    "An acceptance ledger is malformed or is not terminal completed.",
+                    "Complete and validate every acceptance Run ledger before returning.",
+                )]
+            if (
+                ledger["run"]["plugin_id"] != registration.manifest.plugin_id
+                or (ledger["run"]["check_id"], ledger["run"]["check_version"]) != check_ref
+            ):
+                return [_fixture_issue(
+                    "PLUGIN_RELEASE_ACCEPTANCE_LEDGER_IDENTITY_MISMATCH",
+                    "An acceptance ledger belongs to a different plugin or Check.",
+                    "Return ledgers produced by the installed plugin and declared Check.",
+                )]
+            ledger_run_ids.add(ledger["run"]["run_id"])
+            checkpoint_pages += len(ledger.get("review_checkpoints", ()))
+            ledger_collections.update(
+                checkpoint.get("collection_id")
+                for checkpoint in ledger.get("review_checkpoints", ())
+                if isinstance(checkpoint, dict) and isinstance(checkpoint.get("collection_id"), str)
+            )
+        if not declared_collections.issubset(ledger_collections):
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_LEDGER_COVERAGE_INCOMPLETE",
+                "Durable acceptance ledgers do not contain every declared checkpoint collection.",
+                "Persist at least one validated checkpoint for every declared collection.",
+            )]
+        if len(ledger_run_ids) != item["completedRuns"] or checkpoint_pages != item["checkpointPages"]:
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
+                "Declared completed Run or checkpoint-page counts differ from the durable ledgers.",
+                "Derive acceptance metrics from the exact ledger paths returned to the platform.",
+            )]
+        if not ledger_run_ids.intersection(tracker["resumed"]):
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_RESUME_UNPROVEN",
+                "The platform-owned acceptance transport did not observe a resumed Run for this Check.",
+                "Close and explicitly resume at least one running acceptance Run.",
+            )]
+        if not ledger_run_ids.issubset(tracker["replayed"]):
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_REPLAY_UNPROVEN",
+                "The platform-owned acceptance transport did not observe terminal replay for every Run.",
+                "Replay each terminal result through the platform-owned transport.",
+            )]
+        if not ledger_run_ids.issubset(tracker["resultPaged"]):
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_PUBLICATION_UNPROVEN",
+                "The platform-owned acceptance transport did not page every terminal result.",
+                "Read a bounded result page from every published terminal Run.",
+            )]
+    return []
+
+
 def _run_fixture(
     registration: PluginRegistration,
     fixture: Mapping[str, Any],
@@ -180,6 +464,19 @@ def _run_fixture(
             "PLUGIN_FIXTURE_EXECUTION_FAILED",
             f"Fixture {fixture_id} raised outside the platform result contract: {error}",
             "Make fixture execution return a deterministic platform result.",
+        )]
+
+    lifecycle = inspect_plugin_lifecycle(
+        registration, scope, check_id,
+        PlatformContext(f"conformance:{fixture_id}", registration.capabilities),
+        decision_provider=provider,
+    )
+    if not lifecycle.passed:
+        first = lifecycle.issues[0]
+        return [_fixture_issue(
+            "PLUGIN_FIXTURE_LIFECYCLE_FAILED",
+            f"Fixture {fixture_id} violated {first.invariant}: {first.message}",
+            first.next_action,
         )]
 
     conformance = inspect_result_conformance(result)
@@ -243,6 +540,52 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 "The installed registration scope schema differs from the packaged scope schema.",
                 "Publish the same business-input schema in the descriptor and registration.",
             ))
+        semantic_review_path = package_root / descriptor["semanticReview"]
+        try:
+            expected_semantic_digest = hashlib.sha256(
+                semantic_review_path.read_bytes()
+            ).hexdigest()
+        except OSError as error:
+            issues.append(_package_issue(
+                "PLUGIN_SEMANTIC_INSTRUCTIONS_UNAVAILABLE",
+                f"The validated semantic instructions could not be read: {error}",
+                "Keep the validated semantic instructions available to the isolated release worker.",
+            ))
+        else:
+            for contract in registration.agent_contracts:
+                installed_semantic_path = (target / contract.semantic_instructions_path).resolve()
+                try:
+                    installed_semantic_path.relative_to(target)
+                except ValueError:
+                    issues.append(_package_issue(
+                        "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_PATH_UNSAFE",
+                        "The installed Agent contract semantic-instructions path escapes the isolated target.",
+                        "Publish a package-relative semanticInstructions.path inside the wheel.",
+                    ))
+                    continue
+                try:
+                    installed_semantic_digest = hashlib.sha256(
+                        installed_semantic_path.read_bytes()
+                    ).hexdigest()
+                except OSError:
+                    issues.append(_package_issue(
+                        "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_MISSING",
+                        "The wheel does not contain the Agent contract semantic-instructions file.",
+                        "Include semanticInstructions.path in the built wheel package data.",
+                    ))
+                    continue
+                if contract.semantic_instructions_sha256 != installed_semantic_digest:
+                    issues.append(_package_issue(
+                        "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_DIGEST_MISMATCH",
+                        "The installed semantic-instructions bytes do not match the registered Agent contract digest.",
+                        "Generate the digest from the exact semantic-instructions file included in the wheel.",
+                    ))
+                if expected_semantic_digest != installed_semantic_digest:
+                    issues.append(_package_issue(
+                        "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_MISMATCH",
+                        "The installed semantic-instructions bytes differ from the statically validated release resource.",
+                        "Build the wheel from the same reviewed semantic-instructions resource.",
+                    ))
         review_payload_path = descriptor.get("reviewPayloadSchema")
         if review_payload_path:
             review_payload_schema = json.loads(
@@ -254,6 +597,10 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                     "The installed registration review payload schema differs from the packaged review payload schema.",
                     "Publish the same checkpoint payload schema in the descriptor and registration.",
                 ))
+        if not issues and registration.agent_contracts:
+            issues.extend(_run_release_acceptance(
+                registration, descriptor, target, result_path.parent / "acceptance",
+            ))
         if not issues:
             for relative in descriptor["fixtures"]:
                 fixture = json.loads((package_root / relative).read_text(encoding="utf-8"))
@@ -286,13 +633,26 @@ def _cleanup_build_artifacts(root: Path) -> None:
 
 def inspect_plugin_installation(
     package_root: str | Path, *, python: str = sys.executable,
+    package_source: str | Path | None = None,
     install_timeout_seconds: int = 120,
     fixture_timeout_seconds: int = 300,
 ) -> PluginConformanceReport:
     """Install a statically valid package in a temporary target and run fixtures."""
     root = Path(package_root).expanduser().resolve()
-    _cleanup_build_artifacts(root)
-    static_report = inspect_plugin_package(root)
+    wheel = root if root.suffix == ".whl" else None
+    source = (
+        Path(package_source).expanduser().resolve()
+        if package_source is not None
+        else (root if wheel is None else None)
+    )
+    if source is None:
+        return PluginConformanceReport(root.name, (_package_issue(
+            "PLUGIN_WHEEL_SOURCE_REQUIRED",
+            "A wheel installation check requires its statically validated release source.",
+            "Use assayer-plugin-release-check on the source root, or pass package_source with the wheel.",
+        ),))
+    _cleanup_build_artifacts(source)
+    static_report = inspect_plugin_package(source)
     if not static_report.passed:
         return static_report
     with tempfile.TemporaryDirectory(prefix="assayer-plugin-install-check-") as directory:
@@ -321,7 +681,7 @@ def inspect_plugin_installation(
             command = [
                 python, "-m", "pip", "install", "--disable-pip-version-check",
                 "--isolated", "--no-input", "--no-deps", "--no-index",
-                "--no-build-isolation", "--target", str(target), str(root),
+                "--no-build-isolation", "--target", str(target), str(wheel or source),
             ]
         else:
             version_probe = subprocess.run(
@@ -348,7 +708,7 @@ def inspect_plugin_installation(
                 command = [
                     external_pip, "install", "--disable-pip-version-check",
                     "--isolated", "--no-input", "--no-deps", "--no-index",
-                    "--no-build-isolation", "--target", str(target), str(root),
+                    "--no-build-isolation", "--target", str(target), str(wheel or source),
                 ]
             else:
                 uv = shutil.which("uv")
@@ -356,7 +716,7 @@ def inspect_plugin_installation(
                     command = [
                         uv, "pip", "install", "--python", python,
                         "--no-python-downloads", "--no-deps", "--no-index",
-                        "--no-build-isolation", "--target", str(target), str(root),
+                        "--no-build-isolation", "--target", str(target), str(wheel or source),
                     ]
                 else:
                     return PluginConformanceReport(static_report.plugin_id, (_package_issue(
@@ -390,19 +750,19 @@ def inspect_plugin_installation(
                     "Fix package build metadata and declared dependencies before publication.",
                 ),))
         finally:
-            _cleanup_build_artifacts(root)
+            _cleanup_build_artifacts(source)
         try:
             worker = subprocess.run(
                 [
                     python, "-m", "assayer_platform.installation_conformance",
                     "--worker-target", str(target),
-                    "--worker-package", str(root),
+                    "--worker-package", str(source),
                     "--worker-result", str(result_path),
                 ],
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                cwd=root,
+                cwd=source,
                 env=isolated_env,
                 timeout=max(1, fixture_timeout_seconds),
                 check=False,
@@ -423,8 +783,6 @@ def inspect_plugin_installation(
             ),))
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         try:
-            from .conformance import _schema_validator
-
             _schema_validator("plugin-conformance.schema.json").validate({
                 "schemaVersion": "1.0.0",
                 "status": "passed" if not payload["issues"] else "failed",

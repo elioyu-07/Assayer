@@ -281,6 +281,14 @@ class PluginLifecycleManager:
                 "PLUGIN_CONFLICT",
                 f"Plugin is already installed: {plugin_id}",
             )
+        if entry is not None:
+            active = self._store.active_version(entry)
+            if active is not None and _version_key(version) < _version_key(active):
+                raise PlatformContractError(
+                    "PLUGIN_DOWNGRADE_REQUIRED",
+                    f"Repair target version {version} is older than the recorded active "
+                    f"version {active}; publish or select version {active} or newer.",
+                )
         staged = self._stage(plugin_id, version, root)
         if not staged["passed"]:
             self._quarantine(index, plugin_id, staged["reason"])

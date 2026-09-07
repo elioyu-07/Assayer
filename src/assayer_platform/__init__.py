@@ -1,5 +1,11 @@
 """Domain-neutral contracts and execution kernel for Assayer plugins."""
 
+from .agent_contract import (
+    AGENT_CONTRACT_CANONICALIZATION_VERSION,
+    AGENT_CONTRACT_SCHEMA_DIALECT,
+    AgentContractBundle,
+)
+
 from .contract import (
     Artifact,
     CapabilityProfile,
@@ -98,6 +104,7 @@ from .conformance import (
     PluginConformanceReport,
     inspect_plugin_registration,
     inspect_plugin_registrations,
+    inspect_plugin_lifecycle,
     inspect_plugin_package,
     require_plugin_registration_conformance,
 )
@@ -129,6 +136,9 @@ from .source_chunking import SOURCE_CHUNK_LIMIT, build_source_chunks, source_ref
 from .source_fact_index import build_source_fact_index
 
 __all__ = [
+    "AGENT_CONTRACT_CANONICALIZATION_VERSION",
+    "AGENT_CONTRACT_SCHEMA_DIALECT",
+    "AgentContractBundle",
     "Artifact",
     "ArtifactPublisher",
     "CapabilityProfile",
@@ -226,6 +236,7 @@ __all__ = [
     "PluginConformanceReport",
     "inspect_plugin_registration",
     "inspect_plugin_registrations",
+    "inspect_plugin_lifecycle",
     "inspect_plugin_package",
     "require_plugin_registration_conformance",
     "PlatformRunner",

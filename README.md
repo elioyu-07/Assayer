@@ -259,6 +259,18 @@ assayer-plugin-package-check ./my-plugin-release
 assayer-plugin-install-check ./my-plugin-release
 ```
 
+The publication gate must receive the exact wheel selected for release:
+
+```bash
+python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist ./my-plugin-release
+assayer-plugin-release-check --source ./my-plugin-release dist/*.whl
+```
+
+Strict interactive plugins additionally export one
+`assayer.release_acceptance` entry point. The installed journey must cover all
+declared checkpoint collections, finalization, resume, replay, terminal result
+publication, and durable ledgers without Agent retries.
+
 Capability providers have an independent contract and equivalent gates:
 
 ```bash
@@ -314,6 +326,9 @@ scripts/                Test, release, resilience, and language-governance tooli
   laws and ownership
 - [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — plugin behavior and
   lifecycle contract
+- [Plugin Development Standard v1](docs/plugin-development-standard-v1.md) —
+  executable Agent contracts, fail-fast validation, retry boundaries, and
+  release gates
 - [Capability Provider Contract v1](docs/capability-provider-contract-v1.md) —
   controlled runtime capability contract
 - [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md) —

@@ -12,10 +12,11 @@ the newly public symbol.
 
 from __future__ import annotations
 
-PUBLIC_SURFACE_VERSION = "1.0.0"
+PUBLIC_SURFACE_VERSION = "1.1.0"
 
 PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     "assayer_platform": frozenset({
+        "AgentContractBundle",
         "PluginRegistration",
         "PlatformContext",
     }),
@@ -25,6 +26,7 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
         "DecisionProposal",
         "DimensionObservation",
         "EvidenceRecord",
+        "Finding",
         "InvestigationPacket",
         "PlatformContext",
         "PlatformContractError",

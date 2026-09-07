@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-agent-contract.schema.json",
+  "title": "AssayerPluginAgentContractBundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractId",
+    "contractVersion",
+    "checkId",
+    "checkVersion",
+    "schemaDialect",
+    "checkpointPayloadSchemas",
+    "finalizationSchema",
+    "semanticInstructions"
+  ],
+  "properties": {
+    "contractId": { "$ref": "common.schema.json#/$defs/entityId" },
+    "contractVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "checkId": { "type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,63}$" },
+    "checkVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "schemaDialect": { "const": "https://json-schema.org/draft/2020-12/schema" },
+    "checkpointPayloadSchemas": {
+      "type": "object",
+      "propertyNames": { "$ref": "common.schema.json#/$defs/entityId" },
+      "additionalProperties": { "type": "object" }
+    },
+    "finalizationSchema": {
+      "oneOf": [
+        { "type": "object" },
+        { "type": "null" }
+      ]
+    },
+    "semanticInstructions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+        },
+        "sha256": { "$ref": "common.schema.json#/$defs/sha256" }
+      }
+    },
+    "contractDigest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    }
+  }
+}

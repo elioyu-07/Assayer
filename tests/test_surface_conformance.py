@@ -17,7 +17,7 @@ from assayer_platform.surface_conformance import inspect_plugin_surface
 
 class PublicSurfaceTests(unittest.TestCase):
     def test_surface_is_versioned(self) -> None:
-        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.0.0")
+        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.1.0")
 
     def test_every_symbol_resolves_in_its_module(self) -> None:
         for module_name, names in PUBLIC_SURFACE.items():
@@ -29,6 +29,7 @@ class PublicSurfaceTests(unittest.TestCase):
                 )
 
     def test_top_level_registration_and_context_are_public(self) -> None:
+        self.assertIn("AgentContractBundle", public_symbols("assayer_platform"))
         self.assertIn("PluginRegistration", public_symbols("assayer_platform"))
         self.assertIn("PlatformContext", public_symbols("assayer_platform"))
 

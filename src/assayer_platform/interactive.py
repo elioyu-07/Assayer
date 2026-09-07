@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from jsonschema import Draft202012Validator
 
+from .agent_contract import AgentContractBundle
 from .contract import (
     CommitReceipt,
     DecisionProposal,
@@ -40,12 +41,16 @@ from .canonical_result import validate_canonical_result
 from .actionable_result import extract_result_delivery
 from .evidence_graph import validate_candidate_evidence_graph_projection
 from .evidence_collection import EvidenceCollectionPager
+from .error_policy import (
+    DEFAULT_AGENT_CORRECTION_BUDGET,
+    boundary_error_policy,
+)
 from .ledger import JsonPlatformLedgerStore, workflow_progress
 from .ownership import RunOwnership
 from .session import InteractivePlatformRun, InteractivePlatformSession
 
 
-INTERACTIVE_PROTOCOL_VERSION = "1.0"
+INTERACTIVE_PROTOCOL_VERSION = "1.2"
 INTERACTIVE_OPERATIONS = (
     "start",
     "resume",
@@ -64,6 +69,66 @@ _LOG = logging.getLogger(__name__)
 
 DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE = 20
 MAX_EVIDENCE_COLLECTION_PAGE_SIZE = 100
+
+INTERACTIVE_CHECKPOINT_INPUT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["workItemId", "collectionId", "itemIds", "payload"],
+    "properties": {
+        "workItemId": {"type": "string", "minLength": 1},
+        "collectionId": {"type": "string", "minLength": 1},
+        "itemIds": {
+            "type": "array", "minItems": 1,
+            "maxItems": MAX_EVIDENCE_COLLECTION_PAGE_SIZE, "uniqueItems": True,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "payload": {"type": "object"},
+        "supersedesCheckpointId": {"type": "string", "minLength": 1},
+        "contractDigest": {
+            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
+        },
+    },
+}
+
+INTERACTIVE_DECISION_INPUT_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["workItemId", "result", "findings", "reason"],
+    "properties": {
+        "workItemId": {"type": "string", "minLength": 1},
+        "result": {
+            "enum": [
+                "issue_found", "scanned_no_issue", "not_applicable",
+                "needs_review", "noise",
+            ],
+        },
+        "reason": {"type": "string", "minLength": 1},
+        "findings": {
+            "type": "array", "minItems": 1,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["dimension", "status", "reason"],
+                "properties": {
+                    "dimension": {"type": "string", "minLength": 1},
+                    "status": {
+                        "enum": [
+                            "satisfied", "violated", "unresolved", "blocked",
+                            "conflicted",
+                        ],
+                    },
+                    "reason": {"type": "string", "minLength": 1},
+                },
+            },
+        },
+        "details": {"type": "object"},
+        "reviewCheckpointIds": {
+            "type": "array", "minItems": 1, "uniqueItems": True,
+            "items": {"type": "string", "minLength": 1},
+        },
+        "finalization": {"type": "object"},
+        "contractDigest": {
+            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
+        },
+    },
+}
 
 
 def _finding(value: Mapping[str, Any]) -> Finding:
@@ -91,6 +156,73 @@ def _plugin_identity(registration: PluginRegistration) -> dict[str, Any]:
         "version": manifest.version,
         "platformApiVersion": manifest.platform_api_version,
     }
+
+
+def _agent_contract_identity(contract: AgentContractBundle) -> dict[str, str]:
+    return {
+        "contractId": contract.contract_id,
+        "contractVersion": contract.contract_version,
+        "contractDigest": contract.contract_digest,
+    }
+
+
+def _agent_contract_task(
+    contract: AgentContractBundle, *, input_kind: str, schema: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        **_agent_contract_identity(contract),
+        "inputKind": input_kind,
+        "schema": _plain(schema),
+    }
+
+
+def _direct_decision_schema() -> dict[str, Any]:
+    """Return the strict schema for a Decision that has no checkpoint assembly."""
+    properties = dict(INTERACTIVE_DECISION_INPUT_SCHEMA["properties"])
+    properties.pop("reviewCheckpointIds", None)
+    properties.pop("finalization", None)
+    return {
+        **INTERACTIVE_DECISION_INPUT_SCHEMA,
+        "required": [
+            *INTERACTIVE_DECISION_INPUT_SCHEMA["required"],
+            "contractDigest",
+        ],
+        "properties": properties,
+    }
+
+
+def _json_pointer(path: Sequence[Any]) -> str:
+    if not path:
+        return ""
+    return "/" + "/".join(
+        str(part).replace("~", "~0").replace("/", "~1") for part in path
+    )
+
+
+def _validate_agent_schema(
+    schema: Mapping[str, Any], value: Any, *, work_item_id: str | None = None,
+) -> None:
+    errors = sorted(
+        Draft202012Validator(dict(schema)).iter_errors(value),
+        key=lambda error: (
+            tuple(str(part) for part in error.absolute_path),
+            tuple(str(part) for part in error.absolute_schema_path),
+            error.message,
+        ),
+    )
+    if not errors:
+        return
+    structured_errors = tuple({
+        "pointer": _json_pointer(tuple(error.absolute_path)) or "/",
+        "keyword": str(error.validator or "schema"),
+        "message": f"Value does not satisfy the declared {error.validator or 'schema'} constraint",
+    } for error in errors[:8])
+    raise PlatformContractError(
+        "AGENT_CONTRACT_INPUT_INVALID",
+        "Agent input does not satisfy the Run-frozen executable contract; correct the reported fields",
+        errors=structured_errors,
+        work_item_id=work_item_id,
+    )
 
 
 def _result_evidence_graphs(investigations: Sequence[InvestigationPacket]) -> list[dict[str, Any]]:
@@ -212,12 +344,31 @@ def _terminal_result_views(
                 "then start a new Run to obtain an evidence-backed decision."
             ),
         })
+    for failure in failures:
+        if failure.work_item_id not in work_item_ids or failure.work_item_id in decided_ids:
+            continue
+        review_items.append({
+            "workItemId": failure.work_item_id,
+            "checkId": failure.check_id,
+            "reason": failure.message,
+            "gaps": {
+                "contractBoundary": {
+                    "status": "blocked",
+                    "reason": failure.message,
+                    "code": failure.code,
+                },
+            },
+            "nextAction": (
+                "Resolve the recorded contract or input blocker, then start a new "
+                "Run for this WorkItem; this Run contains no fabricated Decision."
+            ),
+        })
 
     discovered = len(work_item_ids)
     inspected = len({item.work_item.work_item_id for item in investigations})
     decided = len(decided_ids)
     failure_count = len(failures)
-    needs_review_count = outcome_counts["needs_review"]
+    needs_review_count = len(review_items)
     packet_by_id = {
         item.work_item.work_item_id: item for item in investigations
     }
@@ -593,6 +744,7 @@ class InteractivePluginController:
             check = matches[0]
         else:
             check = self.registry.check(registration, (check_id, check_version))
+        agent_contract = registration.agent_contract_for(check.ref)
         run_id = run_id or f"run-{uuid.uuid4().hex}"
         if run_id in self._runs:
             raise PlatformContractError("RUN_CONFLICT", "An interactive Run with this ID already exists")
@@ -625,6 +777,7 @@ class InteractivePluginController:
             )
             self._runs[run_id] = {
                 "registration": registration,
+                "agent_contract": agent_contract,
                 "scope": scope,
                 "context": context,
                 "plugin": plugin,
@@ -639,10 +792,13 @@ class InteractivePluginController:
             self._runs.pop(run_id, None)
             self._release_ownership(run_id, reason="start_failed")
             raise
-        return self._response(run_id, "started", {
+        result = {
             "plugin": _plugin_identity(registration),
             "check": {"checkId": check.check_id, "version": check.version},
-        })
+        }
+        if agent_contract is not None:
+            result["agentContract"] = _agent_contract_identity(agent_contract)
+        return self._response(run_id, "started", result)
 
     def _terminal_pointer_path(self) -> Path:
         return self.output_root / ".latest-plugin-run.json"
@@ -797,6 +953,9 @@ class InteractivePluginController:
             "checkVersion": self._runs[run_id]["run"].check.version,
             "scope": _plain(scope), "capabilities": sorted(set(capabilities)),
         }
+        agent_contract = self._runs[run_id].get("agent_contract")
+        if agent_contract is not None:
+            descriptor["agentContract"] = _agent_contract_identity(agent_contract)
         run_path = self.output_root / run_id / "platform-resume.json"
         try:
             temporary = run_path.with_name(run_path.name + ".tmp")
@@ -918,6 +1077,19 @@ class InteractivePluginController:
                 raise PlatformContractError(
                     "PLUGIN_IDENTITY_MISMATCH", "The active Run requires a different installed plugin version",
                 )
+            agent_contract = registration.agent_contract_for(
+                (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
+            )
+            frozen_agent_contract = descriptor.get("agentContract")
+            current_agent_contract = (
+                _agent_contract_identity(agent_contract)
+                if agent_contract is not None else None
+            )
+            if frozen_agent_contract != current_agent_contract:
+                raise PlatformContractError(
+                    "AGENT_CONTRACT_STALE",
+                    "The active Run requires a different executable Agent contract",
+                )
             scope = descriptor["scope"]
             resolved_runtime = None
             if self.runtime_resolver is not None:
@@ -948,7 +1120,7 @@ class InteractivePluginController:
             }
             self._runs[run_id] = {
                 "registration": registration, "scope": scope, "context": context,
-                "plugin": plugin, "run": run,
+                "plugin": plugin, "run": run, "agent_contract": agent_contract,
                 "committer": registration.create_committer(resolved_runtime),
                 "evidence_collections": collections,
                 "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
@@ -1189,14 +1361,91 @@ class InteractivePluginController:
             "nextCursor": page["nextCursor"],
         })
 
+    @staticmethod
+    def _require_agent_contract_digest(
+        state: Mapping[str, Any], contract_digest: Any,
+    ) -> AgentContractBundle | None:
+        contract = state.get("agent_contract")
+        if contract is None:
+            return None
+        if contract_digest != contract.contract_digest:
+            raise PlatformContractError(
+                "AGENT_CONTRACT_STALE",
+                "Agent input does not match the Run-frozen executable contract; refresh the semantic boundary",
+            )
+        return contract
+
+    def _validate_checkpoint_contract(
+        self, state: Mapping[str, Any], work_item_id: str, collection_id: str,
+        payload: Mapping[str, Any], contract_digest: Any,
+    ) -> None:
+        contract = self._require_agent_contract_digest(state, contract_digest)
+        if contract is None:
+            return
+        schema = contract.checkpoint_payload_schemas.get(collection_id)
+        if schema is None:
+            collection = state["evidence_collections"].get(work_item_id, {}).get(
+                collection_id,
+            )
+            if collection is not None and collection["reviewRequired"]:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin emitted a review-required collection without a registered checkpoint schema",
+                    work_item_id=work_item_id,
+                )
+            return
+        _validate_agent_schema(schema, payload, work_item_id=work_item_id)
+
+    def _validate_decision_contract(
+        self, state: Mapping[str, Any], value: Mapping[str, Any],
+    ) -> None:
+        contract = self._require_agent_contract_digest(
+            state, value.get("contractDigest"),
+        )
+        if contract is None:
+            return
+
+        work_item_id = value.get("workItemId")
+        collections = state["evidence_collections"].get(work_item_id, {})
+        requires_checkpoint_assembly = any(
+            collection["reviewRequired"] and collection["itemIds"]
+            for collection in collections.values()
+        )
+        if not requires_checkpoint_assembly:
+            _validate_agent_schema(
+                _direct_decision_schema(), value,
+                work_item_id=str(work_item_id) if work_item_id is not None else None,
+            )
+            return
+
+        if contract.finalization_schema is None:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "The plugin requires finalization without a registered finalization schema",
+                work_item_id=str(work_item_id) if work_item_id is not None else None,
+            )
+        if "finalization" not in value:
+            _validate_agent_schema(
+                {"type": "object", "required": ["finalization"]}, value,
+                work_item_id=str(work_item_id) if work_item_id is not None else None,
+            )
+        _validate_agent_schema(
+            contract.finalization_schema, value["finalization"],
+            work_item_id=str(work_item_id) if work_item_id is not None else None,
+        )
+
     def checkpoint_review(
         self, run_id: str, work_item_id: str, collection_id: str,
         item_ids: Sequence[str], payload: Mapping[str, Any],
         supersedes_checkpoint_id: str | None = None,
+        contract_digest: str | None = None,
     ) -> dict[str, Any]:
         """Durably checkpoint opaque semantic review for declared collection items."""
         self._assert_active_owner(run_id)
         state = self._state(run_id)
+        self._validate_checkpoint_contract(
+            state, work_item_id, collection_id, payload, contract_digest,
+        )
         run: InteractivePlatformRun = state["run"]
         collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
         if collection is None:
@@ -1238,6 +1487,12 @@ class InteractivePluginController:
         run.validate_review_checkpoint_record(checkpoint)
         validator = getattr(state["plugin"], "validate_review_checkpoint", None)
         if not callable(validator):
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin does not implement its declared checkpoint validator",
+                    work_item_id=work_item_id,
+                )
             raise PlatformContractError(
                 "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
                 "A plugin that persists semantic review checkpoints must validate them before persistence",
@@ -1257,9 +1512,35 @@ class InteractivePluginController:
                 checkpoint, selected, prior, run.investigations[work_item_id],
                 run.check, state["context"],
             )
-        except PlatformContractError:
+        except PlatformContractError as error:
+            if (
+                state.get("agent_contract") is not None
+                and error.code != "PLUGIN_SEMANTIC_INPUT_INVALID"
+            ):
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin rejected schema-valid checkpoint input outside its declared semantic error contract",
+                    work_item_id=work_item_id,
+                ) from error
             raise
+        except (AssertionError, KeyError, TypeError) as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin failed while validating schema-valid checkpoint input",
+                    work_item_id=work_item_id,
+                ) from error
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
+                "Plugin checkpoint validation failed before persistence",
+            ) from error
         except Exception as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_RUNTIME_FAILURE",
+                    "The plugin failed unexpectedly while validating checkpoint input",
+                    work_item_id=work_item_id,
+                ) from error
             raise PlatformContractError(
                 "REVIEW_CHECKPOINT_VALIDATION_FAILED",
                 "Plugin checkpoint validation failed before persistence",
@@ -1375,6 +1656,20 @@ class InteractivePluginController:
                     }
                     if review_context is not None:
                         task["reviewContext"] = review_context
+                    contract = state.get("agent_contract")
+                    if contract is not None:
+                        schema = contract.checkpoint_payload_schemas.get(
+                            collection["collectionId"],
+                        )
+                        if schema is None:
+                            raise PlatformContractError(
+                                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                                "The plugin emitted a review-required collection without a registered checkpoint schema",
+                                work_item_id=work_item_id,
+                            )
+                        task["agentContract"] = _agent_contract_task(
+                            contract, input_kind="reviewCheckpoint", schema=schema,
+                        )
                     return task
             review_collections = tuple(
                 collection for collection in collections.values()
@@ -1394,8 +1689,22 @@ class InteractivePluginController:
                 }
                 if review_context is not None:
                     task["reviewContext"] = review_context
+                contract = state.get("agent_contract")
+                if contract is not None:
+                    finalization_schema = contract.finalization_schema
+                    if finalization_schema is None:
+                        raise PlatformContractError(
+                            "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                            "The plugin requires finalization without a registered finalization schema",
+                            work_item_id=work_item_id,
+                        )
+                    task["agentContract"] = _agent_contract_task(
+                        contract,
+                        input_kind="finalization",
+                        schema=finalization_schema,
+                    )
                 return task
-            return {
+            task = {
                 "kind": "decide_work_item",
                 "workItemId": work_item_id,
                 "referenceCollectionIndex": reference_collection_index,
@@ -1407,6 +1716,14 @@ class InteractivePluginController:
                 # low-level tool.
                 "investigation": _packet(packet, include_evidence=not bool(collections)),
             }
+            contract = state.get("agent_contract")
+            if contract is not None:
+                task["agentContract"] = _agent_contract_task(
+                    contract,
+                    input_kind="decision",
+                    schema=_direct_decision_schema(),
+                )
+            return task
         return None
 
     def advance(
@@ -1448,6 +1765,7 @@ class InteractivePluginController:
                 tuple(review_checkpoint["itemIds"]),
                 review_checkpoint["payload"],
                 review_checkpoint.get("supersedesCheckpointId"),
+                review_checkpoint.get("contractDigest"),
             )
             accepted_operation_id = checkpoint_response.get("operationId")
             operation_replayed = bool(checkpoint_response.get("replayed"))
@@ -1570,6 +1888,12 @@ class InteractivePluginController:
                 )
         assembler = getattr(state["plugin"], "assemble_review_checkpoints", None)
         if not callable(assembler):
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin does not implement its declared checkpoint assembler",
+                    work_item_id=str(work_item_id),
+                )
             raise PlatformContractError(
                 "REVIEW_CHECKPOINT_UNSUPPORTED", "Plugin does not provide checkpointed decision assembly",
             )
@@ -1578,13 +1902,41 @@ class InteractivePluginController:
                 tuple(checkpoints), dict(finalization), run.investigations[work_item_id],
                 run.check, state["context"],
             )
-        except PlatformContractError:
+        except PlatformContractError as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin rejected schema-valid finalization outside its declared contract",
+                    work_item_id=str(work_item_id),
+                ) from error
             raise
+        except (AssertionError, KeyError, TypeError) as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin failed while assembling schema-valid finalization input",
+                    work_item_id=str(work_item_id),
+                ) from error
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin could not assemble checkpointed review details",
+            ) from error
         except Exception as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_RUNTIME_FAILURE",
+                    "The plugin failed unexpectedly while assembling finalization input",
+                    work_item_id=str(work_item_id),
+                ) from error
             raise PlatformContractError(
                 "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin could not assemble checkpointed review details",
             ) from error
         if not isinstance(details, Mapping):
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin checkpoint assembler returned a value outside its declared runtime contract",
+                    work_item_id=str(work_item_id),
+                )
             raise PlatformContractError(
                 "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin checkpoint assembler must return decision details",
             )
@@ -1598,6 +1950,8 @@ class InteractivePluginController:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         run: InteractivePlatformRun = state["run"]
+        for item in decisions:
+            self._validate_decision_contract(state, item)
         assembled = tuple(self._assemble_checkpointed_decision(state, item) for item in decisions)
         proposals = tuple(_proposal(item, run.check.check_id, run.check.version) for item in assembled)
         receipts: list[CommitReceipt] = []
@@ -1704,14 +2058,222 @@ class InteractivePluginController:
     def record_rejection(
         self, run_id: str, error_code: str, *, work_item_id: str | None = None,
         operation_id: str | None = None, message: str | None = None,
+        details: Mapping[str, object] | None = None,
     ) -> None:
         """Persist a Host-side rejection for the active Run when possible."""
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         state["run"].record_host_rejection(
             error_code, work_item_id=work_item_id,
-            operation_id=operation_id, message=message,
+            operation_id=operation_id, message=message, details=details,
         )
+
+    def uses_agent_contract(self, run_id: str) -> bool:
+        """Return whether the active Run uses the strict executable boundary."""
+        return self._state(run_id).get("agent_contract") is not None
+
+    @staticmethod
+    def _submitted_work_item_id(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
+        value: Any = arguments
+        if tool_name == "advance_plugin_run":
+            value = arguments.get("reviewCheckpoint") or arguments.get("decision")
+        elif tool_name == "submit_decisions":
+            decisions = arguments.get("decisions")
+            value = decisions[0] if isinstance(decisions, (tuple, list)) and decisions else None
+        if isinstance(value, Mapping):
+            work_item_id = value.get("workItemId")
+            if isinstance(work_item_id, str) and work_item_id:
+                return work_item_id
+        return None
+
+    @staticmethod
+    def _boundary_descriptor(
+        state: Mapping[str, Any], work_item_id: str | None,
+        tool_name: str, arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        contract = state.get("agent_contract")
+        descriptor: dict[str, Any] = {
+            "contractDigest": contract.contract_digest if contract is not None else None,
+            "workItemId": work_item_id or "run",
+        }
+        submitted: Any = arguments
+        if tool_name == "advance_plugin_run":
+            submitted = arguments.get("reviewCheckpoint") or arguments.get("decision")
+        if (
+            isinstance(submitted, Mapping)
+            and isinstance(submitted.get("supersedesCheckpointId"), str)
+        ):
+            descriptor.update({
+                "inputKind": "reviewCheckpointCorrection",
+                "collectionId": submitted.get("collectionId"),
+                "supersedesCheckpointId": submitted["supersedesCheckpointId"],
+            })
+            return descriptor
+
+        run: InteractivePlatformRun = state["run"]
+        collections = state.get("evidence_collections", {}).get(work_item_id, {})
+        has_required_collection = False
+        for collection in collections.values():
+            if not collection["reviewRequired"] or not collection["itemIds"]:
+                continue
+            has_required_collection = True
+            reviewed = {
+                item_id
+                for checkpoint in run.effective_review_checkpoints
+                if checkpoint.work_item_id == work_item_id
+                and checkpoint.collection_id == collection["collectionId"]
+                for item_id in checkpoint.item_ids
+            }
+            remaining = sorted(set(collection["itemIds"]) - reviewed)
+            if remaining:
+                descriptor.update({
+                    "inputKind": "reviewCheckpoint",
+                    "collectionId": collection["collectionId"],
+                    "remainingItemsDigest": hashlib.sha256(
+                        "\x1f".join(remaining).encode("utf-8")
+                    ).hexdigest(),
+                })
+                return descriptor
+        descriptor["inputKind"] = (
+            "finalization" if has_required_collection else "decision"
+        )
+        return descriptor
+
+    def handle_boundary_error(
+        self, run_id: str, error: PlatformContractError, *,
+        tool_name: str, arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Classify one rejection, enforce its budget, and terminalize when required."""
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        run: InteractivePlatformRun = state["run"]
+        contract = state.get("agent_contract")
+        policy = boundary_error_policy(error.code)
+        if run.status != "running":
+            return {
+                "code": error.code,
+                "message": error.message,
+                "owner": policy.owner,
+                "retryDisposition": policy.retry_disposition,
+                "requiredNextStep": policy.required_next_step,
+                "requestId": f"request:{uuid.uuid4().hex}",
+                "contractDigest": (
+                    contract.contract_digest if contract is not None else None
+                ),
+                "errors": [dict(item) for item in error.errors],
+                "correctionBudget": None,
+                "terminalStatus": None,
+            }
+        submitted_work_item_id = error.work_item_id or self._submitted_work_item_id(
+            tool_name, arguments,
+        )
+        work_item_id = (
+            submitted_work_item_id
+            if submitted_work_item_id in run.work_items else None
+        )
+        if work_item_id is None:
+            work_item_id = next((
+                item_id for item_id in run.work_items
+                if item_id in run.investigations and item_id not in run.decisions
+            ), None)
+        descriptor = self._boundary_descriptor(
+            state, work_item_id, tool_name, arguments,
+        )
+        boundary_key = "boundary:" + hashlib.sha256(json.dumps(
+            descriptor, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        request_id = f"request:{uuid.uuid4().hex}"
+        request_digest = hashlib.sha256(json.dumps(
+            _plain(arguments), ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        prior_rejections = sum(
+            event.name == "host.request.rejected"
+            and event.details.get("boundaryKey") == boundary_key
+            and event.details.get("retryDisposition") == "agent_correction"
+            for event in run.events
+        )
+        strict_boundary = contract is not None
+        exhausted = (
+            strict_boundary
+            and policy.retry_disposition == "agent_correction"
+            and prior_rejections >= DEFAULT_AGENT_CORRECTION_BUDGET
+        )
+        correction_budget = None
+        if strict_boundary and policy.retry_disposition == "agent_correction":
+            corrections_used = min(
+                prior_rejections, DEFAULT_AGENT_CORRECTION_BUDGET,
+            )
+            correction_budget = {
+                "maximumCorrections": DEFAULT_AGENT_CORRECTION_BUDGET,
+                "correctionsUsed": corrections_used,
+                "correctionsRemaining": max(
+                    DEFAULT_AGENT_CORRECTION_BUDGET - corrections_used, 0,
+                ),
+                "exhausted": exhausted,
+            }
+        elif strict_boundary and policy.terminal_on_rejection:
+            correction_budget = {
+                "maximumCorrections": 0,
+                "correctionsUsed": 0,
+                "correctionsRemaining": 0,
+                "exhausted": True,
+            }
+
+        self.record_rejection(
+            run_id, error.code, work_item_id=work_item_id, message=error.message,
+            details={
+                "owner": policy.owner,
+                "retryDisposition": policy.retry_disposition,
+                "requestId": request_id,
+                "requestDigest": request_digest,
+                "boundaryKey": boundary_key,
+                **({"correctionBudget": correction_budget} if correction_budget else {}),
+            },
+        )
+
+        terminal_status = None
+        outward_code = error.code
+        outward_message = error.message
+        required_next_step = policy.required_next_step
+        retry_disposition = policy.retry_disposition
+        should_terminalize = strict_boundary and (
+            exhausted or policy.terminal_on_rejection
+        )
+        if should_terminalize:
+            if exhausted:
+                outward_code = "AGENT_CORRECTION_BUDGET_EXHAUSTED"
+                outward_message = (
+                    "Agent correction budget was exhausted; the WorkItem was left "
+                    "without a Decision and the Run was closed as partial"
+                )
+            terminal_policy = boundary_error_policy(outward_code)
+            required_next_step = terminal_policy.required_next_step
+            retry_disposition = terminal_policy.retry_disposition
+            failure = {
+                "workItemId": work_item_id or "run",
+                "checkId": run.check.check_id,
+                "code": outward_code,
+                "message": outward_message,
+            }
+            self.finish(
+                run_id, "partial", (failure,), invoke_plugin_hooks=False,
+            )
+            terminal_status = "partial"
+
+        return {
+            "code": outward_code,
+            "message": outward_message,
+            "owner": policy.owner,
+            "retryDisposition": retry_disposition,
+            "requiredNextStep": required_next_step,
+            "requestId": request_id,
+            "contractDigest": (
+                contract.contract_digest if contract is not None else None
+            ),
+            "errors": [dict(item) for item in error.errors],
+            "correctionBudget": correction_budget,
+            "terminalStatus": terminal_status,
+        }
 
     def get_result(
         self, run_id: str, section_id: str, *, cursor: str | None = None,
@@ -1766,7 +2328,11 @@ class InteractivePluginController:
                 "RESULT_PUBLICATION_FAILED", "Complete terminal result could not be durably published",
             ) from error
 
-    def finish(self, run_id: str, status: str, failures: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    def finish(
+        self, run_id: str, status: str,
+        failures: Sequence[Mapping[str, Any]] = (), *,
+        invoke_plugin_hooks: bool = True,
+    ) -> dict[str, Any]:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         typed_failures = tuple(WorkFailure(
@@ -1788,7 +2354,7 @@ class InteractivePluginController:
         }
         published_artifacts: list[str] = []
         finalize = getattr(state["plugin"], "finalize", None)
-        if callable(finalize):
+        if invoke_plugin_hooks and callable(finalize):
             try:
                 paths = finalize(
                     tuple(state["run"].work_items.values()),
@@ -1806,7 +2372,7 @@ class InteractivePluginController:
                 ) from error
         summary: Mapping[str, Any] = {}
         summarize = getattr(state["plugin"], "summarize", None)
-        if callable(summarize):
+        if invoke_plugin_hooks and callable(summarize):
             try:
                 value = summarize(
                     tuple(state["run"].work_items.values()),

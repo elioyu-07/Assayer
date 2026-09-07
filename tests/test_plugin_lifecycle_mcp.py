@@ -37,7 +37,8 @@ def _catalog_plan(**overrides):
     return plan
 
 
-def _catalog_text(*, sha256="a" * 64, wheel="https://example.com/ass-spec-0.9.0.whl"):
+def _catalog_text(*, version="0.9.0", sha256="a" * 64,
+                  wheel="https://example.com/ass-spec-0.9.0.whl"):
     return json.dumps({
         "schemaVersion": "1.0.0",
         "plugins": {
@@ -46,9 +47,9 @@ def _catalog_text(*, sha256="a" * 64, wheel="https://example.com/ass-spec-0.9.0.
                 "name": "ass-spec",
                 "description": "test catalog plugin",
                 "versions": {
-                    "0.9.0": {
+                    version: {
                         "pluginId": "ass-spec",
-                        "version": "0.9.0",
+                        "version": version,
                         "platformApiVersion": "1.0.0",
                         "wheelUrl": wheel,
                         "sha256": sha256,
@@ -148,6 +149,44 @@ class PluginLifecycleMcpTest(unittest.TestCase):
             self.assertEqual(plan["status"], "blocked")
             self.assertEqual(plan["blocker"]["code"], "PLUGIN_CONFLICT")
             self.assertNotIn("token", replan["structuredContent"]["result"])
+
+    def test_plan_install_fails_fast_when_dirty_record_is_newer_than_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store_root = root / "store"
+            store = PluginInstallationStore(store_root)
+            index = store.load()
+            entry = store.upsert(
+                index,
+                "ass-spec",
+                version="1.1.3",
+                package_root="packages/ass-spec/1.1.3",
+                installed_at=1,
+                conformance={},
+            )
+            entry["state"] = "dirty"
+            entry["stateReason"] = "PLUGIN_CHECKSUM_MISMATCH"
+            store.save(index)
+            catalog = root / "catalog.json"
+            catalog.write_text(_catalog_text(version="1.1.0"), encoding="utf-8")
+            transport = PluginLifecycleMcpToolTransport(
+                str(store_root), catalog_index=str(catalog),
+            )
+
+            result = transport.call_tool(
+                "plan_plugin_change", {"operation": "install", "plugin": "ass-spec"},
+            )
+
+            self.assertFalse(result["isError"])
+            payload = result["structuredContent"]["result"]
+            plan = payload["plan"]
+            self.assertEqual(plan["status"], "blocked")
+            self.assertEqual(plan["changeKind"], "repair")
+            self.assertEqual(plan["currentVersion"], "1.1.3")
+            self.assertEqual(plan["targetVersion"], "1.1.0")
+            self.assertEqual(plan["blocker"]["code"], "PLUGIN_DOWNGRADE_REQUIRED")
+            self.assertFalse(plan["requiresConfirmation"])
+            self.assertNotIn("token", payload)
 
     def test_catalog_change_invalidates_plan_token(self):
         with tempfile.TemporaryDirectory() as directory:

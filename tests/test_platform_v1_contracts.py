@@ -14,6 +14,7 @@ SCHEMAS = ROOT / "schemas"
 CONTRACTS = (
     ROOT / "docs/platform-constitution-v1.md",
     ROOT / "docs/plugin-contract-v1.md",
+    ROOT / "docs/plugin-development-standard-v1.md",
     ROOT / "docs/capability-provider-contract-v1.md",
     ROOT / "docs/canonical-result-contract-v1.md",
     ROOT / "docs/platform-contract-traceability-v1.md",
@@ -52,10 +53,12 @@ class PlatformV1ContractTests(unittest.TestCase):
             }],
         })
 
-    def test_frozen_contracts_share_v1_and_have_valid_local_links(self):
+    def test_contract_documents_use_v1_and_have_valid_local_links(self):
         for path in CONTRACTS:
             text = path.read_text(encoding="utf-8")
-            self.assertIn("| Document version | 1.0.0 |", text, path.name)
+            version = re.search(r"\| Document version \| (\d+)\.(\d+)\.(\d+) \|", text)
+            self.assertIsNotNone(version, path.name)
+            self.assertEqual(version.group(1), "1", path.name)
             for target in re.findall(r"\[[^]]+\]\(([^)#]+\.md)(?:#[^)]+)?\)", text):
                 self.assertTrue((path.parent / target).is_file(), f"{path.name}: {target}")
         self.assertEqual(PLATFORM_API_VERSION, "1.0.0")
@@ -63,6 +66,8 @@ class PlatformV1ContractTests(unittest.TestCase):
     def test_generic_schema_vocabulary_has_no_frontend_only_properties(self):
         forbidden = {"pagestate", "dom", "tab", "screenshot", "chromium"}
         files = (
+            "plugin-agent-contract.schema.json",
+            "plugin-agent-error.schema.json",
             "plugin-manifest.schema.json",
             "platform-ledger.schema.json",
             "capability-provider.schema.json",
@@ -87,6 +92,40 @@ class PlatformV1ContractTests(unittest.TestCase):
             schema = json.loads((SCHEMAS / filename).read_text(encoding="utf-8"))
             leaked = forbidden.intersection(name.lower() for name in property_names(schema))
             self.assertFalse(leaked, f"{filename} leaks frontend properties: {sorted(leaked)}")
+
+    def test_agent_boundary_error_schema_requires_non_retryable_structured_policy(self):
+        check = validator("plugin-agent-error.schema.json")
+        check.validate({
+            "code": "AGENT_CONTRACT_INPUT_INVALID",
+            "message": "Correct the reported fields.",
+            "retryable": False,
+            "requiredNextStep": "correct_agent_input",
+            "owner": "agent_input",
+            "retryDisposition": "agent_correction",
+            "requestId": "request:fixture",
+            "contractDigest": "sha256:" + "a" * 64,
+            "errors": [{
+                "pointer": "/payload/status",
+                "keyword": "enum",
+                "message": "Value does not satisfy the declared enum constraint",
+            }],
+            "correctionBudget": {
+                "maximumCorrections": 1,
+                "correctionsUsed": 0,
+                "correctionsRemaining": 1,
+                "exhausted": False,
+            },
+        })
+        invalid = {
+            "code": "PLUGIN_RUNTIME_FAILURE",
+            "message": "Plugin execution failed.",
+            "retryable": True,
+            "requiredNextStep": "retry",
+            "owner": "plugin",
+            "retryDisposition": "none",
+            "requestId": "request:fixture",
+        }
+        self.assertTrue(list(check.iter_errors(invalid)))
 
     def test_canonical_result_accepts_completed_and_rejects_failed_outcomes(self):
         check = validator("canonical-result.schema.json")

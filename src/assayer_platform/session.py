@@ -366,6 +366,7 @@ class InteractivePlatformRun:
     def record_host_rejection(
         self, error_code: str, *, work_item_id: str | None = None,
         operation_id: str | None = None, message: str | None = None,
+        details: Mapping[str, object] | None = None,
     ) -> None:
         """Record a rejected request without changing semantic conclusions."""
         self._require_running()
@@ -374,7 +375,11 @@ class InteractivePlatformRun:
         self._emit(
             "host.request.rejected", "finish", "rejected",
             operation_id=operation_id, work_item_id=work_item_id,
-            details={"errorCode": error_code, **({"message": message} if message else {})},
+            details={
+                "errorCode": error_code,
+                **({"message": message} if message else {}),
+                **dict(details or {}),
+            },
         )
         self._save()
 

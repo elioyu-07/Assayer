@@ -250,6 +250,27 @@ def plan_plugin_change(
                     "PLUGIN_AVAILABLE", "pass",
                     f"Resolved {plugin_id}@{target_version} from the catalog",
                 ))
+        if (
+            status == "ready"
+            and current_state == "dirty"
+            and current_version is not None
+            and target_version is not None
+            and version_key(target_version) < version_key(current_version)
+        ):
+            block(
+                "PLUGIN_DOWNGRADE_REQUIRED",
+                f"Repair target {target_version} is older than recorded version "
+                f"{current_version}; publish or select {current_version} or newer.",
+            )
+            preconditions.append(_precondition(
+                "PLUGIN_REPAIR_VERSION", "fail",
+                f"Repair cannot replace recorded {current_version} with older {target_version}",
+            ))
+        elif status == "ready" and current_state == "dirty":
+            preconditions.append(_precondition(
+                "PLUGIN_REPAIR_VERSION", "pass",
+                f"Repair target {target_version} is not older than recorded {current_version}",
+            ))
 
     elif operation == "upgrade":
         if current is None:
@@ -321,6 +342,7 @@ def plan_plugin_change(
 
     plan = {
         "operation": operation,
+        "changeKind": "repair" if operation == "install" and current_state == "dirty" else operation,
         "pluginId": plugin_id,
         "currentVersion": current_version,
         "targetVersion": target_version,

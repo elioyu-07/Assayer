@@ -16,6 +16,7 @@ import logging
 import re
 import sys
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
@@ -32,6 +33,11 @@ from assayer_platform import (
     PlatformRunner, PlatformContractError, PluginRegistry, InteractivePluginController,
 )
 from assayer_platform import installed_plugin_registry
+from assayer_platform.interactive import (
+    INTERACTIVE_CHECKPOINT_INPUT_SCHEMA,
+    INTERACTIVE_DECISION_INPUT_SCHEMA,
+)
+from assayer_platform.error_policy import boundary_error_policy
 from assayer_platform.plugin_lifecycle import package_checksum
 
 
@@ -448,47 +454,8 @@ class InteractivePlatformMcpToolTransport:
             "type": "object", "additionalProperties": False,
             "properties": {
                 "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
-                "reviewCheckpoint": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["workItemId", "collectionId", "itemIds", "payload"],
-                    "properties": {
-                        "workItemId": {"type": "string", "minLength": 1},
-                        "collectionId": {"type": "string", "minLength": 1},
-                        "itemIds": {
-                            "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
-                            "items": {"type": "string", "minLength": 1},
-                        },
-                        "payload": {"type": "object"},
-                        "supersedesCheckpointId": {"type": "string", "minLength": 1},
-                    },
-                },
-                "decision": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["workItemId", "result", "findings", "reason"],
-                    "properties": {
-                        "workItemId": {"type": "string", "minLength": 1},
-                        "result": {"enum": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"]},
-                        "reason": {"type": "string", "minLength": 1},
-                        "findings": {
-                            "type": "array", "minItems": 1,
-                            "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["dimension", "status", "reason"],
-                                "properties": {
-                                    "dimension": {"type": "string", "minLength": 1},
-                                    "status": {"enum": ["satisfied", "violated", "unresolved", "blocked", "conflicted"]},
-                                    "reason": {"type": "string", "minLength": 1},
-                                },
-                            },
-                        },
-                        "details": {"type": "object"},
-                        "reviewCheckpointIds": {
-                            "type": "array", "minItems": 1, "uniqueItems": True,
-                            "items": {"type": "string", "minLength": 1},
-                        },
-                        "finalization": {"type": "object"},
-                    },
-                },
+                "reviewCheckpoint": deepcopy(INTERACTIVE_CHECKPOINT_INPUT_SCHEMA),
+                "decision": deepcopy(INTERACTIVE_DECISION_INPUT_SCHEMA),
                 "closeout": {
                     "type": "object", "additionalProperties": False,
                     "required": ["status"],
@@ -550,52 +517,13 @@ class InteractivePlatformMcpToolTransport:
                 "groupKey": {"type": "string", "minLength": 1},
             },
         },
-        "checkpoint_review": {
-            "type": "object", "additionalProperties": False,
-            "required": ["workItemId", "collectionId", "itemIds", "payload"],
-            "properties": {
-                "workItemId": {"type": "string", "minLength": 1},
-                "collectionId": {"type": "string", "minLength": 1},
-                "itemIds": {
-                    "type": "array", "minItems": 1, "maxItems": 100, "uniqueItems": True,
-                    "items": {"type": "string", "minLength": 1},
-                },
-                "payload": {"type": "object"},
-                "supersedesCheckpointId": {"type": "string", "minLength": 1},
-            },
-        },
+        "checkpoint_review": deepcopy(INTERACTIVE_CHECKPOINT_INPUT_SCHEMA),
         "submit_decisions": {
             "type": "object", "additionalProperties": False,
             "required": ["decisions"], "properties": {
                 "decisions": {
                     "type": "array", "minItems": 1,
-                    "items": {
-                        "type": "object", "additionalProperties": False,
-                        "required": ["workItemId", "result", "findings", "reason"],
-                        "properties": {
-                            "workItemId": {"type": "string", "minLength": 1},
-                            "result": {"enum": ["issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"]},
-                            "reason": {"type": "string", "minLength": 1},
-                            "findings": {
-                                "type": "array", "minItems": 1,
-                                "items": {
-                                    "type": "object", "additionalProperties": False,
-                                    "required": ["dimension", "status", "reason"],
-                                    "properties": {
-                                        "dimension": {"type": "string", "minLength": 1},
-                                        "status": {"enum": ["satisfied", "violated", "unresolved", "blocked", "conflicted"]},
-                                        "reason": {"type": "string", "minLength": 1},
-                                    },
-                                },
-                            },
-                            "details": {"type": "object"},
-                            "reviewCheckpointIds": {
-                                "type": "array", "minItems": 1, "uniqueItems": True,
-                                "items": {"type": "string", "minLength": 1},
-                            },
-                            "finalization": {"type": "object"},
-                        },
-                    },
+                    "items": deepcopy(INTERACTIVE_DECISION_INPUT_SCHEMA),
                 },
             },
         },
@@ -735,13 +663,12 @@ class InteractivePlatformMcpToolTransport:
         return tools
 
     def _review_payload_contract_text(self) -> str:
-        """Collect every registered plugin's checkpoint payload contract.
+        """Collect legacy checkpoint payload contracts for tool descriptions.
 
-        The platform treats review checkpoints as opaque plugin semantics, so
-        the Agent never saw the accepted ``payload`` shape and guessed wrong.
-        Publishing each plugin's declared ``review_payload_schema`` onto the
-        ``checkpoint_review`` tool restores that contract to the Agent without
-        making the platform enforce plugin-specific payload validation.
+        Registrations using ``AgentContractBundle`` receive an exact selected
+        schema in ``semanticTask`` and are validated before plugin hooks. This
+        description-only path remains solely for unmigrated registrations that
+        still declare one global ``review_payload_schema``.
         """
         parts = []
         for registration in self._controller.registry.list():
@@ -754,13 +681,119 @@ class InteractivePlatformMcpToolTransport:
             )
         return "\n".join(parts)
 
+    def _raise_contract_error(
+        self, name: str, arguments: dict[str, Any], error: PlatformContractError,
+    ) -> None:
+        policy = boundary_error_policy(error.code)
+        resolution = {
+            "code": error.code,
+            "message": error.message,
+            "owner": policy.owner,
+            "retryDisposition": policy.retry_disposition,
+            "requiredNextStep": policy.required_next_step,
+            "requestId": None,
+            "contractDigest": None,
+            "errors": [dict(item) for item in error.errors],
+            "correctionBudget": None,
+            "terminalStatus": None,
+        }
+        if self._active_run_id is not None:
+            active_run_id = self._active_run_id
+            try:
+                resolution = self._controller.handle_boundary_error(
+                    active_run_id, error, tool_name=name, arguments=arguments,
+                )
+            except Exception as handling_error:
+                _LOG.error(
+                    "Boundary error handling failed for %s after %s",
+                    active_run_id, error.code, exc_info=True,
+                )
+                raise HostError(
+                    "PLATFORM_CONTRACT_STATE_INVALID",
+                    "The Host could not durably apply the boundary error policy; stop this Run",
+                    owner="platform", retry_disposition="none",
+                    request_id=f"request:{uuid.uuid4().hex}",
+                ) from handling_error
+            if resolution["terminalStatus"] is not None:
+                self._terminal_run_id = active_run_id
+                self._active_run_id = None
+
+        resolved_policy = boundary_error_policy(resolution["code"])
+        if (
+            resolution["owner"] in {"plugin", "platform"}
+            and resolved_policy.terminal_on_rejection
+        ):
+            _LOG.error(
+                "Interactive boundary rejected: requestId=%s code=%s owner=%s",
+                resolution["requestId"], resolution["code"], resolution["owner"],
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        raise HostError(
+            resolution["code"], resolution["message"], retryable=False,
+            next_step=resolution["requiredNextStep"],
+            owner=resolution["owner"],
+            retry_disposition=resolution["retryDisposition"],
+            request_id=resolution["requestId"],
+            contract_digest=resolution["contractDigest"],
+            errors=resolution["errors"],
+            correction_budget=resolution["correctionBudget"],
+            terminal_status=resolution["terminalStatus"],
+        ) from error
+
     def call_tool(self, name: str, arguments: object) -> dict:
         if name not in self._SCHEMAS:
             raise HostError("UNKNOWN_TOOL", f"Tool {name} does not exist")
         if not isinstance(arguments, dict):
             raise HostError("INVALID_REQUEST", f"{name} arguments must be an object")
+        if (
+            name == "advance_plugin_run"
+            and self._active_run_id is not None
+            and self._controller.uses_agent_contract(self._active_run_id)
+            and sum(
+                key in arguments
+                for key in ("reviewCheckpoint", "decision", "closeout")
+            ) > 1
+        ):
+            self._raise_contract_error(
+                name, arguments,
+                PlatformContractError(
+                    "AGENT_CONTRACT_ENVELOPE_INVALID",
+                    "Agent input must contain at most one semantic mutation",
+                    errors=({
+                        "pointer": "/",
+                        "keyword": "mutualExclusivity",
+                        "message": (
+                            "reviewCheckpoint, decision, and closeout are mutually exclusive"
+                        ),
+                    },),
+                ),
+            )
         error = next(Draft202012Validator(self._SCHEMAS[name]).iter_errors(arguments), None)
         if error is not None:
+            if (
+                self._active_run_id is not None
+                and name in {"advance_plugin_run", "checkpoint_review", "submit_decisions"}
+                and self._controller.uses_agent_contract(self._active_run_id)
+            ):
+                pointer = "/" + "/".join(
+                    str(part).replace("~", "~0").replace("/", "~1")
+                    for part in error.absolute_path
+                ) if error.absolute_path else "/"
+                self._raise_contract_error(
+                    name, arguments,
+                    PlatformContractError(
+                        "AGENT_CONTRACT_ENVELOPE_INVALID",
+                        "Agent input does not satisfy the interactive platform envelope; correct the reported fields",
+                        errors=({
+                            "pointer": pointer,
+                            "keyword": str(error.validator or "schema"),
+                            "message": (
+                                "Value does not satisfy the declared "
+                                f"{error.validator or 'schema'} constraint"
+                            ),
+                        },),
+                    ),
+                )
             raise HostError("INVALID_REQUEST", f"{name} arguments do not satisfy the platform schema")
         try:
             if name == "start_plugin_run":
@@ -825,6 +858,7 @@ class InteractivePlatformMcpToolTransport:
                     self._active_run(), arguments["workItemId"], arguments["collectionId"],
                     arguments["itemIds"], arguments["payload"],
                     arguments.get("supersedesCheckpointId"),
+                    arguments.get("contractDigest"),
                 )
             elif name == "submit_decisions":
                 result = self._controller.submit_decisions(self._active_run(), arguments["decisions"])
@@ -840,19 +874,7 @@ class InteractivePlatformMcpToolTransport:
                 self._terminal_run_id = result["runId"]
                 self._active_run_id = None
         except PlatformContractError as exc:
-            # Keep rejected requests visible in the same durable platform
-            # diary. A telemetry write can never replace the original error.
-            if self._active_run_id is not None:
-                try:
-                    self._controller.record_rejection(
-                        self._active_run_id, exc.code, message=exc.message,
-                    )
-                except Exception as telemetry_error:
-                    # Rejection telemetry is best-effort and must not mask
-                    # the original protocol error, but the failure remains
-                    # observable for host diagnostics and resilience scans.
-                    _LOG.debug("Unable to persist host rejection telemetry: %s", telemetry_error)
-            raise HostError(exc.code, exc.message) from exc
+            self._raise_contract_error(name, arguments, exc)
         failed = result.get("status") == "failed"
         return {
             "structuredContent": {"status": "failed" if failed else "ok", "result": result},

@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
-| Date | 2026-09-05 |
-| Status | Adopted; public-surface import gate implemented (see §5) |
+| Document version | 1.1.0 |
+| Date | 2026-09-07 |
+| Status | Adopted; public-surface import gate 1.1.0 implemented (see §5) |
 | Authority | Derived from Platform Constitution v1 and Plugin Contract v1 |
 | Scope | Module ownership, dependency direction, compatibility bridges, and governance gates |
 
@@ -77,6 +77,8 @@ implementation are not a substitute for registration.
 Plugins may depend only on the following stable surfaces:
 
 - `assayer_platform.contract` entities and versioned enums;
+- top-level `assayer_platform.AgentContractBundle` for immutable, versioned
+  Agent-facing Check contracts;
 - plugin registration, manifest, and conformance APIs;
 - capability-provider registration and negotiated provider interfaces;
 - evidence-claim and decision validation APIs;
