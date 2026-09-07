@@ -69,6 +69,12 @@ class PluginPackagingContractTests(unittest.TestCase):
         wheel = source.index('"wheel"', source.index("def build("))
         self.assertLess(validation, wheel)
 
+    def test_bundle_declares_every_runtime_extra_it_builds(self):
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+        extras = project["optional-dependencies"]
+        self.assertIn("playwright==1.62.0", extras["browser"])
+        self.assertIn("mcp==1.27.0", extras["mcp"])
+
 
 if __name__ == "__main__":
     unittest.main()
