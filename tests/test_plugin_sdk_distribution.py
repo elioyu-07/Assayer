@@ -86,9 +86,9 @@ class PluginSdkDistributionTest(unittest.TestCase):
                     os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
 
     def test_plugin_facing_validators_use_the_sdk_schema_root(self) -> None:
-        platform = ROOT / "src" / "assayer_platform"
+        sdk = ROOT / "src" / "assayer_plugin_sdk"
         for name in ("actionable_result.py", "evidence_claim.py", "evaluation.py"):
-            text = (platform / name).read_text(encoding="utf-8")
+            text = (sdk / name).read_text(encoding="utf-8")
             self.assertNotIn("_schema_root", text, name)
             self.assertIn("assayer_plugin_sdk.resources", text, name)
 

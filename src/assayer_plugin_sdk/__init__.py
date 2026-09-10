@@ -12,6 +12,12 @@ from .agent_contract import (
     DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION,
     DomainResultContract,
 )
+from .actionable_result import (  # noqa: F401
+    build_actionable_result,
+    extract_result_delivery,
+    extract_result_delivery_bundle,
+    validate_result_delivery,
+)
 from .contract import *  # noqa: F401,F403
 from .contract import (  # noqa: F401
     DECISION_STATES,
@@ -51,12 +57,17 @@ from .evidence_handles import (  # noqa: F401
     EvidenceHandle,
     EvidenceHandleRegistry,
 )
+from .evidence_claim import validate_evidence_claims  # noqa: F401
 from .evidence_reference import (  # noqa: F401
     host_evidence_references,
     resolve_evidence_references,
     validate_domain_evidence_references,
 )
 from .identity import digest_bytes, document_state_digest  # noqa: F401
+from .evaluation import (  # noqa: F401
+    load_evaluation_corpus,
+    validate_evaluation_corpus,
+)
 from .plugin_compatibility import (  # noqa: F401
     HOST_PROTOCOL_CAPABILITIES,
     HOST_PROTOCOL_VERSION,
