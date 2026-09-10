@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/plugin-protocol-envelope.schema.json",
+  "title": "AssayerPluginProtocolEnvelope",
+  "description": "Binding-neutral request/response envelope for every Host-to-plugin operation. The same envelope is carried by any transport binding (in-process or out-of-process); it defines no assumption about process separation.",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "operation": {
+      "enum": [
+        "describe",
+        "discover",
+        "inspect",
+        "restore",
+        "validate_review_checkpoint",
+        "map_domain_result",
+        "summarize"
+      ]
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "pluginId", "operation", "input"],
+      "properties": {
+        "protocolVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "pluginId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "runId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "checkId": { "type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,63}$" },
+        "operation": { "$ref": "#/$defs/operation" },
+        "deadlineMs": { "type": "integer", "minimum": 0 },
+        "input": { "type": "object" }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "requestId", "status"],
+      "properties": {
+        "protocolVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "requestId": { "$ref": "common.schema.json#/$defs/entityId" },
+        "status": { "enum": ["ok", "rejected", "failed"] },
+        "output": { "type": "object" },
+        "error": { "$ref": "#/$defs/error" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ok" } }, "required": ["status"] },
+          "then": { "required": ["output"] }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["rejected", "failed"] } }, "required": ["status"] },
+          "then": { "required": ["error"] }
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable", "requiredNextStep"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" },
+        "message": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" },
+        "requiredNextStep": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

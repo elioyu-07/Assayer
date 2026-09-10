@@ -34,6 +34,8 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `result-delivery.schema.json`: summary-first terminal delivery metadata,
   stable section references, and result-bound delta pages.
 - `plugin-manifest.schema.json`: domain-neutral plugin checks, evidence requirements, capabilities, and performance/recovery constraints.
+- `plugin-protocol-envelope.schema.json`: binding-neutral Host-to-plugin request/response envelope for the plugin protocol operations, with the shared error shape.
+- `plugin-domain-result-contract.schema.json`: one plugin-owned Agent submission boundary per interactive Check, with its semantic rules and instructions digest.
 - `plugin-conformance.schema.json`: package-time plugin registration results, violated contract identifiers, and required next actions.
 - `plugin-release-acceptance.schema.json`: installed-wheel interactive acceptance evidence for Check coverage, paging, resume, replay, and terminal publication.
 - `plugin-release.schema.json`: static, import-free plugin package layout, registration metadata, policy resources, and deterministic fixture declarations.
