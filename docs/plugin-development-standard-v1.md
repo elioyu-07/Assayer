@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.1 |
-| Date | 2026-09-07 |
-| Status | Accepted design; implementation in progress (slices 1-4 complete) |
+| Document version | 1.1.1 |
+| Date | 2026-09-10 |
+| Status | SDK v2 hard-cut adopted; DomainResult boundary is current, legacy AgentContractBundle text below is migration history |
 | Owner | Assayer maintainers |
 | Authority | Platform Constitution v1, Audit Plugin Contract v1, and Platform--Plugin Boundary Contract v1 |
 | Scope | Plugin registration, Agent-facing contracts, Host validation, failure handling, retry policy, and release conformance |
@@ -21,12 +21,23 @@ release fixtures.
 The keywords **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and
 **MAY** are normative as described by RFC 2119 and RFC 8174.
 
-This document is design-first. It defines the required target behavior and
-release gates. The contract data model, registration gate, opt-in Host
-structural enforcement, structured error policy, and bounded correction gate
-are implemented. Legacy registrations and the remaining plugin migration and
-release gates are non-conformant until the remaining implementation slices in
-section 14 are complete.
+The contract data model, registration gate, Host structural enforcement,
+mandatory checkpoint preflight, structured error policy, bounded correction
+gate, `ass-spec` migration, and installed-artifact release gate are implemented.
+Interactive registrations that publish only the removed generic payload schema
+are rejected and cannot claim conformance with this standard.
+
+### SDK v2 hard-cut amendment (current)
+
+For current interactive plugins, `DomainResultContract` is the only
+Agent-facing contract. The Agent returns only the plugin-defined DomainResult;
+the Host owns TaskContext, Evidence resolution, paging, checkpointing, Decision
+assembly, replay, resume, and finalization. The old `AgentContractBundle`
+checkpoint/preflight/finalization operations are private migration primitives,
+absent from the normal catalog, and rejected with `UNSUPPORTED_PROTOCOL`.
+Where later sections mention bundles, checkpoints, or finalization envelopes,
+they describe the pre-v2 migration surface and do not authorize new plugin
+implementations to publish or call it.
 
 ## 2. Problem Statement and Current Evidence
 
@@ -74,6 +85,20 @@ This standard does not:
 - treat JSON Schema validation alone as proof of a correct Decision;
 - change production runtime behavior in this documentation slice.
 
+### 3.1 Platform-change isolation
+
+An internal Host or transport optimization MUST remain transparent to an
+existing plugin. Changes to MCP framing, serialization, payload sizing,
+paging, recovery, persistence, observability, or lifecycle orchestration MUST
+be implemented behind the stable plugin contract and MUST NOT require plugin
+source, manifest, schema, or domain-result edits.
+
+Plugin migration is allowed only for a versioned public-contract change or an
+explicitly adopted optional capability. The platform owns compatibility
+bridges for supported prior contracts. A plugin hook MUST NOT be introduced
+merely to compensate for a missing generic Host adapter; that coupling is
+implementation debt and requires a separate design decision.
+
 ## 4. One Executable Contract
 
 ### 4.1 Contract authority
@@ -103,13 +128,21 @@ at least these fields:
 ```json
 {
   "contractId": "dev.assayer.ass-spec.review",
-  "contractVersion": "2.0.0",
+  "contractVersion": "2.1.0",
   "checkId": "SPEC-001",
   "checkVersion": "2.0.0",
   "schemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "checkpointPayloadSchemas": {
     "checklist-dimensions": {},
     "candidate-findings": {}
+  },
+  "checkpointSemanticRules": {
+    "candidate-findings": [
+      {
+        "ruleId": "ASS-SPEC-CANDIDATE-EVIDENCE-TRACE",
+        "instruction": "For CONFIRMED, copy an exact candidate evidence line into evidence."
+      }
+    ]
   },
   "finalizationSchema": {},
   "semanticInstructions": {
@@ -137,6 +170,15 @@ Schemas MUST be self-contained within the release or use only package-local,
 release-validated references. Remote schema fetches during registration or a
 Run are forbidden. Object schemas SHOULD set `additionalProperties: false`
 unless forward-compatible extension data has an explicit namespace and owner.
+
+Every plugin semantic invariant that can reject an otherwise schema-valid
+checkpoint MUST be declared under `checkpointSemanticRules` for each affected
+collection. Each rule MUST have a stable `ruleId` and a non-empty, directly
+executable `instruction`. Rule collection keys MUST also exist in
+`checkpointPayloadSchemas`; duplicate rule IDs within one collection are
+invalid. The rules are immutable contract data and MUST participate in the
+contract digest. A Markdown instruction file may explain a rule, but MUST NOT
+be the only place where a rejection condition is disclosed.
 
 ### 4.3 Contract digest
 
@@ -168,12 +210,19 @@ unrelated plugins or collections into prose. The target shape is:
   "workItemId": "spec:requirements",
   "collectionId": "checklist-dimensions",
   "itemIds": ["CHK-01", "CHK-02"],
+  "taskDigest": "sha256:<task-digest>",
   "agentContract": {
     "contractId": "dev.assayer.ass-spec.review",
-    "contractVersion": "2.0.0",
+    "contractVersion": "2.1.0",
     "contractDigest": "sha256:<digest>",
     "inputKind": "reviewCheckpoint",
-    "schema": {}
+    "schema": {},
+    "semanticRules": [
+      {
+        "ruleId": "ASS-SPEC-CANDIDATE-EVIDENCE-TRACE",
+        "instruction": "For CONFIRMED, copy an exact candidate evidence line into evidence."
+      }
+    ]
   }
 }
 ```
@@ -182,30 +231,56 @@ A `finalize_decision` task MUST similarly return `inputKind=finalization` and
 the exact finalization schema. Generic decision fields remain governed by the
 platform Decision schema and MUST NOT be redefined by a plugin.
 
+For checkpoint tasks, the Host MUST return only the semantic rules registered
+for the current collection. The Agent MUST read both `schema` and
+`semanticRules` before constructing the payload. It MUST NOT discover a
+required field, enum, traceability condition, or cross-field invariant by
+submitting speculative input and interpreting the rejection.
+
 ### 5.2 Agent submission
 
-Every Agent semantic submission MUST echo the frozen `contractDigest` at the
-boundary containing the checkpoint or decision. The Agent MUST submit only the
-requested `inputKind`, WorkItem, collection, and item IDs. It MUST NOT infer a
-schema from an earlier Run, another collection, examples, or a runtime error.
+Every new-task Agent semantic submission MUST echo both the frozen
+`contractDigest` and the current `taskDigest` at the boundary containing the
+checkpoint or decision. An explicit accepted-checkpoint correction is instead
+bound to the exact original checkpoint by `supersedesCheckpointId` and MUST
+retain its WorkItem, collection, and item IDs.
+The task digest binds the Run, contract, input kind, exact WorkItem,
+collection, ordered item IDs, and accepted-checkpoint state. The Agent MUST
+submit only the requested `inputKind`, WorkItem, collection, and item IDs. It
+MUST NOT infer a schema from an earlier Run, another collection, examples, or a
+runtime error.
 
-The Host MUST treat a missing or unequal digest as stale contract input. It
-MUST return the current semantic boundary without invoking plugin code or
-persisting a mutation.
+The Host MUST treat a missing or unequal contract digest as stale contract
+input and a missing, unequal, or identity-inconsistent task digest as
+`AGENT_SEMANTIC_TASK_STALE`. It MUST re-offer the exact current semantic task
+without changing its page size, invoking plugin code, consuming the Agent
+correction budget, or persisting a semantic mutation. A rejected submission
+MUST NOT switch WorkItem, collection, or item IDs to create a new correction
+boundary.
+
+The Agent-facing interactive submission is a single plugin-defined
+`DomainResult`. The Agent/Skill MUST read the current `domainContract` and
+return only fields declared by its `resultSchema`; it MUST NOT construct or
+echo Run, WorkItem, collection, checkpoint, digest, revision, or finalization
+fields. The Host resolves task-local `supportedBy` handles against the
+immutable InvestigationPacket, invokes the plugin's domain validator and mapper, and
+persists the resulting Decision atomically. Unknown or duplicate Evidence
+references fail before persistence. The old checkpoint, preflight, Decision,
+and finish operations are private Host migration primitives and are rejected
+at the Agent boundary with `UNSUPPORTED_PROTOCOL`.
 
 ## 6. Mandatory Validation Order
 
 The Host MUST validate every semantic mutation in this order:
 
-1. **Generic envelope** — tool name, allowed fields, primitive types, size
-   bounds, and mutual exclusivity.
+1. **Generic envelope** — tool name, allowed fields, primitive types, and size
+   bounds.
 2. **Frozen contract identity** — Run, plugin, Check, contract version, and
    digest match the active semantic boundary.
-3. **Boundary JSON Schema** — checkpoint payload or finalization conforms to
-   the exact schema selected for the current collection and input kind.
-4. **Platform invariants** — WorkItem identity, Evidence item membership,
-   coverage, correction lineage, replay identity, recovery barrier, and Run
-   revision.
+3. **Boundary JSON Schema** — the DomainResult conforms to the exact
+   Run-frozen domain-result Schema.
+4. **Platform invariants** — active TaskContext, Evidence membership, domain
+   stage coverage, replay identity, recovery barrier, and Run revision.
 5. **Plugin semantics** — the plugin validator may check domain relationships
    that JSON Schema cannot express.
 6. **Persistence** — only a fully accepted mutation enters the ledger.
@@ -217,7 +292,8 @@ revision change.
 
 Schema evaluation MUST report deterministic field locations as RFC 6901 JSON
 Pointers. The Host MUST cap error count and payload size so validation itself
-cannot become an unbounded workload.
+cannot become an unbounded workload. A schema-valid result rejected by the
+plugin mapper is a plugin contract defect, not an Agent correction.
 
 ## 7. Plugin Runtime Obligations
 
@@ -230,8 +306,8 @@ cannot become an unbounded workload.
 It MAY reject schema-valid input only for a declared semantic invariant that
 cannot be represented in JSON Schema, such as a relationship to prior accepted
 checkpoints or a source-bound evidence rule. Such a rejection MUST use a
-registered semantic error code, safe message, JSON Pointer when applicable,
-owner, and retry disposition.
+registered semantic error code, the same declared `ruleId`, a safe message,
+JSON Pointer when applicable, owner, and retry disposition.
 
 `assemble_review_checkpoints` MUST accept every combination produced by valid
 checkpoint fixtures plus a schema-valid finalization fixture when platform
@@ -245,21 +321,51 @@ plugin implementation defect. The Host MUST map it to
 diagnostic detail in protected logs, and MUST NOT ask the Agent to repair the
 payload.
 
+### 7.1 Mandatory public SDK boundary helpers
+
+Plugins MUST import shared boundary helpers from the versioned public module
+`assayer_platform.plugin_sdk`. A plugin MUST NOT copy or redefine these
+contracts locally:
+
+- `validate_entity_id` is the only EntityId validator. Entity IDs MUST match
+  `^[A-Za-z][A-Za-z0-9._:-]{2,127}$` exactly; whitespace, Unicode identifiers,
+  and identifiers shorter than three characters are invalid.
+- `to_json_value` is the required projection for plugin-owned values returned
+  to the Host. It recursively detaches frozen mappings and sequences, converts
+  sets to deterministically ordered arrays, and rejects non-string object keys,
+  non-finite numbers, cyclic containers, bytes, and unknown Python objects.
+- `PluginContractError` is the standard deterministic plugin-boundary error.
+  Its default code is `PLUGIN_CONTRACT_VIOLATION`. Plugins MAY supply a more
+  specific registered code when the ownership and required action differ.
+
+Boundary values MUST be validated before persistence or terminal publication.
+Plugins MUST NOT use `default=str`, stringify mapping keys, expose exception
+class names, or silently coerce unsupported objects. These practices hide a
+contract defect and can create key collisions or non-reproducible results.
+
+`PLUGIN_CONTRACT_VIOLATION` is plugin-owned, has no Agent correction budget,
+and closes a strict Run as `partial`. The required next step is to inspect the
+terminal result and fix/release the plugin; the Agent MUST NOT regenerate or
+resubmit the same semantic input.
+
 ## 8. Error Contract and Retry Policy
 
 Every boundary failure MUST use a structured platform error containing:
 
 ```json
 {
-  "code": "AGENT_CONTRACT_INPUT_INVALID",
-  "message": "Checkpoint payload does not match the active contract.",
+  "code": "DOMAIN_RESULT_INVALID",
+  "message": "DomainResult does not match the active contract.",
   "retryable": false,
   "requiredNextStep": "correct_agent_input",
   "owner": "agent_input",
   "retryDisposition": "agent_correction",
-  "contractDigest": "sha256:<digest>",
   "errors": [
-    {"pointer": "/checklist_review/0/status", "keyword": "enum", "message": "..."}
+    {
+      "pointer": "/checklist_review/0/status",
+      "keyword": "enum",
+      "message": "Allowed values: PASS, REWORK, ESCALATE, UNVERIFIED"
+    }
   ],
   "requestId": "<correlation-id>",
   "correctionBudget": {
@@ -277,6 +383,17 @@ The executable response shape is
 submission after inspecting the field errors; it never authorizes automatic
 transport or model retry.
 
+Schema errors MUST be directly actionable without package or source-code
+inspection. A `required` error MUST point to each concrete missing field; an
+`additionalProperties` error MUST point to each concrete undeclared field; an
+`enum` error MUST list the allowed values from the published schema. Messages
+MUST NOT repeat rejected values or source prose. A plugin semantic error SHOULD
+also include the violated published `ruleId` alongside its JSON Pointer.
+
+If an Agent bypasses preflight and exhausts the correction budget, the terminal
+`AGENT_CORRECTION_BUDGET_EXHAUSTED` message MUST retain the original validation
+error pointers and messages, so the first invalid draft remains diagnosable.
+
 Messages returned to an Agent or user MUST NOT expose stack traces, package
 paths, secrets, source text outside authorized Evidence, or internal exception
 class names. Protected logs MUST retain the full exception, correlation ID,
@@ -288,11 +405,19 @@ The initial error taxonomy is:
 |---|---|---|---|
 | `AGENT_CONTRACT_ENVELOPE_INVALID` | `agent_input` | `agent_correction` | Correct the named generic fields |
 | `AGENT_CONTRACT_STALE` | `contract_state` | `refresh_boundary` | Fetch the current `semanticTask`; do not replay old content |
+| `AGENT_SEMANTIC_TASK_STALE` | `contract_state` | `refresh_boundary` | Re-read and echo the exact current task; do not switch WorkItem, collection, or item IDs |
 | `AGENT_CONTRACT_INPUT_INVALID` | `agent_input` | `agent_correction` | Correct the reported JSON Pointers against the same frozen schema |
 | `PLATFORM_CONTRACT_STATE_INVALID` | `platform` | `none` | Block and diagnose the Host/platform invariant |
 | `PLUGIN_SEMANTIC_INPUT_INVALID` | `agent_input` | `agent_correction` | Correct the declared domain invariant |
+| `AGENT_CHECKPOINT_PREFLIGHT_REQUIRED` | `agent_input` | `none` | Run the mandatory checkpoint preflight; the current Run ends partial |
+| `AGENT_CHECKPOINT_PREFLIGHT_STALE` | `agent_input` | `none` | Preflight the exact task envelope and payload again; the current Run ends partial |
 | `PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH` | `plugin` | `none` | Block and fix/release the plugin contract or runtime |
+| `PLUGIN_CONTRACT_VIOLATION` | `plugin` | `none` | End the Run `partial`; fix the deterministic plugin boundary violation |
 | `PLUGIN_RUNTIME_FAILURE` | `plugin` | `none` | Block and diagnose an unexpected plugin failure |
+| `PLUGIN_REPORT_FAILED` | `plugin` | `none` | End the Run `partial`; fix report generation before release |
+| `PLUGIN_SUMMARY_FAILED` | `plugin` | `none` | End the Run `partial`; return a recursively JSON-safe summary |
+| `PLATFORM_INTERNAL_ERROR` | `platform` | `none` | End the Run `partial`; diagnose by `requestId` without Agent retry |
+| `RERUN_USER_CONFIRMATION_REQUIRED` | `agent_input` | `none` | Ask the user before starting another Run |
 
 Deterministic contract errors MUST NOT enter an automatic retry loop. The same
 canonical submission MUST never be regenerated or resubmitted automatically.
@@ -309,6 +434,13 @@ boundary, and is reconstructed from the durable rejection events on resume.
 by `plugin` or `platform` are never Agent-retryable. Plugin release checks and
 local schema validation are deterministic and MUST run once per artifact or
 input digest, not through generic exponential backoff.
+
+One user request starts at most one interactive Run. After a Run reaches any
+terminal status, `start_plugin_run` MUST reject another start in the same Host
+session unless `rerunAuthorization.previousRunId` identifies that latest Run
+and `rerunAuthorization.userConfirmed` is true. The Agent MUST set this field
+only after a new, explicit user confirmation; a plugin error, `partial` result,
+or exhausted correction budget is not implicit authorization to rerun.
 
 ## 9. Evidence and Decision Integrity
 
@@ -350,6 +482,9 @@ A plugin release MUST fail before publication when any of these gates fails:
     retry request;
 12. the semantic-instructions file and digest are present in the installed
     artifact.
+13. a local install or upgrade plan invokes the same complete static package
+    validator before issuing its confirmation token; a package rejected by the
+    release gate cannot mutate the installation store or become `dirty`.
 
 The complete developer gate is `assayer-plugin-release-check`. It MUST compose
 static package inspection, construction, isolated installation, executable
@@ -387,10 +522,9 @@ conformance-tested compatibility adapter. It MUST NOT silently widen a schema,
 drop fields, synthesize plugin data, or retry until legacy content happens to
 pass. Unsupported versions fail before discovery.
 
-Legacy plugins without an executable Agent contract may be listed for
-diagnosis, but MUST NOT start a new interactive production Run after the
-enforcement gate is enabled. Migration compatibility cannot be represented as
-full conformance.
+Plugins without an executable Agent contract may be listed for diagnosis, but
+MUST NOT start a new interactive production Run that accepts Agent input.
+Migration compatibility cannot be represented as full conformance.
 
 ## 12. Ownership and Trust Boundaries
 
@@ -414,10 +548,6 @@ contract, retry loop, or ledger.
 
 At the date of this document, the following known gaps are explicit debt:
 
-- legacy checkpoint and finalization paths still rely on a generic object and
-  description text when no `AgentContractBundle` is registered;
-- legacy interactive registrations may still omit `AgentContractBundle` during
-  the migration window;
 - legacy interactive releases without an executable acceptance driver remain
   non-conformant and cannot pass the complete release gate.
 
@@ -452,6 +582,10 @@ Implementation MUST proceed in the following independently verifiable slices:
    `assayer-plugin-release-check` and require it in CI. Exit: the exact built
    wheel passes the complete lifecycle; each intentionally broken fixture fails
    at its expected pre-plugin stage.
+7. **Remove direct checkpoint compatibility — complete.** Require a successful
+   exact-draft preflight before every strict checkpoint mutation. Exit: direct
+   or changed-payload checkpoint calls fail closed and cannot consume the Agent
+   correction budget.
 
 No slice may claim a later gate. In particular, publishing this document alone
 does not change runtime behavior, and a passing source-tree registration check
@@ -466,8 +600,10 @@ does not prove Agent contract compatibility.
 | Wrong payload type or required field | JSON Schema validation | No | No | At most one explicit correction |
 | Unknown or overlapping item ID | Platform invariant validation | No | No | No automatic retry |
 | Declared semantic relation is invalid | Plugin semantic validation | Yes | No | At most one explicit correction |
+| Checkpoint skips or changes preflight | Preflight gate | No | No | No; Run ends partial |
 | Schema-valid payload triggers missing-field/runtime structural error | Plugin implementation mismatch | Yes | No | No |
 | Unexpected plugin exception | Plugin runtime failure | Yes | No | No |
+| Start after a terminal Run without fresh user confirmation | Rerun authorization gate | No | No | No; ask user |
 | Valid checkpoint replay | Replay gate | Only if no durable acknowledgement exists | No duplicate | No |
 | All valid pages and finalization | Full pipeline | Yes | One accepted mutation per operation | No |
 

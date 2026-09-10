@@ -24,6 +24,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from assayer_platform import PlatformContractError
+from assayer_platform.plugin_catalog import version_key
 
 from .plugin_intent import IntentStep
 from .plugin_lifecycle_ops import (
@@ -101,10 +102,34 @@ class PluginLifecycleMcpToolTransport:
         return None
 
     def _run(self, step: IntentStep) -> dict:
-        return execute_intent_step(
+        latest_available = latest_available_from(self._catalog_index)
+        result = execute_intent_step(
             step, self._store_root, "./assayer-output",
-            latest_available_from(self._catalog_index), self._catalog_index,
+            latest_available, self._catalog_index,
         )
+        if step.operation == "info" and result.get("status") == "completed":
+            latest_version = (
+                latest_available(step.plugin_id)
+                if latest_available is not None else None
+            )
+            active_version = result.get("activeVersion")
+            version_relation = "unknown"
+            if latest_version is not None and active_version is not None:
+                if version_key(latest_version) > version_key(active_version):
+                    version_relation = "update_available"
+                elif version_key(latest_version) < version_key(active_version):
+                    version_relation = "installed_ahead_of_catalog"
+                else:
+                    version_relation = "current"
+            result.update({
+                "catalogStatus": (
+                    "available" if latest_available is not None else "unavailable"
+                ),
+                "latestAvailableVersion": latest_version,
+                "latestVersionKnown": latest_version is not None,
+                "versionRelation": version_relation,
+            })
+        return result
 
     def _respond(self, payload: dict) -> dict:
         failed = payload.get("status") not in {"completed", "quarantined"}
@@ -123,7 +148,7 @@ class PluginLifecycleMcpToolTransport:
             },
             {
                 "name": "get_plugin_info",
-                "description": "Show one installed plugin's version, state, source, gate results, and checksum. The state is one of installed, upgradable, or dirty.",
+                "description": "Use this single read-only lookup for an installed plugin's active version, lifecycle state, catalog status, latest available catalog version, and versionRelation. If latestVersionKnown is false, report that the upstream latest version is unknown; do not scan repositories or retry.",
                 "inputSchema": self._SCHEMAS["get_plugin_info"],
             },
             {

@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
-| Date | 2026-09-03 |
-| Status | Frozen for M2; enforcement tracked by M3 |
+| Document version | 1.0.1 |
+| Date | 2026-09-10 |
+| Status | Frozen for M2; plugin-change-isolation amendment recorded |
 | Owner | Assayer maintainers |
 | Applies to | Platform kernel, plugins, capability providers, Agent adapters, and report adapters |
 
@@ -33,6 +33,22 @@ a domain discovers facts or what a domain considers compliant.
 
 The user supplies intent and business input. The platform supplies protocol
 versions, Run IDs, output locations, rule snapshots, and internal defaults.
+
+### Platform change isolation
+
+Platform implementation and transport changes MUST remain transparent to
+registered plugins. An optimization of serialization, paging, MCP framing,
+recovery, persistence, observability, or internal orchestration MUST NOT
+require a plugin source, manifest, schema, or domain-result change. The Host
+MUST absorb such changes behind the existing public contract.
+
+A plugin migration is justified only when a versioned public platform or
+domain contract changes, or when the plugin voluntarily adopts a new optional
+capability. In that case the platform MUST publish the compatibility boundary,
+retain an adapter for the supported prior contract when practical, and reject
+or migrate explicitly rather than silently coupling every plugin to an
+internal implementation change. Platform concerns MUST NOT be relocated into
+plugin code merely because the platform currently lacks a generic adapter.
 
 ## 3. Non-negotiable laws
 
@@ -70,6 +86,11 @@ versions, Run IDs, output locations, rule snapshots, and internal defaults.
 12. **Historical immutability.** A completed Run is interpreted with the
     frozen plugin, Check, capability, protocol, and algorithm versions recorded
     at its start.
+13. **Plugin change isolation.** A platform-only implementation or transport
+    optimization does not require plugin changes. Any required plugin change
+    must be justified by a versioned public-contract change or an explicitly
+    adopted optional capability, with compatibility and migration behavior
+    documented before implementation.
 
 ## 4. Lifecycle law
 

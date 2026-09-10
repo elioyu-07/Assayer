@@ -23,7 +23,7 @@
     "decisionBatching": "forbidden",
     "parallelism": "forbidden",
     "cacheReuse": "forbidden",
-    "checkpoint": "required",
+    "checkpoint": "optional",
     "maxBatchSize": 1,
     "ordering": "strict"
   }

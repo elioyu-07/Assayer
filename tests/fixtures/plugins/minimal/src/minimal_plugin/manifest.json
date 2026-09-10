@@ -2,6 +2,14 @@
   "pluginId": "test-minimal",
   "version": "1.0.0",
   "platformApiVersion": "1.0.0",
+  "compatibility": {
+    "protocolMinVersion": "1.2.0",
+    "protocolMaxVersion": "1.2.0",
+    "sdkMinVersion": "0.1.2",
+    "sdkMaxVersion": "0.1.2",
+    "capabilities": ["task_local_evidence_handles", "domain_result", "supported_by"],
+    "domainContractVersion": "1.0.0"
+  },
   "domains": ["minimal"],
   "subjectKinds": ["configuration_file"],
   "checks": [

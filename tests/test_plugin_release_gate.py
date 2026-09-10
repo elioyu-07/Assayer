@@ -185,30 +185,35 @@ registration = PluginRegistration(
     def make_strict_installable(
         self, package: Path, *, acceptance: bool = True,
         semantic_resource: bool = True, acceptance_replay: bool = True,
-        checkpoint_collection: str = "signals",
-        checkpoint_schema_valid: bool = True,
-        finalization_schema: bool = True,
+        result_schema_valid: bool = True,
+        mapper: bool = True,
+        reported_submissions: int = 1,
     ) -> None:
         semantic = "# Fixture semantic review\n"
-        checkpoint_schemas = {checkpoint_collection: {
-            "type": "object" if checkpoint_schema_valid else "invalid-type",
+        result_schema = {
+            "type": "object" if result_schema_valid else "invalid-type",
             "additionalProperties": False,
-            "required": ["summary"],
-            "properties": {"summary": {"type": "string", "minLength": 1}},
-        }}
-        finalization = ({
-            "type": "object", "additionalProperties": False,
-            "required": ["summary"],
-            "properties": {"summary": {"type": "string", "minLength": 1}},
-        } if finalization_schema else None)
+            "required": ["result", "findings", "reason"],
+            "properties": {
+                "result": {"const": "scanned_no_issue"},
+                "findings": {"type": "array"},
+                "reason": {"type": "string", "minLength": 1},
+            },
+        }
         (package / "plugin" / "review.md").write_text(semantic)
         if semantic_resource:
             (package / "src" / "fixture_plugin" / "review.md").write_text(semantic)
+        mapper_source = (
+            "    def map_domain_result(self, result, packet, check, context):\n"
+            "        del packet, check, context\n"
+            "        return dict(result)\n"
+            if mapper else ""
+        )
         manifest = (package / "plugin" / "manifest.json").read_text()
         scope_schema = (package / "plugin" / "scope.schema.json").read_text()
         source = f'''import hashlib
 import json
-from assayer_platform import AgentContractBundle, PluginRegistration
+from assayer_platform import DomainResultContract, PluginRegistration
 from assayer_platform.contract import (
     DimensionObservation, EvidenceRecord, InvestigationPacket, WorkItem,
 )
@@ -242,20 +247,12 @@ class FixturePlugin:
             }}]}},
         ),)
 
-    def validate_review_checkpoint(self, checkpoint, collection_items, prior, packet, check, context):
-        del checkpoint, prior, packet, check, context
-        if not collection_items:
-            raise ValueError("empty fixture checkpoint")
-
-    def assemble_review_checkpoints(self, checkpoints, finalization, packet, check, context):
-        del checkpoints, packet, check, context
-        return {{"finalization": dict(finalization)}}
+{mapper_source}
 
 
-CONTRACT = AgentContractBundle(
-    "dev.assayer.fixture.release", "1.0.0", "FIX-001", "1.0.0",
-    {checkpoint_schemas!r},
-    {finalization!r},
+CONTRACT = DomainResultContract(
+    "dev.assayer.fixture.release", "2.0.0", "FIX-001", "1.0.0",
+    {result_schema!r},
     "fixture_plugin/review.md", hashlib.sha256({semantic!r}.encode()).hexdigest(),
 )
 
@@ -265,7 +262,7 @@ registration = PluginRegistration(
     capabilities=frozenset({{"structured_read"}}),
     execution_modes=frozenset({{"interactive"}}),
     scope_schema=SCOPE_SCHEMA,
-    agent_contracts=(CONTRACT,),
+    domain_result_contracts=(CONTRACT,),
 )
 '''
         (package / "src" / "fixture_plugin" / "plugin.py").write_text(source)
@@ -298,23 +295,18 @@ def run(*, registration, output_root, transport_factory):
         "checkId": "FIX-001", "scope": {{"path": "fixture"}},
     }}))
     run_id = started["runId"]
-    digest = started["result"]["agentContract"]["contractDigest"]
     boundary = value(transport.call_tool("advance_plugin_run", {{}}))
     task = boundary["result"]["semanticTask"]
-    transport.call_tool("advance_plugin_run", {{"reviewCheckpoint": {{
-        "workItemId": task["workItemId"], "collectionId": "signals",
-        "itemIds": task["itemIds"], "payload": {{"summary": "Reviewed."}},
-        "contractDigest": digest,
-    }}}})
     transport.close()
     transport = transport_factory(output_root)
     resumed = value(transport.call_tool("resume_plugin_run", {{"runId": run_id}}))
     task = resumed["result"]["semanticTask"]
-    terminal = value(transport.call_tool("advance_plugin_run", {{"decision": {{
-        "workItemId": task["workItemId"], "result": "scanned_no_issue",
+    if task["kind"] != "domain_review":
+        raise AssertionError("release fixture did not resume at the DomainResult boundary")
+    terminal = value(transport.call_tool("advance_plugin_run", {{"domainResult": {{
+        "result": "scanned_no_issue",
         "findings": [{{"dimension": "present", "status": "satisfied", "reason": "Reviewed."}}],
-        "reason": "The fixture was reviewed.", "finalization": {{"summary": "Complete."}},
-        "contractDigest": digest,
+        "reason": "The fixture was reviewed.",
     }}}}))
     replay = value(transport.call_tool("advance_plugin_run", {{}}))
     transport.call_tool("get_plugin_result", {{
@@ -322,10 +314,10 @@ def run(*, registration, output_root, transport_factory):
     }})
     ledger = output_root / run_id / f"{{run_id}}.platform-ledger.json"
     return {{
-        "schemaVersion": "1.0.0", "status": "passed", "checks": [{{
+        "schemaVersion": "2.0.0", "status": "passed", "checks": [{{
             "checkId": "FIX-001", "checkVersion": "1.0.0",
-            "completedRuns": 1, "checkpointPages": 1,
-            "reviewedCollections": ["signals"], "agentRetries": 0,
+            "completedRuns": 1, "domainResultSubmissions": {reported_submissions!r},
+            "agentCorrections": 0,
             "ledgerPaths": [ledger.relative_to(output_root).as_posix()],
             "resumeVerified": resumed.get("resumed") is True,
             "replayVerified": {acceptance_replay!r} and replay.get("replayed") is True,
@@ -602,6 +594,25 @@ def run(*, registration, output_root, transport_factory):
         )
         self.assertNotIn("artifact", result)
 
+    def test_release_gate_rejects_manifest_descriptor_compatibility_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.write_package(Path(directory))
+            manifest_path = package / "plugin" / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["compatibility"] = {
+                "protocolMinVersion": "1.2.0",
+                "protocolMaxVersion": "1.2.0",
+                "sdkMinVersion": "0.1.2",
+                "sdkMaxVersion": "0.1.2",
+                "capabilities": ["domain_result"],
+            }
+            manifest_path.write_text(json.dumps(manifest))
+            report = inspect_plugin_package(package)
+        self.assertIn(
+            "PLUGIN_COMPATIBILITY_IDENTITY_MISMATCH",
+            {issue.code for issue in report.issues},
+        )
+
     def test_complete_release_gate_requires_source_for_a_prebuilt_wheel(self):
         with tempfile.TemporaryDirectory() as directory:
             wheel = Path(directory) / "fixture-1.0.0-py3-none-any.whl"
@@ -669,42 +680,38 @@ def run(*, registration, output_root, transport_factory):
             "PLUGIN_RELEASE_ACCEPTANCE_RESULT_INVALID",
         )
 
-    def test_strict_wheel_rejects_malformed_checkpoint_schema_before_acceptance(self):
+    def test_strict_acceptance_cannot_invent_domain_result_submissions(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
-            self.make_strict_installable(package, checkpoint_schema_valid=False)
+            self.make_strict_installable(package, reported_submissions=2)
             result = inspect_plugin_release(package)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(
             result["issues"][0]["code"],
-            "PLUGIN_AGENT_CONTRACT_SCHEMA_INVALID",
+            "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
         )
 
-    def test_strict_wheel_rejects_missing_finalization_before_acceptance(self):
+    def test_strict_wheel_rejects_malformed_domain_result_schema_before_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
-            self.make_strict_installable(package, finalization_schema=False)
+            self.make_strict_installable(package, result_schema_valid=False)
             result = inspect_plugin_release(package)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(
             result["issues"][0]["code"],
-            "PLUGIN_AGENT_CONTRACT_FINALIZATION_MISSING",
+            "PLUGIN_INSTALLED_REGISTRATION_FAILED",
         )
 
-    def test_runtime_collection_without_schema_fails_the_installed_stage(self):
+    def test_strict_wheel_rejects_missing_domain_result_mapper_during_acceptance(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
-            self.make_strict_installable(
-                package, checkpoint_collection="other-signals",
-            )
+            self.make_strict_installable(package, mapper=False)
             result = inspect_plugin_release(package)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(
             result["issues"][0]["code"],
             "PLUGIN_RELEASE_ACCEPTANCE_EXECUTION_FAILED",
         )
-        self.assertEqual(result["stages"][-1]["status"], "failed")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,7 +17,7 @@ from assayer_platform.surface_conformance import inspect_plugin_surface
 
 class PublicSurfaceTests(unittest.TestCase):
     def test_surface_is_versioned(self) -> None:
-        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.1.0")
+        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.4.0")
 
     def test_every_symbol_resolves_in_its_module(self) -> None:
         for module_name, names in PUBLIC_SURFACE.items():
@@ -29,12 +29,15 @@ class PublicSurfaceTests(unittest.TestCase):
                 )
 
     def test_top_level_registration_and_context_are_public(self) -> None:
-        self.assertIn("AgentContractBundle", public_symbols("assayer_platform"))
+        self.assertNotIn("AgentContractBundle", public_symbols("assayer_platform"))
         self.assertIn("PluginRegistration", public_symbols("assayer_platform"))
         self.assertIn("PlatformContext", public_symbols("assayer_platform"))
+        self.assertIn("EvidenceHandle", public_symbols("assayer_platform"))
+        self.assertIn("EvidenceHandleRegistry", public_symbols("assayer_platform"))
 
     def test_is_public_module(self) -> None:
         self.assertTrue(is_public_module("assayer_platform.contract"))
+        self.assertTrue(is_public_module("assayer_platform.plugin_sdk"))
         self.assertFalse(is_public_module("assayer_platform.kernel"))
 
 
@@ -60,6 +63,7 @@ class SurfaceConformanceTests(unittest.TestCase):
             "plugin_mod.py": (
                 "from assayer_platform import PluginRegistration\n"
                 "from assayer_platform.contract import PlatformContext, WorkItem\n"
+                "from assayer_platform.plugin_sdk import to_json_value, validate_entity_id\n"
                 "from assayer_platform.registry import load_plugin_manifest\n"
             ),
         })

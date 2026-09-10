@@ -242,18 +242,19 @@ class _ReleaseAcceptanceTransport:
             if self._active_run_id is None:
                 if self._terminal_run_id is None:
                     raise PlatformContractError("RUN_NOT_STARTED", "No release acceptance Run is active")
-                if any(key in arguments for key in ("reviewCheckpoint", "decision", "closeout")):
+                if "domainResult" in arguments:
                     raise PlatformContractError("RUN_TERMINAL", "The release acceptance Run is terminal")
                 result = self._controller.terminal_status(self._terminal_run_id)
                 self._tracker["replayed"].add(self._terminal_run_id)
             else:
+                submitted_domain_result = "domainResult" in arguments
                 result = self._controller.advance(
                     self._active_run_id,
-                    review_checkpoint=arguments.get("reviewCheckpoint"),
-                    decision=arguments.get("decision"),
-                    closeout=arguments.get("closeout"),
+                    domain_result=arguments.get("domainResult"),
                     page_size=arguments.get("pageSize"),
                 )
+                if submitted_domain_result:
+                    self._tracker["domainResultSubmissions"] += 1
                 if result.get("status") in {"completed", "partial", "failed"}:
                     self._terminal_run_id = result["runId"]
                     self._active_run_id = None
@@ -298,8 +299,8 @@ def _run_release_acceptance(
     if not acceptance_spec:
         return [_fixture_issue(
             "PLUGIN_INTERACTIVE_RELEASE_ACCEPTANCE_MISSING",
-            "An interactive plugin with Agent contracts does not declare releaseAcceptance.",
-            "Publish an installed acceptance driver that completes paging, finalization, resume, replay, and terminal publication.",
+            "An interactive DomainResult plugin does not declare releaseAcceptance.",
+            "Publish an installed acceptance driver that completes DomainResult submission, resume, replay, and terminal publication.",
         )]
     driver, issues = _entry_point_release_acceptance(
         target, acceptance_spec, descriptor["pluginVersion"],
@@ -311,6 +312,7 @@ def _run_release_acceptance(
         registry = PluginRegistry((registration,))
         tracker: dict[str, Any] = {
             "resumed": set(), "replayed": set(), "resultPaged": set(),
+            "domainResultSubmissions": 0,
         }
         result = driver(
             registration=registration,
@@ -337,7 +339,10 @@ def _run_release_acceptance(
             "Return the frozen plugin-release-acceptance result contract.",
         )]
 
-    expected = {contract.check_ref: contract for contract in registration.agent_contracts}
+    expected = {
+        contract.check_ref: contract
+        for contract in registration.domain_result_contracts
+    }
     actual = {
         (item["checkId"], item["checkVersion"]): item
         for item in result["checks"]
@@ -345,22 +350,17 @@ def _run_release_acceptance(
     if set(actual) != set(expected) or len(actual) != len(result["checks"]):
         return [_fixture_issue(
             "PLUGIN_RELEASE_ACCEPTANCE_COVERAGE_INCOMPLETE",
-            "The release-acceptance result does not cover every Agent contract exactly once.",
+            "The release-acceptance result does not cover every DomainResult contract exactly once.",
             "Return one acceptance record for every interactive Check and contract version.",
         )]
     ledger_validator = _schema_validator("platform-ledger.schema.json")
+    declared_domain_result_submissions = 0
     for check_ref, contract in expected.items():
+        del contract
         item = actual[check_ref]
-        declared_collections = set(contract.checkpoint_payload_schemas)
-        if set(item["reviewedCollections"]) != declared_collections:
-            return [_fixture_issue(
-                "PLUGIN_RELEASE_ACCEPTANCE_COLLECTION_COVERAGE_INCOMPLETE",
-                f"Acceptance coverage for {check_ref[0]}@{check_ref[1]} differs from its declared checkpoint collections.",
-                "Drive at least one page for every declared checkpoint collection.",
-            )]
-        ledger_collections: set[str] = set()
+        declared_domain_result_submissions += item["domainResultSubmissions"]
         ledger_run_ids: set[str] = set()
-        checkpoint_pages = 0
+        observed_decisions = 0
         for relative in item["ledgerPaths"]:
             ledger_path = (output_root / relative).resolve()
             try:
@@ -389,23 +389,15 @@ def _run_release_acceptance(
                     "Return ledgers produced by the installed plugin and declared Check.",
                 )]
             ledger_run_ids.add(ledger["run"]["run_id"])
-            checkpoint_pages += len(ledger.get("review_checkpoints", ()))
-            ledger_collections.update(
-                checkpoint.get("collection_id")
-                for checkpoint in ledger.get("review_checkpoints", ())
-                if isinstance(checkpoint, dict) and isinstance(checkpoint.get("collection_id"), str)
-            )
-        if not declared_collections.issubset(ledger_collections):
-            return [_fixture_issue(
-                "PLUGIN_RELEASE_ACCEPTANCE_LEDGER_COVERAGE_INCOMPLETE",
-                "Durable acceptance ledgers do not contain every declared checkpoint collection.",
-                "Persist at least one validated checkpoint for every declared collection.",
-            )]
-        if len(ledger_run_ids) != item["completedRuns"] or checkpoint_pages != item["checkpointPages"]:
+            observed_decisions += len(ledger.get("decisions", ()))
+        if (
+            len(ledger_run_ids) != item["completedRuns"]
+            or observed_decisions != item["domainResultSubmissions"]
+        ):
             return [_fixture_issue(
                 "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
-                "Declared completed Run or checkpoint-page counts differ from the durable ledgers.",
-                "Derive acceptance metrics from the exact ledger paths returned to the platform.",
+                "Declared completed Run or DomainResult submission counts differ from the durable ledgers.",
+                "Derive acceptance metrics from the exact terminal ledgers returned to the platform.",
             )]
         if not ledger_run_ids.intersection(tracker["resumed"]):
             return [_fixture_issue(
@@ -425,6 +417,12 @@ def _run_release_acceptance(
                 "The platform-owned acceptance transport did not page every terminal result.",
                 "Read a bounded result page from every published terminal Run.",
             )]
+    if declared_domain_result_submissions != tracker["domainResultSubmissions"]:
+        return [_fixture_issue(
+            "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
+            "The acceptance driver DomainResult count differs from Host-observed submissions.",
+            "Report the exact number of DomainResults accepted by the platform-owned transport.",
+        )]
     return []
 
 
@@ -552,7 +550,7 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 "Keep the validated semantic instructions available to the isolated release worker.",
             ))
         else:
-            for contract in registration.agent_contracts:
+            for contract in registration.domain_result_contracts:
                 installed_semantic_path = (target / contract.semantic_instructions_path).resolve()
                 try:
                     installed_semantic_path.relative_to(target)
@@ -570,14 +568,14 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 except OSError:
                     issues.append(_package_issue(
                         "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_MISSING",
-                        "The wheel does not contain the Agent contract semantic-instructions file.",
+                        "The wheel does not contain the DomainResult contract semantic-instructions file.",
                         "Include semanticInstructions.path in the built wheel package data.",
                     ))
                     continue
                 if contract.semantic_instructions_sha256 != installed_semantic_digest:
                     issues.append(_package_issue(
                         "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_DIGEST_MISMATCH",
-                        "The installed semantic-instructions bytes do not match the registered Agent contract digest.",
+                        "The installed semantic-instructions bytes do not match the registered DomainResult contract digest.",
                         "Generate the digest from the exact semantic-instructions file included in the wheel.",
                     ))
                 if expected_semantic_digest != installed_semantic_digest:
@@ -597,7 +595,7 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                     "The installed registration review payload schema differs from the packaged review payload schema.",
                     "Publish the same checkpoint payload schema in the descriptor and registration.",
                 ))
-        if not issues and registration.agent_contracts:
+        if not issues and registration.domain_result_contracts:
             issues.extend(_run_release_acceptance(
                 registration, descriptor, target, result_path.parent / "acceptance",
             ))

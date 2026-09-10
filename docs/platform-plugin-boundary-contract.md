@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.1.0 |
-| Date | 2026-09-07 |
-| Status | Adopted; public-surface import gate 1.1.0 implemented (see §5) |
+| Document version | 1.3.0 |
+| Date | 2026-09-08 |
+| Status | Adopted; public-surface import gate 1.3.0 implemented (see §5) |
 | Authority | Derived from Platform Constitution v1 and Plugin Contract v1 |
 | Scope | Module ownership, dependency direction, compatibility bridges, and governance gates |
 
@@ -77,12 +77,14 @@ implementation are not a substitute for registration.
 Plugins may depend only on the following stable surfaces:
 
 - `assayer_platform.contract` entities and versioned enums;
-- top-level `assayer_platform.AgentContractBundle` for immutable, versioned
-  Agent-facing Check contracts;
+- top-level `assayer_platform.DomainResultContract` for every current
+  Agent-facing interactive Check contract;
 - plugin registration, manifest, and conformance APIs;
 - capability-provider registration and negotiated provider interfaces;
 - evidence-claim and decision validation APIs;
 - result and staged-delivery contracts;
+- `assayer_platform.plugin_sdk` EntityId validation, JSON-safe projection, and
+  deterministic plugin contract errors;
 - documented platform context and failure types.
 
 Plugins must not import private modules solely because they contain a useful
@@ -98,6 +100,12 @@ modules and symbols listed there; widening the surface requires updating the
 whitelist and this contract together and adding a conformance fixture for the
 newly public symbol.
 
+Public-surface version 1.3.0 adds `DomainResultContract` for the domain-only
+Agent result boundary. Plugins MUST use the `assayer_platform.plugin_sdk`
+`validate_entity_id` and `to_json_value` helpers instead of maintaining local
+copies. Unsupported output is rejected with `PluginContractError` before
+persistence or publication; it is never repaired by an Agent retry loop.
+
 ## 6. Plugin Responsibilities and Limits
 
 A plugin may:
@@ -108,6 +116,26 @@ A plugin may:
 - define semantic-review instructions and domain Findings;
 - declare execution profiles, required capabilities, and invalidation signals;
 - provide an optional namespaced `domainExtension` for the canonical result.
+
+An interactive plugin MUST publish every Agent-facing JSON Schema and every
+schema-external semantic rejection rule in its immutable
+`DomainResultContract`. The Host returns only the current domain task's schema
+and rules before Agent work begins. A plugin validator MUST identify a violated
+semantic rule with the same stable `ruleId`; hidden runtime-only preconditions
+are contract defects and are never learned through an Agent retry loop.
+
+The Agent submits only `domainResult` through `advance_plugin_run`. The Host
+resolves stable Evidence references against the current immutable packet,
+invokes the plugin validator and mapper, and persists the resulting Decision.
+Run, WorkItem, collection, checkpoint, digest, revision, and finalization
+fields are Host-owned and forbidden in the DomainResult. The old checkpoint,
+preflight, Decision, and finish operations are private migration primitives and
+are rejected at the Agent boundary with `UNSUPPORTED_PROTOCOL`.
+
+If a mutating boundary is nevertheless rejected, the terminal
+`AGENT_CORRECTION_BUDGET_EXHAUSTED` response retains the original validation
+error pointers and messages so operators can diagnose the first invalid
+payload rather than receiving only a budget-exhausted summary.
 
 A plugin may not:
 
@@ -137,19 +165,14 @@ The platform kernel may change only when the missing behavior is a lifecycle,
 integrity, security, or common result concern shared by at least two domains.
 The plugin-specific interpretation of a new fact remains in the plugin.
 
-## 8. Compatibility Bridge Rule
+## 8. Compatibility Rule
 
-Compatibility bridges are allowed only when all conditions hold:
-
-1. The bridge is explicitly named and documented as compatibility code;
-2. The generic contract remains the authoritative source of truth;
-3. The bridge cannot create a second terminal result or ledger;
-4. The bridge preserves generic identity, evidence, and validity semantics;
-5. A removal condition and conformance test are recorded.
-
-The current frontend canonical-result adapter is therefore a permitted bridge,
-not a target platform layer. Generic publication must work without importing
-that adapter.
+The removed Agent checkpoint/decision envelope has no compatibility adapter.
+New plugins MUST NOT publish or consume it, and the Host MUST fail fast with
+`UNSUPPORTED_PROTOCOL`. Existing private migration helpers may remain only
+inside the Host until their callers are removed; they are not an Agent or
+plugin extension point. A new compatibility bridge requires an explicit major
+contract decision and is out of scope for SDK v2.
 
 ## 9. Result and Ledger Authority
 
@@ -176,12 +199,10 @@ Boundary changes follow the platform constitution:
 
 Migration order:
 
-1. Add the generic contract and conformance test;
-2. Keep the compatibility bridge and dual-read if required;
-3. Migrate one plugin without changing semantic outcomes;
-4. Make the generic path the default;
-5. Remove the bridge only after clean-install, resume, and terminal-result
-   acceptance passes.
+1. Add the DomainResult contract and conformance tests;
+2. Migrate one plugin without changing domain semantic outcomes;
+3. Verify clean install, resume, replay, and terminal-result publication;
+4. Reject the legacy Agent envelope at the public transport boundary.
 
 No physical package move is allowed to remove a compatibility bridge before the
 generic path is independently verified.

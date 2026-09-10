@@ -38,6 +38,20 @@ not installed, tell them it is missing and offer to install it first (see
 | "what plugins do i have", "list plugins" | `list_plugins()` |
 | "tell me about ass-spec", "info ass-spec" | `get_plugin_info(pluginId="ass-spec")` |
 
+For "version", "latest version", or "what version is installed" questions,
+call `get_plugin_info` first and only. Do not scan the repository, manifests,
+lock files, Git history, package indexes, or call `list_plugins` afterward.
+Report `activeVersion` as the installed version. Report
+`latestAvailableVersion` as the catalog latest only when
+`latestVersionKnown=true`. When it is false, say that the upstream latest is
+unknown because the catalog is unavailable or has no entry; do not retry the
+catalog within the same user request. Read-only catalog lookup has a single
+three-second budget. Use `versionRelation` directly: `current` means installed
+and catalog versions match, `update_available` means a newer catalog release
+exists, and `installed_ahead_of_catalog` means the local installation is newer
+than the public catalog. Do not reinterpret these relations from repository
+files.
+
 These never mutate and need no confirmation.
 
 ## Mutations are two-phase: plan, confirm, execute

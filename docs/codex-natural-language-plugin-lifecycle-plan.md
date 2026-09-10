@@ -2,11 +2,18 @@
 
 | 元数据 | 内容 |
 |---|---|
-| 文档版本 | 1.0.0 |
-| 日期 | 2026-09-06 |
-| 状态 | 待实施计划 |
+| 文档版本 | 1.0.1 |
+| 日期 | 2026-09-09 |
+| 状态 | 自动化实现与 Clean Codex CLI 验收完成；自然语言 operator 验收待完成 |
 | Owner | Assayer Maintainers |
 | 主要客户端 | Codex CLI |
+
+截至 2026-09-09，P0 生命周期闭环、P1 自然语言路由和安装后同连接运行
+已经由自动化测试覆盖；完整 full gate、exact bundle 构建，以及隔离
+`CODEX_HOME` 下的 Marketplace CLI 发现/安装/列出/launcher 启动也已通过。
+剩余工作只是在真实交互 Codex 会话中记录自然语言确认、独立 domain plugin
+运行、升级/回滚/卸载和重启后的 operator 证据，不再把独立插件消费 SDK 或
+底层生命周期能力描述为尚未实现的功能。
 
 ## 1. 目标
 
@@ -428,7 +435,7 @@ list_plugins
 plan_plugin_change(install) -> execute_plugin_change(token, confirmed=true)
 list_plugins
 start_plugin_run
-finish_plugin_run
+advance_plugin_run(domainResult)
 plan_plugin_change(uninstall) -> execute_plugin_change(token, confirmed=true)
 list_plugins
 start_plugin_run

@@ -19,9 +19,16 @@ from assayer_platform import (
     load_plugin_manifest,
     validate_candidate_evidence_graph_projection,
     inspect_plugin_lifecycle,
+    inspect_plugin_registration,
 )
 from tests.helpers.config_quality import ConfigQualityPlugin, ConfigurationDecisionProvider
-from assayer_frontend_audit import FrontendAuditPlugin, FrontendDecisionProvider, ProductFrontendRuntime
+from assayer_frontend_audit import (
+    FRONTEND_DOMAIN_RESULT_CONTRACT,
+    FrontendAuditPlugin,
+    FrontendDecisionProvider,
+    ProductFrontendRuntime,
+    registration as frontend_registration,
+)
 
 
 class RecordPlugin:
@@ -72,6 +79,14 @@ class RecordDecisionProvider:
 
 
 class CrossPluginConformanceTest(unittest.TestCase):
+    def test_frontend_interactive_registration_uses_domain_result_contract(self):
+        self.assertEqual(frontend_registration.agent_contracts, ())
+        self.assertEqual(
+            frontend_registration.domain_result_contracts,
+            (FRONTEND_DOMAIN_RESULT_CONTRACT,),
+        )
+        self.assertTrue(inspect_plugin_registration(frontend_registration).passed)
+
     def test_generic_lifecycle_gate_accepts_a_registered_plugin(self):
         from tests.helpers import config_quality_registration
         with tempfile.TemporaryDirectory() as directory:

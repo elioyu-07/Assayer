@@ -20,7 +20,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Mapping, TextIO
 
 from jsonschema import Draft202012Validator
 
@@ -33,10 +33,6 @@ from assayer_platform import (
     PlatformRunner, PlatformContractError, PluginRegistry, InteractivePluginController,
 )
 from assayer_platform import installed_plugin_registry
-from assayer_platform.interactive import (
-    INTERACTIVE_CHECKPOINT_INPUT_SCHEMA,
-    INTERACTIVE_DECISION_INPUT_SCHEMA,
-)
 from assayer_platform.error_policy import boundary_error_policy
 from assayer_platform.plugin_lifecycle import package_checksum
 
@@ -394,6 +390,16 @@ class PlatformMcpToolTransport:
                 "capabilities": sorted(item.capabilities),
                 "executionModes": sorted(item.execution_modes),
                 "scopeSchema": dict(item.scope_schema),
+                "compatibility": (
+                    {
+                        "protocolMinVersion": item.compatibility.protocol_min_version,
+                        "protocolMaxVersion": item.compatibility.protocol_max_version,
+                        "sdkMinVersion": item.compatibility.sdk_min_version,
+                        "sdkMaxVersion": item.compatibility.sdk_max_version,
+                        "capabilities": sorted(item.compatibility.capabilities),
+                    }
+                    if item.compatibility is not None else None
+                ),
             } for item in sorted(self._registry.list(), key=lambda value: value.manifest.plugin_id)]}
             return {"structuredContent": {"status": "ok", "result": payload},
                     "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)}],
@@ -432,6 +438,14 @@ class InteractivePlatformMcpToolTransport:
     an external runtime; this transport never starts a browser implicitly.
     """
 
+    # Private Host methods remain available for migration and recovery, but
+    # these legacy Agent operations are deliberately not part of the normal
+    # model-facing catalog.
+    _LEGACY_AGENT_OPERATIONS = frozenset({
+        "checkpoint_review", "validate_checkpoint_draft",
+        "submit_decisions", "finish_plugin_run",
+    })
+
     _SCHEMAS = {
         "start_plugin_run": {
             "type": "object", "additionalProperties": False,
@@ -441,6 +455,17 @@ class InteractivePlatformMcpToolTransport:
                 "checkId": {"type": "string", "minLength": 1},
                 "checkVersion": {"type": "string", "minLength": 1},
                 "scope": {},
+                "rerunAuthorization": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["previousRunId", "userConfirmed"],
+                    "properties": {
+                        "previousRunId": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,127}$",
+                        },
+                        "userConfirmed": {"const": True},
+                    },
+                },
             },
         },
         "resume_plugin_run": {
@@ -454,26 +479,7 @@ class InteractivePlatformMcpToolTransport:
             "type": "object", "additionalProperties": False,
             "properties": {
                 "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
-                "reviewCheckpoint": deepcopy(INTERACTIVE_CHECKPOINT_INPUT_SCHEMA),
-                "decision": deepcopy(INTERACTIVE_DECISION_INPUT_SCHEMA),
-                "closeout": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["status"],
-                    "properties": {
-                        "status": {"enum": ["partial", "failed"]},
-                        "failures": {
-                            "type": "array", "items": {
-                                "type": "object", "additionalProperties": False,
-                                "required": ["code", "message"],
-                                "properties": {
-                                    "workItemId": {"type": "string", "minLength": 1},
-                                    "code": {"type": "string", "minLength": 1},
-                                    "message": {"type": "string", "minLength": 1},
-                                },
-                            },
-                        },
-                    },
-                },
+                "domainResult": {"type": "object"},
             },
         },
         "get_plugin_result": {
@@ -517,16 +523,6 @@ class InteractivePlatformMcpToolTransport:
                 "groupKey": {"type": "string", "minLength": 1},
             },
         },
-        "checkpoint_review": deepcopy(INTERACTIVE_CHECKPOINT_INPUT_SCHEMA),
-        "submit_decisions": {
-            "type": "object", "additionalProperties": False,
-            "required": ["decisions"], "properties": {
-                "decisions": {
-                    "type": "array", "minItems": 1,
-                    "items": deepcopy(INTERACTIVE_DECISION_INPUT_SCHEMA),
-                },
-            },
-        },
         "recover_work_item": {
             "type": "object", "additionalProperties": False,
             "required": ["workItemId"], "properties": {
@@ -537,23 +533,6 @@ class InteractivePlatformMcpToolTransport:
         "get_plugin_progress": {
             "type": "object", "additionalProperties": False,
             "properties": {},
-        },
-        "finish_plugin_run": {
-            "type": "object", "additionalProperties": False,
-            "required": ["status"], "properties": {
-                "status": {"enum": ["completed", "partial", "failed"]},
-                "failures": {
-                    "type": "array", "items": {
-                        "type": "object", "additionalProperties": False,
-                        "required": ["code", "message"],
-                        "properties": {
-                            "workItemId": {"type": "string", "minLength": 1},
-                            "code": {"type": "string", "minLength": 1},
-                            "message": {"type": "string", "minLength": 1},
-                        },
-                    },
-                },
-            },
         },
     }
 
@@ -571,6 +550,11 @@ class InteractivePlatformMcpToolTransport:
         )
         self._active_run_id: str | None = self._controller.active_run_id
         self._terminal_run_id: str | None = self._controller.terminal_run_id
+        # Only a Run that became terminal through this live MCP transport
+        # requires an in-session rerun confirmation. A restored terminal
+        # pointer belongs to an earlier session and remains readable, but must
+        # not make an otherwise fresh session unusable.
+        self._rerun_confirmation_run_id: str | None = None
 
     def _compute_store_digest(self) -> str | None:
         """Digest the durable store so a change can be detected without polling.
@@ -633,56 +617,26 @@ class InteractivePlatformMcpToolTransport:
 
     def list_tools(self) -> list[dict]:
         descriptions = {
-            "start_plugin_run": "Start a domain-neutral interactive plugin Run using only plugin, Check, and business scope. The response reports the resolved plugin identity (pluginId, version, platformApiVersion); confirm that version before submitting checkpoint payloads.",
+            "start_plugin_run": "Start one domain-neutral interactive plugin Run using only plugin, Check, and business scope. Compatibility is negotiated before Run creation; unsupported protocol/SDK combinations fail without partial state. If this MCP session already has a terminal Run, do not start another until the user explicitly confirms it; then include rerunAuthorization with that previousRunId and userConfirmed=true. The response reports the resolved plugin identity and negotiated compatibility.",
             "resume_plugin_run": "Explicitly resume one durable plugin Run by the Run ID returned when it started; Host startup never resumes a Run implicitly.",
-            "advance_plugin_run": "Drive Host-owned discovery, inspection, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal.",
+            "advance_plugin_run": "Drive Host-owned discovery, inspection, domain-result binding, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal. For a v2 domain-result Check, submit only domainResult; the Host binds the current task and all platform identity internally.",
             "get_plugin_result": "Read one bounded page from a terminal result; the complete result remains durably stored.",
             "discover_work_items": "Discover logical WorkItems for an active plugin Run.",
             "inspect_work_items": "Inspect selected WorkItems and return summary-first InvestigationPackets; set includeEvidence=true only when full payloads are required.",
             "expand_investigation": "Expand selected immutable Evidence for an inspected WorkItem when the indexed payload is required in full.",
             "expand_evidence_collection": "Read one bounded page from a plugin-declared immutable Evidence collection, with stable item IDs and optional mechanical groups; this never advances or mutates the Run.",
-            "checkpoint_review": "Durably checkpoint semantic-review progress for stable items in a declared Evidence collection. First expand the Evidence collection that exposes the frozen source sections (its itemIdField is source_chunk_id) to read the sourceChunks; then build each evidence_refs entry by copying five fields verbatim from one matching sourceChunks entry: source_chunk_id, start_line, end_line, source_digest, document_path. Do NOT reference an EvidenceRecord evidenceId here: evidence_refs must point at sourceChunks, and evidenceId belongs to a different identifier namespace.",
-            "submit_decisions": "Submit the platform DecisionProposal skeleton (workItemId, result, findings, reason) and, for a review, its finalization and reviewCheckpointIds. Submit domain-level findings page-by-page through checkpoint_review instead; the plugin assembles the canonical envelope from those checkpoints.",
             "recover_work_item": "Record plugin/runtime recovery for one WorkItem.",
             "get_plugin_progress": "Return progress for an active plugin Run, including the resolved plugin identity (pluginId, version).",
-            "finish_plugin_run": "Finish an interactive plugin Run with completed, partial, or failed status.",
         }
-        contract = self._review_payload_contract_text()
-        if contract:
-            descriptions["checkpoint_review"] += " Checkpoint payload contract: " + contract
-            descriptions["advance_plugin_run"] += " Review checkpoint payload contract: " + contract
         tools = []
         for name, schema in self._SCHEMAS.items():
             tool_schema = deepcopy(schema)
-            if contract:
-                if name == "checkpoint_review":
-                    tool_schema["properties"]["payload"]["description"] = contract
-                elif name == "advance_plugin_run":
-                    tool_schema["properties"]["reviewCheckpoint"]["properties"]["payload"]["description"] = contract
             tools.append({"name": name, "description": descriptions[name], "inputSchema": tool_schema})
         return tools
 
-    def _review_payload_contract_text(self) -> str:
-        """Collect legacy checkpoint payload contracts for tool descriptions.
-
-        Registrations using ``AgentContractBundle`` receive an exact selected
-        schema in ``semanticTask`` and are validated before plugin hooks. This
-        description-only path remains solely for unmigrated registrations that
-        still declare one global ``review_payload_schema``.
-        """
-        parts = []
-        for registration in self._controller.registry.list():
-            schema = registration.review_payload_schema
-            if not schema:
-                continue
-            parts.append(
-                f"{registration.manifest.plugin_id} ({registration.manifest.version}): "
-                f"{json.dumps(schema, ensure_ascii=False, sort_keys=True)}"
-            )
-        return "\n".join(parts)
-
     def _raise_contract_error(
         self, name: str, arguments: dict[str, Any], error: PlatformContractError,
+        *, cause: Exception | None = None,
     ) -> None:
         policy = boundary_error_policy(error.code)
         resolution = {
@@ -691,7 +645,7 @@ class InteractivePlatformMcpToolTransport:
             "owner": policy.owner,
             "retryDisposition": policy.retry_disposition,
             "requiredNextStep": policy.required_next_step,
-            "requestId": None,
+            "requestId": f"request:{uuid.uuid4().hex}",
             "contractDigest": None,
             "errors": [dict(item) for item in error.errors],
             "correctionBudget": None,
@@ -716,10 +670,17 @@ class InteractivePlatformMcpToolTransport:
                 ) from handling_error
             if resolution["terminalStatus"] is not None:
                 self._terminal_run_id = active_run_id
+                self._rerun_confirmation_run_id = active_run_id
                 self._active_run_id = None
 
         resolved_policy = boundary_error_policy(resolution["code"])
-        if (
+        if cause is not None:
+            _LOG.error(
+                "Unhandled interactive platform failure: requestId=%s code=%s owner=%s tool=%s",
+                resolution["requestId"], resolution["code"], resolution["owner"], name,
+                exc_info=(type(cause), cause, cause.__traceback__),
+            )
+        elif (
             resolution["owner"] in {"plugin", "platform"}
             and resolved_policy.terminal_on_rejection
         ):
@@ -738,41 +699,30 @@ class InteractivePlatformMcpToolTransport:
             errors=resolution["errors"],
             correction_budget=resolution["correctionBudget"],
             terminal_status=resolution["terminalStatus"],
-        ) from error
+        ) from (cause or error)
 
     def call_tool(self, name: str, arguments: object) -> dict:
+        if name in self._LEGACY_AGENT_OPERATIONS:
+            raise HostError(
+                "UNSUPPORTED_PROTOCOL",
+                f"Interactive operation {name} belongs to the removed legacy Agent protocol; use advance_plugin_run with domainResult",
+            )
         if name not in self._SCHEMAS:
             raise HostError("UNKNOWN_TOOL", f"Tool {name} does not exist")
         if not isinstance(arguments, dict):
             raise HostError("INVALID_REQUEST", f"{name} arguments must be an object")
-        if (
-            name == "advance_plugin_run"
-            and self._active_run_id is not None
-            and self._controller.uses_agent_contract(self._active_run_id)
-            and sum(
-                key in arguments
-                for key in ("reviewCheckpoint", "decision", "closeout")
-            ) > 1
+        if name == "advance_plugin_run" and any(
+            key in arguments for key in ("reviewCheckpoint", "decision", "closeout")
         ):
-            self._raise_contract_error(
-                name, arguments,
-                PlatformContractError(
-                    "AGENT_CONTRACT_ENVELOPE_INVALID",
-                    "Agent input must contain at most one semantic mutation",
-                    errors=({
-                        "pointer": "/",
-                        "keyword": "mutualExclusivity",
-                        "message": (
-                            "reviewCheckpoint, decision, and closeout are mutually exclusive"
-                        ),
-                    },),
-                ),
+            raise HostError(
+                "UNSUPPORTED_PROTOCOL",
+                "The legacy checkpoint/decision/closeout envelope is removed; submit only domainResult",
             )
         error = next(Draft202012Validator(self._SCHEMAS[name]).iter_errors(arguments), None)
         if error is not None:
             if (
                 self._active_run_id is not None
-                and name in {"advance_plugin_run", "checkpoint_review", "submit_decisions"}
+                and name == "advance_plugin_run"
                 and self._controller.uses_agent_contract(self._active_run_id)
             ):
                 pointer = "/" + "/".join(
@@ -801,6 +751,17 @@ class InteractivePlatformMcpToolTransport:
                     raise self._controller.resume_error
                 if self._active_run_id is not None:
                     raise PlatformContractError("RUN_CONFLICT", "An interactive plugin Run is already active")
+                if self._rerun_confirmation_run_id is not None:
+                    authorization = arguments.get("rerunAuthorization")
+                    if not (
+                        isinstance(authorization, dict)
+                        and authorization.get("previousRunId") == self._rerun_confirmation_run_id
+                        and authorization.get("userConfirmed") is True
+                    ):
+                        raise PlatformContractError(
+                            "RERUN_USER_CONFIRMATION_REQUIRED",
+                            "Starting another plugin Run requires explicit user confirmation for the latest terminal Run",
+                        )
                 self._refresh_registry()
                 result = self._controller.start(
                     plugin_id=arguments["pluginId"], check_id=arguments["checkId"],
@@ -808,12 +769,14 @@ class InteractivePlatformMcpToolTransport:
                 )
                 self._active_run_id = result["runId"]
                 self._terminal_run_id = None
+                self._rerun_confirmation_run_id = None
             elif name == "resume_plugin_run":
                 if self._active_run_id is not None:
                     raise PlatformContractError("RUN_CONFLICT", "An interactive plugin Run is already active")
                 result = self._controller.resume(arguments["runId"])
                 if result.get("status") in {"completed", "partial", "failed"}:
                     self._terminal_run_id = result["runId"]
+                    self._rerun_confirmation_run_id = result["runId"]
                 else:
                     self._active_run_id = result["runId"]
                     self._terminal_run_id = None
@@ -824,15 +787,14 @@ class InteractivePlatformMcpToolTransport:
                 )
             elif name == "advance_plugin_run":
                 if self._active_run_id is None and self._terminal_run_id is not None:
-                    if any(key in arguments for key in ("reviewCheckpoint", "decision", "closeout")):
+                    if "domainResult" in arguments:
                         raise PlatformContractError(
                             "RUN_TERMINAL", "The latest plugin Run is terminal and cannot accept more semantic input",
                         )
                     result = self._controller.terminal_status(self._terminal_run_id)
                 else:
                     result = self._controller.advance(
-                        self._active_run(), review_checkpoint=arguments.get("reviewCheckpoint"),
-                        decision=arguments.get("decision"), closeout=arguments.get("closeout"),
+                        self._active_run(), domain_result=arguments.get("domainResult"),
                         page_size=arguments.get("pageSize"),
                     )
             elif name == "discover_work_items":
@@ -853,34 +815,60 @@ class InteractivePlatformMcpToolTransport:
                     cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
                     group_key=arguments.get("groupKey"),
                 )
-            elif name == "checkpoint_review":
-                result = self._controller.checkpoint_review(
-                    self._active_run(), arguments["workItemId"], arguments["collectionId"],
-                    arguments["itemIds"], arguments["payload"],
-                    arguments.get("supersedesCheckpointId"),
-                    arguments.get("contractDigest"),
-                )
-            elif name == "submit_decisions":
-                result = self._controller.submit_decisions(self._active_run(), arguments["decisions"])
             elif name == "recover_work_item":
                 result = self._controller.recover(self._active_run(), arguments["workItemId"], arguments.get("payload"))
             elif name == "get_plugin_progress":
                 result = self._controller.progress(self._active_run())
-            else:
-                result = self._controller.finish(self._active_run(), arguments["status"], arguments.get("failures", ()))
-                self._terminal_run_id = result["runId"]
-                self._active_run_id = None
             if name == "advance_plugin_run" and result.get("status") in {"completed", "partial", "failed"}:
                 self._terminal_run_id = result["runId"]
+                self._rerun_confirmation_run_id = result["runId"]
                 self._active_run_id = None
+            failed = result.get("status") == "failed"
+            # MCP clients that understand ``structuredContent`` already have
+            # the authoritative response above.  Returning the complete JSON
+            # a second time in ``content`` needlessly doubles the wire payload
+            # (and was the last remaining source of ~280 KB semantic-review
+            # envelopes after the domain projection was compacted).  Keep a
+            # small compatibility/status text block for clients that render
+            # text, while leaving the full result in structuredContent only.
+            content_result = result.get("result")
+            content_status = (
+                content_result.get("status")
+                if isinstance(content_result, Mapping) else None
+            )
+            content_workflow = (
+                content_result.get("workflow")
+                if isinstance(content_result, Mapping)
+                else None
+            )
+            content_text = json.dumps({
+                "status": result.get("status"),
+                "runId": result.get("runId"),
+                "runRevision": result.get("runRevision"),
+                **({"resultStatus": content_status} if content_status is not None else {}),
+                **({
+                    "requiredNextStep": content_workflow.get("requiredNextStep"),
+                    "phase": content_workflow.get("phase"),
+                } if isinstance(content_workflow, Mapping) else {}),
+            }, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+            return {
+                "structuredContent": {"status": "failed" if failed else "ok", "result": result},
+                "content": [{"type": "text", "text": content_text}],
+                "isError": failed,
+            }
         except PlatformContractError as exc:
             self._raise_contract_error(name, arguments, exc)
-        failed = result.get("status") == "failed"
-        return {
-            "structuredContent": {"status": "failed" if failed else "ok", "result": result},
-            "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)}],
-            "isError": failed,
-        }
+        except HostError:
+            raise
+        except Exception as exc:
+            self._raise_contract_error(
+                name, arguments,
+                PlatformContractError(
+                    "PLATFORM_INTERNAL_ERROR",
+                    "The platform could not complete this operation; read the terminal result",
+                ),
+                cause=exc,
+            )
 
     def close(self) -> None:
         self._controller.close()

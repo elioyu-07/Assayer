@@ -12,13 +12,18 @@ the newly public symbol.
 
 from __future__ import annotations
 
-PUBLIC_SURFACE_VERSION = "1.1.0"
+PUBLIC_SURFACE_VERSION = "1.4.0"
 
 PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     "assayer_platform": frozenset({
-        "AgentContractBundle",
+        "DomainResultContract",
+        "EvidenceHandle",
+        "EvidenceHandleRegistry",
         "PluginRegistration",
         "PlatformContext",
+        "PluginCompatibility",
+        "CompatibilityResult",
+        "negotiate_plugin_compatibility",
     }),
     "assayer_platform.contract": frozenset({
         "CheckContract",
@@ -51,6 +56,33 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     "assayer_platform.identity": frozenset({
         "digest_bytes",
         "document_state_digest",
+    }),
+    "assayer_platform.plugin_sdk": frozenset({
+        "ENTITY_ID_PATTERN",
+        "JsonScalar",
+        "JsonValue",
+        "PLUGIN_CONTRACT_VIOLATION",
+        "PluginContractError",
+        "to_json_value",
+        "validate_entity_id",
+    }),
+    "assayer_platform.plugin_compatibility": frozenset({
+        "HOST_PROTOCOL_CAPABILITIES",
+        "HOST_SUPPORTED_PROTOCOL_VERSIONS",
+        "HOST_PROTOCOL_VERSION",
+        "HOST_SDK_VERSION",
+        "CompatibilityResult",
+        "PluginCompatibility",
+        "negotiate_plugin_compatibility",
+    }),
+    "assayer_platform.evidence_handles": frozenset({
+        "EvidenceHandle",
+        "EvidenceHandleRegistry",
+    }),
+    "assayer_platform.evidence_reference": frozenset({
+        "host_evidence_references",
+        "resolve_evidence_references",
+        "validate_domain_evidence_references",
     }),
     "assayer_platform.source_chunking": frozenset({
         "build_source_chunks",

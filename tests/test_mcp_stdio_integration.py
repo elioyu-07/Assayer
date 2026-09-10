@@ -112,16 +112,17 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
             "scope": {"files": [{"path": str(sample), "requiredKeys": ["name"]}]},
         })
         self.assertFalse(started.isError)
+        started_result = _envelope(started)["structuredContent"]["result"]
 
         # Drive the same public workflow Codex uses through a terminal result.
         advanced = _envelope(await session.call_tool("advance_plugin_run", {}))
         advanced_result = advanced["structuredContent"]["result"]
         self.assertEqual(advanced_result["status"], "awaiting_agent_decision")
         task = advanced_result["result"]["semanticTask"]
-        self.assertEqual(task["kind"], "decide_work_item")
+        self.assertEqual(task["kind"], "domain_review")
+        self.assertNotIn("workItemId", task)
         terminal = _envelope(await session.call_tool("advance_plugin_run", {
-            "decision": {
-                "workItemId": task["workItemId"],
+            "domainResult": {
                 "result": "scanned_no_issue",
                 "findings": [{
                     "dimension": "required_keys",
@@ -184,6 +185,9 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
         rejected = await session.call_tool("start_plugin_run", {
             "pluginId": PLUGIN_ID, "checkId": "TST-001",
             "scope": {"files": [{"path": str(sample)}]},
+            "rerunAuthorization": {
+                "previousRunId": started_result["runId"], "userConfirmed": True,
+            },
         })
         self.assertTrue(rejected.isError)
         self.assertIn("not registered", rejected.content[0].text)

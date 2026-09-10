@@ -14,6 +14,7 @@ from .contract import (
     PLATFORM_API_VERSION, CheckContract, ExecutionProfile,
     PlatformContractError, PluginManifest,
 )
+from .plugin_compatibility import PluginCompatibility
 
 
 def _version_core(value: str) -> tuple[int, int, int]:
@@ -104,4 +105,12 @@ def load_plugin_manifest(source: str | Path | Mapping[str, Any]) -> PluginManife
         plugin_id=value["pluginId"], version=value["version"],
         platform_api_version=value["platformApiVersion"], domains=tuple(value["domains"]),
         subject_kinds=tuple(value["subjectKinds"]), checks=checks, execution_profile=execution,
+        compatibility=(PluginCompatibility(
+            protocol_min_version=value.get("compatibility", {}).get("protocolMinVersion", "1.0.0"),
+            protocol_max_version=value.get("compatibility", {}).get("protocolMaxVersion", "1.2.0"),
+            sdk_min_version=value.get("compatibility", {}).get("sdkMinVersion", "0.1.0"),
+            sdk_max_version=value.get("compatibility", {}).get("sdkMaxVersion", "0.1.2"),
+            capabilities=frozenset(value.get("compatibility", {}).get("capabilities", ())),
+            domain_contract_version=value.get("compatibility", {}).get("domainContractVersion"),
+        ) if value.get("compatibility") is not None else None),
     )

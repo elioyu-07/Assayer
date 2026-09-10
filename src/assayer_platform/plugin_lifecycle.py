@@ -98,16 +98,21 @@ def package_checksum(root: str | Path) -> str:
 
 
 def read_package_descriptor(package_root: str | Path) -> dict:
-    """Read and validate a plugin package's release descriptor, fail-closed.
+    """Read a descriptor only after the complete static package gate passes.
 
-    Public wrapper around the private descriptor reader so the host lifecycle
-    facade can inspect a local package without importing its code or reaching
-    into private platform internals.  A missing package maps to
-    ``PLUGIN_PACKAGE_NOT_FOUND``; an unreadable or malformed descriptor (or one
-    missing ``pluginId`` / ``pluginVersion``) maps to
-    ``PLUGIN_RELEASE_DESCRIPTOR_INVALID``.
+    Planning and release checking must not recognize different descriptor
+    shapes.  Reuse :func:`inspect_plugin_package` here so a local lifecycle
+    plan cannot issue an executable token for a package that the installer
+    will later quarantine.  The private reader remains the post-validation
+    loader used inside the manager.
     """
-    return _descriptor(package_root)
+    root = Path(package_root).expanduser().resolve()
+    descriptor = _descriptor(root)
+    report = inspect_plugin_package(root)
+    if not report.passed:
+        first = report.issues[0]
+        raise PlatformContractError(first.code, first.message)
+    return descriptor
 
 
 def _copy_installer(package_root: Path, target: Path) -> None:
@@ -494,7 +499,17 @@ def discover_plugin_registry(
             entry["stateReason"] = "PLUGIN_CHECKSUM_MISMATCH"
             store.save(index)
             continue
-        registration = loader(package_root)
+        try:
+            registration = loader(package_root)
+        except Exception as error:
+            # An installed package built against the removed Agent SDK (or
+            # otherwise failing registration import) is not a usable plugin.
+            # Quarantine it in the durable index; never resurrect compatibility
+            # exports or let one stale package crash discovery for all plugins.
+            entry["state"] = "dirty"
+            entry["stateReason"] = getattr(error, "code", "PLUGIN_REGISTRATION_LOAD_FAILED")
+            store.save(index)
+            continue
         registry.register(registration)
     return registry
 

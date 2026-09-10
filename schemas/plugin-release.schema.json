@@ -25,6 +25,18 @@
     "description": { "$ref": "common.schema.json#/$defs/nonEmptyString" },
     "pluginVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
     "platformApiVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+    "compatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocolMinVersion", "protocolMaxVersion", "sdkMinVersion", "sdkMaxVersion", "capabilities"],
+      "properties": {
+        "protocolMinVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "protocolMaxVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "sdkMinVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "sdkMaxVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
+        "capabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
+        "domainContractVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" }
+      }
+    },
     "registration": {
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_]*$"

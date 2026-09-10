@@ -25,6 +25,22 @@
       "propertyNames": { "$ref": "common.schema.json#/$defs/entityId" },
       "additionalProperties": { "type": "object" }
     },
+    "checkpointSemanticRules": {
+      "type": "object",
+      "propertyNames": { "$ref": "common.schema.json#/$defs/entityId" },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ruleId", "instruction"],
+          "properties": {
+            "ruleId": { "$ref": "common.schema.json#/$defs/entityId" },
+            "instruction": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
     "finalizationSchema": {
       "oneOf": [
         { "type": "object" },

@@ -91,7 +91,7 @@ def _packet(value: InvestigationPacket | Mapping[str, Any], check: CheckContract
 
 
 class FrontendAuditPlugin:
-    """Compatibility plugin backed by an injected legacy frontend runtime."""
+    """Frontend plugin backed by an injected runtime adapter."""
 
     manifest: PluginManifest = load_plugin_manifest(_MANIFEST)
 
@@ -104,6 +104,15 @@ class FrontendAuditPlugin:
     def inspect(self, work_items: Sequence[WorkItem], check: CheckContract, context: PlatformContext) -> Sequence[InvestigationPacket]:
         by_id = {item.work_item_id: item for item in work_items}
         return tuple(_packet(item, check, by_id) for item in self.runtime.inspect_work_items(work_items, check, context))
+
+    def map_domain_result(self, result, packet, check, context):
+        """Project the plugin-defined frontend review into a Host Decision."""
+        del packet, check, context
+        return {
+            "result": result["result"],
+            "findings": result["findings"],
+            "reason": result["reason"],
+        }
 
 
 class FrontendDecisionProvider:

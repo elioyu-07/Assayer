@@ -23,23 +23,65 @@ _POLICIES = {
     "AGENT_CONTRACT_INPUT_INVALID": BoundaryErrorPolicy(
         "agent_input", "agent_correction", "correct_agent_input",
     ),
+    "DOMAIN_RESULT_INVALID": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_domain_result",
+    ),
+    "DOMAIN_EVIDENCE_REFERENCE_INVALID": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_domain_result",
+    ),
     "PLUGIN_SEMANTIC_INPUT_INVALID": BoundaryErrorPolicy(
         "agent_input", "agent_correction", "correct_agent_input",
     ),
+    "AGENT_CHECKPOINT_PREFLIGHT_REQUIRED": BoundaryErrorPolicy(
+        "agent_input", "none", "validate_checkpoint_draft", True,
+    ),
+    "AGENT_CHECKPOINT_PREFLIGHT_STALE": BoundaryErrorPolicy(
+        "agent_input", "none", "validate_checkpoint_draft", True,
+    ),
     "AGENT_CONTRACT_STALE": BoundaryErrorPolicy(
+        "contract_state", "refresh_boundary", "refresh_semantic_boundary",
+    ),
+    "AGENT_SEMANTIC_TASK_STALE": BoundaryErrorPolicy(
+        "contract_state", "refresh_boundary", "refresh_semantic_boundary",
+    ),
+    "STALE_EVIDENCE_HANDLE": BoundaryErrorPolicy(
+        "contract_state", "refresh_boundary", "refresh_semantic_boundary",
+    ),
+    "CROSS_TASK_EVIDENCE_HANDLE": BoundaryErrorPolicy(
         "contract_state", "refresh_boundary", "refresh_semantic_boundary",
     ),
     "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH": BoundaryErrorPolicy(
         "plugin", "none", "read_terminal_result", True,
     ),
+    "PLUGIN_CONTRACT_VIOLATION": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
     "PLUGIN_RUNTIME_FAILURE": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
+    "PLUGIN_REPORT_FAILED": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
+    "PLUGIN_SUMMARY_FAILED": BoundaryErrorPolicy(
         "plugin", "none", "read_terminal_result", True,
     ),
     "PLATFORM_CONTRACT_STATE_INVALID": BoundaryErrorPolicy(
         "platform", "none", "read_terminal_result", True,
     ),
+    "PLATFORM_INTERNAL_ERROR": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
     "AGENT_CORRECTION_BUDGET_EXHAUSTED": BoundaryErrorPolicy(
         "agent_input", "none", "read_terminal_result", True,
+    ),
+    "RERUN_USER_CONFIRMATION_REQUIRED": BoundaryErrorPolicy(
+        "agent_input", "none", "request_user_confirmation",
+    ),
+    "RUN_RESTART_REQUIRED": BoundaryErrorPolicy(
+        "contract_state", "none", "start_new_run",
+    ),
+    "UNSUPPORTED_PROTOCOL": BoundaryErrorPolicy(
+        "agent_input", "none", "stop", True,
     ),
 }
 
@@ -69,9 +111,13 @@ _PLUGIN_STOP_CODES = frozenset({
 def boundary_error_policy(code: str) -> BoundaryErrorPolicy:
     """Return a closed policy; unknown errors are never Agent-retryable."""
     if code in _AGENT_INPUT_STOP_CODES:
-        return BoundaryErrorPolicy("agent_input", "none", "stop")
+        return BoundaryErrorPolicy(
+            "agent_input", "none", "read_terminal_result", True,
+        )
     if code in _PLUGIN_STOP_CODES:
-        return BoundaryErrorPolicy("plugin", "none", "stop")
+        return BoundaryErrorPolicy(
+            "plugin", "none", "read_terminal_result", True,
+        )
     return _POLICIES.get(code, BoundaryErrorPolicy("platform", "none", "stop"))
 
 

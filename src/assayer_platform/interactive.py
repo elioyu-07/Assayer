@@ -14,7 +14,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -22,7 +21,7 @@ from typing import Any, Callable
 
 from jsonschema import Draft202012Validator
 
-from .agent_contract import AgentContractBundle
+from .agent_contract import AgentContractBundle, DomainResultContract
 from .contract import (
     CommitReceipt,
     DecisionProposal,
@@ -36,11 +35,13 @@ from .contract import (
     WorkItem,
 )
 from .plugin_registry import PluginRegistry, PluginRegistration
+from .plugin_sdk import to_json_value, validate_entity_id
 from .result_delivery import StagedResultDocument
 from .canonical_result import validate_canonical_result
 from .actionable_result import extract_result_delivery
 from .evidence_graph import validate_candidate_evidence_graph_projection
 from .evidence_collection import EvidenceCollectionPager
+from .evidence_reference import validate_domain_evidence_references
 from .error_policy import (
     DEFAULT_AGENT_CORRECTION_BUDGET,
     boundary_error_policy,
@@ -48,9 +49,12 @@ from .error_policy import (
 from .ledger import JsonPlatformLedgerStore, workflow_progress
 from .ownership import RunOwnership
 from .session import InteractivePlatformRun, InteractivePlatformSession
+from .task_context import TaskContext
+from .evidence_handles import EvidenceHandleRegistry
+from .plugin_compatibility import HOST_PROTOCOL_VERSION, negotiate_plugin_compatibility
 
 
-INTERACTIVE_PROTOCOL_VERSION = "1.2"
+INTERACTIVE_PROTOCOL_VERSION = ".".join(HOST_PROTOCOL_VERSION.split(".")[:2])
 INTERACTIVE_OPERATIONS = (
     "start",
     "resume",
@@ -58,13 +62,12 @@ INTERACTIVE_OPERATIONS = (
     "get_result",
     "discover",
     "inspect",
-    "submit_decisions",
     "recover",
     "progress",
-    "finish",
+    # Checkpoint, Decision, and finish methods remain private Host primitives;
+    # they are intentionally absent from the Agent-facing operation catalog.
 )
 
-_RUN_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{2,127}$")
 _LOG = logging.getLogger(__name__)
 
 DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE = 20
@@ -84,6 +87,9 @@ INTERACTIVE_CHECKPOINT_INPUT_SCHEMA = {
         "payload": {"type": "object"},
         "supersedesCheckpointId": {"type": "string", "minLength": 1},
         "contractDigest": {
+            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
+        },
+        "taskDigest": {
             "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
         },
     },
@@ -127,6 +133,9 @@ INTERACTIVE_DECISION_INPUT_SCHEMA = {
         "contractDigest": {
             "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
         },
+        "taskDigest": {
+            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
+        },
     },
 }
 
@@ -168,11 +177,36 @@ def _agent_contract_identity(contract: AgentContractBundle) -> dict[str, str]:
 
 def _agent_contract_task(
     contract: AgentContractBundle, *, input_kind: str, schema: Mapping[str, Any],
+    semantic_rules: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    return {
+    task = {
         **_agent_contract_identity(contract),
         "inputKind": input_kind,
         "schema": _plain(schema),
+    }
+    if semantic_rules:
+        task["semanticRules"] = _plain(semantic_rules)
+    return task
+
+
+def _domain_result_contract_task(contract: DomainResultContract) -> dict[str, Any]:
+    """Publish only the domain contract; Host identity stays server-side."""
+    value = contract.as_dict()
+    return {
+        "contractId": value["contractId"],
+        "contractVersion": value["contractVersion"],
+        "checkId": value["checkId"],
+        "checkVersion": value["checkVersion"],
+        "inputKind": "domainResult",
+        "resultSchema": _plain(value["resultSchema"]),
+        # Keep the contract's resource identity visible so a client can
+        # correlate the semantic guidance with the frozen executable
+        # contract.  The resource contents are intentionally not loaded into
+        # the task; semanticRules and resultShape below are derived from the
+        # same immutable contract and are the actionable Agent guidance.
+        "semanticInstructions": _plain(value["semanticInstructions"]),
+        "resultShape": _plain(contract.result_shape),
+        **({"semanticRules": _plain(value["semanticRules"])} if "semanticRules" in value else {}),
     }
 
 
@@ -186,6 +220,7 @@ def _direct_decision_schema() -> dict[str, Any]:
         "required": [
             *INTERACTIVE_DECISION_INPUT_SCHEMA["required"],
             "contractDigest",
+            "taskDigest",
         ],
         "properties": properties,
     }
@@ -201,6 +236,8 @@ def _json_pointer(path: Sequence[Any]) -> str:
 
 def _validate_agent_schema(
     schema: Mapping[str, Any], value: Any, *, work_item_id: str | None = None,
+    error_code: str = "AGENT_CONTRACT_INPUT_INVALID",
+    error_message: str = "Agent input does not satisfy the Run-frozen executable contract; correct the reported fields",
 ) -> None:
     errors = sorted(
         Draft202012Validator(dict(schema)).iter_errors(value),
@@ -212,14 +249,72 @@ def _validate_agent_schema(
     )
     if not errors:
         return
-    structured_errors = tuple({
-        "pointer": _json_pointer(tuple(error.absolute_path)) or "/",
-        "keyword": str(error.validator or "schema"),
-        "message": f"Value does not satisfy the declared {error.validator or 'schema'} constraint",
-    } for error in errors[:8])
+    projected: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(path: Sequence[Any], keyword: str, message: str) -> None:
+        pointer = _json_pointer(tuple(path)) or "/"
+        identity = (pointer, keyword, message)
+        if identity not in seen and len(projected) < 8:
+            seen.add(identity)
+            projected.append({
+                "pointer": pointer,
+                "keyword": keyword,
+                "message": message[:512],
+            })
+
+    for error in errors:
+        if len(projected) >= 8:
+            break
+        path = tuple(error.absolute_path)
+        keyword = str(error.validator or "schema")
+        if keyword == "required" and isinstance(error.instance, Mapping):
+            required = error.validator_value
+            missing = (
+                [field for field in required if field not in error.instance]
+                if isinstance(required, (tuple, list)) else []
+            )
+            for field in missing:
+                add((*path, field), "required", "Required field is missing")
+            if missing:
+                continue
+        if (
+            keyword == "additionalProperties"
+            and error.validator_value is False
+            and isinstance(error.instance, Mapping)
+            and isinstance(error.schema, Mapping)
+        ):
+            properties = error.schema.get("properties", {})
+            allowed = set(properties) if isinstance(properties, Mapping) else set()
+            unknown = sorted(
+                key for key in error.instance
+                if isinstance(key, str) and key not in allowed
+            )
+            for field in unknown:
+                add(
+                    (*path, field), "additionalProperties",
+                    "Field is not declared by this contract",
+                )
+            if unknown:
+                continue
+        if keyword == "enum" and isinstance(error.validator_value, (tuple, list)):
+            allowed_values = ", ".join(
+                item if isinstance(item, str) else json.dumps(
+                    item, ensure_ascii=False, sort_keys=True,
+                )
+                for item in error.validator_value
+            )
+            add(path, "enum", f"Allowed values: {allowed_values}")
+            continue
+        add(
+            path,
+            keyword,
+            f"Value does not satisfy the declared {keyword} constraint",
+        )
+    structured_errors = tuple(projected)
     raise PlatformContractError(
-        "AGENT_CONTRACT_INPUT_INVALID",
-        "Agent input does not satisfy the Run-frozen executable contract; correct the reported fields",
+        error_code,
+        error_message,
         errors=structured_errors,
         work_item_id=work_item_id,
     )
@@ -506,6 +601,110 @@ def _packet(packet: InvestigationPacket, *, include_evidence: bool = True,
     }
 
 
+def _domain_packet(packet: InvestigationPacket) -> dict[str, Any]:
+    """Project an InvestigationPacket without Host identity fields."""
+    value = _packet(packet, include_evidence=True)
+    value.pop("workItem", None)
+    value.pop("checkId", None)
+    value.pop("checkVersion", None)
+    value.pop("recoveryStatus", None)
+    value.pop("caseRef", None)
+    value["subject"] = {
+        "kind": packet.work_item.kind,
+        "identity": packet.work_item.identity,
+        "metadata": _plain(packet.work_item.metadata),
+    }
+    value["evidenceIndex"] = [{
+        "evidenceId": item.evidence_id,
+        "kind": item.kind,
+        "sourceIdentity": item.source_identity,
+    } for item in packet.evidence]
+    value["evidence"] = [{
+        "evidenceId": item.evidence_id,
+        "kind": item.kind,
+        "sourceIdentity": item.source_identity,
+        "payload": _plain(item.payload),
+    } for item in packet.evidence]
+    return value
+
+
+def _domain_agent_view(
+    packet: InvestigationPacket, registry: EvidenceHandleRegistry,
+    *, domain_data: Mapping[str, Any] | Sequence[Any] | None = None,
+) -> dict[str, Any]:
+    """Build the minimal Agent view without platform Evidence identities.
+
+    Domain plugins may expose a compact, domain-owned projection through
+    ``build_domain_agent_data``.  The immutable InvestigationPacket remains
+    the source of truth; this projection only controls what crosses the
+    Agent-facing transport boundary.  The fallback deliberately preserves the
+    historical full payload for plugins that have not opted into a compact
+    view yet.
+    """
+    dimensions = []
+    for item in packet.dimensions:
+        refs = [
+            handle for reference in item.evidence_refs
+            if (handle := registry.handle_for_reference(reference)) is not None
+        ]
+        dimensions.append({
+            "name": item.name,
+            "observations": list(item.observations),
+            "evidenceRefs": refs,
+            "candidateStatus": item.candidate_status,
+        })
+    if domain_data is None:
+        evidence_payloads = [
+            _agent_safe_value(item.payload, registry)
+            for item in packet.evidence
+        ]
+    else:
+        evidence_payloads = _agent_safe_value(domain_data, registry)
+    return {
+        "subject": {"kind": packet.work_item.kind},
+        "dimensions": dimensions,
+        "evidence": [
+            registry.resolve(handle).as_public()
+            for handle in registry.handles
+        ],
+        "domainData": evidence_payloads,
+    }
+
+
+_AGENT_PRIVATE_KEYS = frozenset({
+    "runid", "workitemid", "checkpointid", "taskdigest", "contractdigest",
+    "evidenceid", "sourcechunkid", "sourcedigest", "documentpath", "path",
+    "startline", "endline", "line", "sourceidentity", "revision",
+    "runrevision", "checkid", "checkversion",
+})
+
+
+def _agent_safe_value(value: Any, registry: EvidenceHandleRegistry) -> Any:
+    """Project domain material while removing Host identity and location data."""
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        internal_ref = (
+            value.get("source_chunk_id") or value.get("sourceChunkId")
+            or value.get("evidence_id") or value.get("evidenceId")
+        )
+        if isinstance(internal_ref, str):
+            handle = registry.handle_for_reference(internal_ref)
+            if handle is not None:
+                result["evidenceRef"] = handle
+        for key, item in value.items():
+            normalized = str(key).replace("_", "").lower()
+            if normalized in _AGENT_PRIVATE_KEYS:
+                continue
+            result[str(key)] = _agent_safe_value(item, registry)
+        return result
+    if isinstance(value, (tuple, list)):
+        return [_agent_safe_value(item, registry) for item in value]
+    if isinstance(value, str):
+        handle = registry.handle_for_reference(value)
+        return handle if handle is not None else value
+    return value
+
+
 def _collection_group_key(collection_id: str, values: Mapping[str, Any]) -> str:
     canonical = json.dumps(_plain(values), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(f"{collection_id}\x1f{canonical}".encode("utf-8")).hexdigest()[:16]
@@ -745,6 +944,10 @@ class InteractivePluginController:
         else:
             check = self.registry.check(registration, (check_id, check_version))
         agent_contract = registration.agent_contract_for(check.ref)
+        domain_result_contract = registration.domain_result_contract_for(check.ref)
+        # Negotiate before creating a plugin, claiming ownership, or writing
+        # a ledger.  Incompatible combinations therefore leave no partial Run.
+        compatibility = negotiate_plugin_compatibility(registration.compatibility)
         run_id = run_id or f"run-{uuid.uuid4().hex}"
         if run_id in self._runs:
             raise PlatformContractError("RUN_CONFLICT", "An interactive Run with this ID already exists")
@@ -769,6 +972,21 @@ class InteractivePluginController:
             raise PlatformContractError("PLUGIN_INITIALIZATION_FAILED", "Interactive plugin could not be initialized") from error
         if getattr(plugin, "manifest", None) != registration.manifest:
             raise PlatformContractError("PLUGIN_IDENTITY_MISMATCH", "Plugin factory returned different registered metadata")
+        if domain_result_contract is not None:
+            missing = [
+                name for name in ("map_domain_result",)
+                if not callable(getattr(plugin, name, None))
+            ]
+            if missing:
+                # This is a plugin implementation defect, not an Agent input
+                # problem.  Detect it before ownership/ledger creation so a
+                # malformed release cannot reach a semantic boundary and
+                # consume the Agent correction budget.
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The domain-result plugin is missing required operation(s): "
+                    + ", ".join(missing),
+                )
         store = JsonPlatformLedgerStore(self.output_root / run_id)
         self._claim_ownership(run_id)
         try:
@@ -778,6 +996,7 @@ class InteractivePluginController:
             self._runs[run_id] = {
                 "registration": registration,
                 "agent_contract": agent_contract,
+                "domain_result_contract": domain_result_contract,
                 "scope": scope,
                 "context": context,
                 "plugin": plugin,
@@ -786,6 +1005,12 @@ class InteractivePluginController:
                 "evidence_collections": {},
                 "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
                 "discovery_complete": False,
+                "active_semantic_task": None,
+                "active_semantic_task_payload": None,
+                "task_context": None,
+                "evidence_handle_registry": None,
+                "compatibility": compatibility,
+                "validated_checkpoint_draft": None,
             }
             self._write_resume_descriptor(run_id, registration, scope, caps)
         except Exception:
@@ -798,6 +1023,7 @@ class InteractivePluginController:
         }
         if agent_contract is not None:
             result["agentContract"] = _agent_contract_identity(agent_contract)
+        result["compatibility"] = compatibility.as_dict()
         return self._response(run_id, "started", result)
 
     def _terminal_pointer_path(self) -> Path:
@@ -956,6 +1182,12 @@ class InteractivePluginController:
         agent_contract = self._runs[run_id].get("agent_contract")
         if agent_contract is not None:
             descriptor["agentContract"] = _agent_contract_identity(agent_contract)
+        domain_result_contract = self._runs[run_id].get("domain_result_contract")
+        if domain_result_contract is not None:
+            descriptor["domainResultContract"] = domain_result_contract.as_dict(include_digest=True)
+        compatibility = self._runs[run_id].get("compatibility")
+        if compatibility is not None:
+            descriptor["compatibility"] = compatibility.as_dict()
         run_path = self.output_root / run_id / "platform-resume.json"
         try:
             temporary = run_path.with_name(run_path.name + ".tmp")
@@ -976,8 +1208,7 @@ class InteractivePluginController:
         return self.output_root / run_id / "platform-owner.lock"
 
     def _claim_ownership(self, run_id: str) -> None:
-        if not _RUN_ID.fullmatch(run_id):
-            raise PlatformContractError("INVALID_RUN_ID", "Run ID is not safe for ownership persistence")
+        validate_entity_id(run_id, label="Run ID", code="INVALID_RUN_ID")
         if run_id in self._ownership_locks:
             return
         run_root = self.output_root / run_id
@@ -1047,8 +1278,7 @@ class InteractivePluginController:
         """Explicitly claim and restore one durable interactive Run."""
         if self._runs:
             raise PlatformContractError("RUN_CONFLICT", "This Host already owns an interactive plugin Run")
-        if not _RUN_ID.fullmatch(run_id):
-            raise PlatformContractError("INVALID_RUN_ID", "Run ID is not safe for ownership persistence")
+        validate_entity_id(run_id, label="Run ID", code="INVALID_RUN_ID")
         descriptor_path = self.output_root / run_id / "platform-resume.json"
         if not descriptor_path.is_file():
             raise PlatformContractError(
@@ -1077,7 +1307,17 @@ class InteractivePluginController:
                 raise PlatformContractError(
                     "PLUGIN_IDENTITY_MISMATCH", "The active Run requires a different installed plugin version",
                 )
+            compatibility = negotiate_plugin_compatibility(registration.compatibility)
+            frozen_compatibility = descriptor.get("compatibility")
+            if frozen_compatibility != compatibility.as_dict():
+                raise PlatformContractError(
+                    "RUN_RESTART_REQUIRED",
+                    "The active Run was created under a different or unrecorded interaction protocol; start a new Run",
+                )
             agent_contract = registration.agent_contract_for(
+                (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
+            )
+            domain_result_contract = registration.domain_result_contract_for(
                 (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
             )
             frozen_agent_contract = descriptor.get("agentContract")
@@ -1089,6 +1329,16 @@ class InteractivePluginController:
                 raise PlatformContractError(
                     "AGENT_CONTRACT_STALE",
                     "The active Run requires a different executable Agent contract",
+                )
+            frozen_domain_result_contract = descriptor.get("domainResultContract")
+            current_domain_result_contract = (
+                domain_result_contract.as_dict(include_digest=True)
+                if domain_result_contract is not None else None
+            )
+            if frozen_domain_result_contract != current_domain_result_contract:
+                raise PlatformContractError(
+                    "DOMAIN_RESULT_CONTRACT_STALE",
+                    "The active Run requires a different executable domain-result contract",
                 )
             scope = descriptor["scope"]
             resolved_runtime = None
@@ -1121,10 +1371,17 @@ class InteractivePluginController:
             self._runs[run_id] = {
                 "registration": registration, "scope": scope, "context": context,
                 "plugin": plugin, "run": run, "agent_contract": agent_contract,
+                "domain_result_contract": domain_result_contract,
                 "committer": registration.create_committer(resolved_runtime),
                 "evidence_collections": collections,
                 "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
                 "discovery_complete": run.discovery_complete,
+                "active_semantic_task": None,
+                "active_semantic_task_payload": None,
+                "task_context": None,
+                "evidence_handle_registry": None,
+                "compatibility": compatibility,
+                "validated_checkpoint_draft": None,
             }
             self._write_resume_descriptor(run_id, registration, scope, capabilities)
             response = self.advance(run_id)
@@ -1375,13 +1632,52 @@ class InteractivePluginController:
             )
         return contract
 
+    @staticmethod
+    def _require_active_semantic_task(
+        state: Mapping[str, Any], *, task_digest: Any, kind: str,
+        work_item_id: str, collection_id: str | None = None,
+        item_ids: Sequence[str] | None = None,
+    ) -> None:
+        active = state.get("active_semantic_task")
+        matches = (
+            isinstance(active, Mapping)
+            and task_digest == active.get("taskDigest")
+            and kind == active.get("kind")
+            and work_item_id == active.get("workItemId")
+        )
+        if collection_id is not None:
+            matches = matches and collection_id == active.get("collectionId")
+        if item_ids is not None:
+            matches = matches and list(item_ids) == active.get("itemIds")
+        if not matches:
+            raise PlatformContractError(
+                "AGENT_SEMANTIC_TASK_STALE",
+                "Agent input does not match the exact current semantic task; refresh the boundary and do not switch WorkItem, collection, or item IDs",
+                errors=({
+                    "pointer": "/taskDigest",
+                    "keyword": "currentSemanticTask",
+                    "message": "taskDigest and task identity must match the current semanticTask",
+                },),
+                work_item_id=work_item_id or None,
+            )
+
     def _validate_checkpoint_contract(
         self, state: Mapping[str, Any], work_item_id: str, collection_id: str,
-        payload: Mapping[str, Any], contract_digest: Any,
+        item_ids: Sequence[str], payload: Mapping[str, Any], contract_digest: Any,
+        task_digest: Any, supersedes_checkpoint_id: str | None,
     ) -> None:
         contract = self._require_agent_contract_digest(state, contract_digest)
         if contract is None:
             return
+        if supersedes_checkpoint_id is None:
+            self._require_active_semantic_task(
+                state,
+                task_digest=task_digest,
+                kind="review_evidence_items",
+                work_item_id=work_item_id,
+                collection_id=collection_id,
+                item_ids=item_ids,
+            )
         schema = contract.checkpoint_payload_schemas.get(collection_id)
         if schema is None:
             collection = state["evidence_collections"].get(work_item_id, {}).get(
@@ -1406,6 +1702,19 @@ class InteractivePluginController:
             return
 
         work_item_id = value.get("workItemId")
+        active_task = state.get("active_semantic_task")
+        expected_kind = (
+            str(active_task.get("kind"))
+            if isinstance(active_task, Mapping) else ""
+        )
+        if expected_kind not in {"finalize_decision", "decide_work_item"}:
+            expected_kind = "finalize_decision"
+        self._require_active_semantic_task(
+            state,
+            task_digest=value.get("taskDigest"),
+            kind=expected_kind,
+            work_item_id=str(work_item_id) if work_item_id is not None else "",
+        )
         collections = state["evidence_collections"].get(work_item_id, {})
         requires_checkpoint_assembly = any(
             collection["reviewRequired"] and collection["itemIds"]
@@ -1434,18 +1743,194 @@ class InteractivePluginController:
             work_item_id=str(work_item_id) if work_item_id is not None else None,
         )
 
+    def _validate_plugin_checkpoint(
+        self, state: Mapping[str, Any], checkpoint: ReviewCheckpoint,
+        selected: Sequence[Mapping[str, Any]],
+        prior: Sequence[ReviewCheckpoint],
+    ) -> None:
+        """Run the plugin's semantic validator without persisting a checkpoint."""
+        run: InteractivePlatformRun = state["run"]
+        validator = getattr(state["plugin"], "validate_review_checkpoint", None)
+        if not callable(validator):
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin does not implement its declared checkpoint validator",
+                    work_item_id=checkpoint.work_item_id,
+                )
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
+                "A plugin that persists semantic review checkpoints must validate them before persistence",
+            )
+        try:
+            validator(
+                checkpoint, selected, prior, run.investigations[checkpoint.work_item_id],
+                run.check, state["context"],
+            )
+        except PlatformContractError as error:
+            if (
+                state.get("agent_contract") is not None
+                and error.code != "PLUGIN_SEMANTIC_INPUT_INVALID"
+            ):
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin rejected schema-valid checkpoint input outside its declared semantic error contract",
+                    work_item_id=checkpoint.work_item_id,
+                ) from error
+            raise
+        except (AssertionError, KeyError, TypeError) as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin failed while validating schema-valid checkpoint input",
+                    work_item_id=checkpoint.work_item_id,
+                ) from error
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
+                "Plugin checkpoint validation failed before persistence",
+            ) from error
+        except Exception as error:
+            if state.get("agent_contract") is not None:
+                raise PlatformContractError(
+                    "PLUGIN_RUNTIME_FAILURE",
+                    "The plugin failed unexpectedly while validating checkpoint input",
+                    work_item_id=checkpoint.work_item_id,
+                ) from error
+            raise PlatformContractError(
+                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
+                "Plugin checkpoint validation failed before persistence",
+            ) from error
+
+    def validate_checkpoint_draft(
+        self, run_id: str, work_item_id: str, collection_id: str,
+        item_ids: Sequence[str], payload: Mapping[str, Any],
+        contract_digest: str | None = None,
+        task_digest: str | None = None,
+        supersedes_checkpoint_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate a checkpoint draft without persistence or correction-budget use.
+
+        This is intentionally a read-only preflight boundary.  It validates the
+        frozen task, generic collection coverage, the executable JSON Schema,
+        and the plugin's semantic validator, but never records a rejection or
+        checkpoint.  Agents can therefore repair a draft without consuming the
+        Run's correction budget.
+        """
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        try:
+            self._validate_checkpoint_contract(
+                state, work_item_id, collection_id, item_ids, payload,
+                contract_digest, task_digest, supersedes_checkpoint_id,
+            )
+            run: InteractivePlatformRun = state["run"]
+            collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
+            if collection is None:
+                raise PlatformContractError(
+                    "UNKNOWN_EVIDENCE_COLLECTION",
+                    "Review checkpoint references an undeclared Evidence collection",
+                )
+            if not collection["reviewRequired"]:
+                raise PlatformContractError(
+                    "EVIDENCE_COLLECTION_NOT_REVIEWABLE",
+                    "Reference Evidence collections can be expanded but cannot receive review checkpoints",
+                )
+            requested = tuple(sorted(item_ids))
+            if len(requested) > MAX_EVIDENCE_COLLECTION_PAGE_SIZE:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_CHECKPOINT",
+                    "Review checkpoint exceeds the maximum Evidence collection page size",
+                )
+            unknown = set(requested) - set(collection["itemIds"])
+            if unknown:
+                raise PlatformContractError(
+                    "UNKNOWN_EVIDENCE_COLLECTION_ITEM",
+                    "Review checkpoint references an unknown collection item",
+                )
+            identity = {
+                "runId": run_id,
+                "workItemId": work_item_id,
+                "collectionId": collection_id,
+                "itemIds": sorted(requested),
+                "payload": _plain(payload),
+            }
+            if supersedes_checkpoint_id is not None:
+                identity["supersedesCheckpointId"] = supersedes_checkpoint_id
+            canonical = json.dumps(
+                identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            )
+            checkpoint_id = f"review:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:24]}"
+            checkpoint = ReviewCheckpoint(
+                checkpoint_id, work_item_id, run.check.check_id, run.check.version,
+                collection_id, requested, payload, supersedes_checkpoint_id,
+            )
+            run.validate_review_checkpoint_record(checkpoint)
+            requested_set = set(requested)
+            selected = tuple(
+                item for item_id, item in zip(collection["itemIds"], collection["items"])
+                if item_id in requested_set
+            )
+            prior = tuple(
+                item for item in run.effective_review_checkpoints
+                if item.work_item_id == work_item_id
+                and item.collection_id == collection_id
+                and item.checkpoint_id not in {checkpoint_id, supersedes_checkpoint_id}
+            )
+            self._validate_plugin_checkpoint(state, checkpoint, selected, prior)
+            state["validated_checkpoint_draft"] = checkpoint_id
+            return self._response(run_id, "checkpoint_draft_validated", {
+                "valid": True,
+                "workItemId": work_item_id,
+                "collectionId": collection_id,
+                "itemIds": list(requested),
+                "checkpointId": checkpoint_id,
+            })
+        except PlatformContractError as error:
+            # Preflight may report draft-owned errors without entering the
+            # correction-budget path, but a plugin or platform defect is not
+            # an Agent correction. Re-raise those failures so the normal
+            # boundary policy can terminalize the Run immediately.
+            if error.code in {
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "PLUGIN_CONTRACT_VIOLATION",
+                "PLUGIN_RUNTIME_FAILURE",
+                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
+                "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
+            }:
+                raise
+            return self._response(run_id, "checkpoint_draft_invalid", {
+                "valid": False,
+                "workItemId": work_item_id,
+                "collectionId": collection_id,
+                "itemIds": list(item_ids),
+                "error": {
+                    "code": error.code,
+                    "message": error.message,
+                    "errors": [dict(item) for item in error.errors],
+                    "workItemId": error.work_item_id,
+                },
+            })
+
     def checkpoint_review(
         self, run_id: str, work_item_id: str, collection_id: str,
         item_ids: Sequence[str], payload: Mapping[str, Any],
         supersedes_checkpoint_id: str | None = None,
         contract_digest: str | None = None,
+        task_digest: str | None = None,
     ) -> dict[str, Any]:
         """Durably checkpoint opaque semantic review for declared collection items."""
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         self._validate_checkpoint_contract(
-            state, work_item_id, collection_id, payload, contract_digest,
+            state, work_item_id, collection_id, item_ids, payload,
+            contract_digest, task_digest, supersedes_checkpoint_id,
         )
+        if state.get("agent_contract") is not None and state.get("validated_checkpoint_draft") is None:
+            raise PlatformContractError(
+                "AGENT_CHECKPOINT_PREFLIGHT_REQUIRED",
+                "A checkpoint must pass validate_checkpoint_draft before checkpoint_review",
+                work_item_id=work_item_id,
+            )
         run: InteractivePlatformRun = state["run"]
         collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
         if collection is None:
@@ -1480,23 +1965,25 @@ class InteractivePluginController:
             identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         )
         checkpoint_id = f"review:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:24]}"
+        if (
+            state.get("agent_contract") is not None
+            and state.get("validated_checkpoint_draft") != checkpoint_id
+        ):
+            raise PlatformContractError(
+                "AGENT_CHECKPOINT_PREFLIGHT_STALE",
+                "The checkpoint payload differs from the last preflight; validate this exact draft again",
+                errors=({
+                    "pointer": "/",
+                    "keyword": "checkpointPreflight",
+                    "message": "Run validate_checkpoint_draft for the exact task envelope and payload",
+                },),
+                work_item_id=work_item_id,
+            )
         checkpoint = ReviewCheckpoint(
             checkpoint_id, work_item_id, run.check.check_id, run.check.version,
             collection_id, requested, payload, supersedes_checkpoint_id,
         )
         run.validate_review_checkpoint_record(checkpoint)
-        validator = getattr(state["plugin"], "validate_review_checkpoint", None)
-        if not callable(validator):
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin does not implement its declared checkpoint validator",
-                    work_item_id=work_item_id,
-                )
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
-                "A plugin that persists semantic review checkpoints must validate them before persistence",
-            )
         requested_set = set(requested)
         selected = tuple(
             item for item_id, item in zip(collection["itemIds"], collection["items"])
@@ -1507,46 +1994,13 @@ class InteractivePluginController:
             if item.work_item_id == work_item_id and item.collection_id == collection_id
             and item.checkpoint_id not in {checkpoint_id, supersedes_checkpoint_id}
         )
-        try:
-            validator(
-                checkpoint, selected, prior, run.investigations[work_item_id],
-                run.check, state["context"],
-            )
-        except PlatformContractError as error:
-            if (
-                state.get("agent_contract") is not None
-                and error.code != "PLUGIN_SEMANTIC_INPUT_INVALID"
-            ):
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin rejected schema-valid checkpoint input outside its declared semantic error contract",
-                    work_item_id=work_item_id,
-                ) from error
-            raise
-        except (AssertionError, KeyError, TypeError) as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin failed while validating schema-valid checkpoint input",
-                    work_item_id=work_item_id,
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
-                "Plugin checkpoint validation failed before persistence",
-            ) from error
-        except Exception as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_RUNTIME_FAILURE",
-                    "The plugin failed unexpectedly while validating checkpoint input",
-                    work_item_id=work_item_id,
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
-                "Plugin checkpoint validation failed before persistence",
-            ) from error
+        self._validate_plugin_checkpoint(state, checkpoint, selected, prior)
         replayed = checkpoint_id in run.review_checkpoints
         run.record_review_checkpoints((checkpoint,))
+        state["validated_checkpoint_draft"] = None
+        state["active_semantic_task"] = None
+        state["task_context"] = None
+        state["active_semantic_task_payload"] = None
         relevant = tuple(
             item for item in run.effective_review_checkpoints
             if item.work_item_id == work_item_id and item.collection_id == collection_id
@@ -1568,8 +2022,133 @@ class InteractivePluginController:
             },
         }, operation_id=checkpoint_id, replayed=replayed)
 
+    @staticmethod
+    def _evidence_handle_offset(
+        run: InteractivePlatformRun, work_item_id: str,
+    ) -> int:
+        """Return a deterministic Run-local ordinal for one semantic task.
+
+        Handles stay short while never being reused by a later WorkItem in the
+        same Run.  The value is derived from frozen investigations, so resume
+        reconstructs the same handle set without persisting Agent-visible IDs.
+        """
+        offset = 0
+        for candidate_id in run.work_items:
+            if candidate_id == work_item_id:
+                break
+            packet = run.investigations.get(candidate_id)
+            if packet is not None:
+                offset += len(EvidenceHandleRegistry.from_packet(candidate_id, packet).handles)
+        return offset
+
+    @staticmethod
+    def _publish_semantic_task(
+        state: Mapping[str, Any], task: dict[str, Any],
+    ) -> dict[str, Any]:
+        contract = state.get("agent_contract")
+        domain_contract = state.get("domain_result_contract")
+        if contract is None and domain_contract is None:
+            state["active_semantic_task"] = None
+            state["task_context"] = None
+            return task
+        run: InteractivePlatformRun = state["run"]
+        work_item_id = str(task.get("workItemId") or "")
+        accepted_checkpoint_ids = sorted(
+            checkpoint.checkpoint_id
+            for checkpoint in run.effective_review_checkpoints
+            if checkpoint.work_item_id == work_item_id
+        )
+        binding = {
+            "runId": run.context.run_id,
+            "workItemId": work_item_id,
+            "kind": task.get("kind"),
+            "collectionId": task.get("collectionId"),
+            "itemIds": list(task.get("itemIds", ())),
+            "reviewCheckpointIds": list(task.get("reviewCheckpointIds", ())),
+            "acceptedCheckpointIds": accepted_checkpoint_ids,
+            "contractDigest": (
+                contract.contract_digest if contract is not None
+                else domain_contract.contract_digest
+            ),
+        }
+        task_digest = "sha256:" + hashlib.sha256(json.dumps(
+            binding, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        state["active_semantic_task"] = {
+            "taskDigest": task_digest,
+            "kind": task.get("kind"),
+            "workItemId": work_item_id,
+            "collectionId": task.get("collectionId"),
+            "itemIds": list(task.get("itemIds", ())),
+        }
+        if domain_contract is not None and contract is None:
+            public_task = dict(task)
+            packet = run.investigations.get(work_item_id)
+            registry = None
+            if packet is not None:
+                registry = EvidenceHandleRegistry.from_packet(
+                    work_item_id, packet,
+                    start_ordinal=InteractivePluginController._evidence_handle_offset(
+                        run, work_item_id,
+                    ),
+                )
+                state["evidence_handle_registry"] = registry
+                public_task["evidenceHandles"] = [
+                    registry.resolve(handle).as_public()
+                    for handle in registry.handles
+                ]
+                public_task["agentView"] = _domain_agent_view(
+                    packet,
+                    registry,
+                    domain_data=InteractivePluginController._domain_agent_data(state, packet),
+                )
+            # Explicitly negotiated registrations use the minimal boundary;
+            # legacy registrations retain the old projection during migration.
+            compatibility = state.get("compatibility")
+            if (
+                state.get("registration").compatibility is not None
+                and compatibility is not None
+                and compatibility.protocol_version == HOST_PROTOCOL_VERSION
+            ):
+                public_task.pop("investigation", None)
+                public_task.pop("evidenceHandles", None)
+                if "reviewContext" in public_task and registry is not None:
+                    # Document context is already part of the compact domain
+                    # projection.  Do not repeat the large source-fact index
+                    # on every semantic boundary.
+                    raw_review_context = public_task["reviewContext"]
+                    if isinstance(raw_review_context, Mapping):
+                        context_only = {
+                            "documentContext": raw_review_context.get("documentContext", {}),
+                        }
+                        public_task["reviewContext"] = _agent_safe_value(
+                            context_only, registry,
+                        )
+                    else:
+                        public_task.pop("reviewContext", None)
+            for field_name in (
+                "workItemId", "collectionId", "itemIds", "reviewCheckpointIds",
+                "coverage",
+            ):
+                public_task.pop(field_name, None)
+            public_task["domainContract"] = _domain_result_contract_task(domain_contract)
+            state["task_context"] = TaskContext.from_task(
+                run.context.run_id, task,
+                contract_digest=domain_contract.contract_digest,
+                task_digest=task_digest,
+            )
+            state["active_semantic_task_payload"] = _plain(public_task)
+            return public_task
+        task["taskDigest"] = task_digest
+        state["task_context"] = None
+        state["active_semantic_task_payload"] = _plain(task)
+        return task
+
     def _semantic_task(self, state: Mapping[str, Any], page_size: int) -> dict[str, Any] | None:
         """Return the next bounded semantic input without changing Evidence or decisions."""
+        active_payload = state.get("active_semantic_task_payload")
+        if isinstance(active_payload, Mapping):
+            return _plain(active_payload)
         run: InteractivePlatformRun = state["run"]
         for work_item_id in run.work_items:
             packet = run.investigations.get(work_item_id)
@@ -1610,6 +2189,20 @@ class InteractivePluginController:
                 for collection_id, collection in collections.items()
                 if not collection["reviewRequired"]
             })
+            domain_contract = state.get("domain_result_contract")
+            if domain_contract is not None and state.get("agent_contract") is None:
+                # DomainResult is currently a complete WorkItem submission.
+                # Paging/checkpoint mechanics remain internal and will be
+                # introduced as a domain-stage extension, never as Agent
+                # authored platform fields.
+                task = {
+                    "kind": "domain_review",
+                    "workItemId": work_item_id,
+                    "investigation": _domain_packet(packet),
+                }
+                if review_context is not None:
+                    task["reviewContext"] = review_context
+                return self._publish_semantic_task(state, task)
             for collection in collections.values():
                 if not collection["reviewRequired"]:
                     continue
@@ -1668,9 +2261,14 @@ class InteractivePluginController:
                                 work_item_id=work_item_id,
                             )
                         task["agentContract"] = _agent_contract_task(
-                            contract, input_kind="reviewCheckpoint", schema=schema,
+                            contract,
+                            input_kind="reviewCheckpoint",
+                            schema=schema,
+                            semantic_rules=contract.checkpoint_semantic_rules.get(
+                                collection["collectionId"], (),
+                            ),
                         )
-                    return task
+                    return self._publish_semantic_task(state, task)
             review_collections = tuple(
                 collection for collection in collections.values()
                 if collection["reviewRequired"]
@@ -1703,7 +2301,7 @@ class InteractivePluginController:
                         input_kind="finalization",
                         schema=finalization_schema,
                     )
-                return task
+                return self._publish_semantic_task(state, task)
             task = {
                 "kind": "decide_work_item",
                 "workItemId": work_item_id,
@@ -1723,12 +2321,258 @@ class InteractivePluginController:
                     input_kind="decision",
                     schema=_direct_decision_schema(),
                 )
-            return task
+            return self._publish_semantic_task(state, task)
+        state["active_semantic_task"] = None
+        state["task_context"] = None
+        state["active_semantic_task_payload"] = None
         return None
+
+    @staticmethod
+    def _domain_agent_data(
+        state: Mapping[str, Any], packet: InvestigationPacket,
+    ) -> Mapping[str, Any] | Sequence[Any] | None:
+        """Ask a domain plugin for a bounded Agent projection when available.
+
+        The Host never derives domain meaning from the projection.  It only
+        validates that the plugin returned JSON-safe data before applying the
+        generic Evidence-handle sanitization.  Plugins without the optional
+        hook keep the historical full-packet behavior during migration.
+        """
+        builder = getattr(state.get("plugin"), "build_domain_agent_data", None)
+        if not callable(builder):
+            return None
+        try:
+            value = builder(packet, state["run"].check, state["context"])
+            return to_json_value(
+                value,
+                label="Domain Agent task data",
+                work_item_id=packet.work_item.work_item_id,
+            )
+        except PlatformContractError:
+            raise
+        except Exception as error:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "The domain plugin failed while building its Agent task projection",
+                work_item_id=packet.work_item.work_item_id,
+            ) from error
+
+    def submit_domain_result(
+        self, run_id: str, result: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Accept one plugin-defined DomainResult bound to the current task.
+
+        The Agent supplies only ``result``.  The Host resolves the active
+        TaskContext, validates the frozen domain contract, invokes optional
+        plugin semantics, and lets the existing platform Decision/ledger path
+        perform the durable commit.
+        """
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        contract = state.get("domain_result_contract")
+        if contract is None or state.get("agent_contract") is not None:
+            raise PlatformContractError(
+                "DOMAIN_RESULT_CONTRACT_UNAVAILABLE",
+                "The active Run does not expose the domain-result submission boundary",
+            )
+        task_context = state.get("task_context")
+        if not isinstance(task_context, TaskContext) or task_context.kind != "domain_review":
+            raise PlatformContractError(
+                "AGENT_SEMANTIC_TASK_STALE",
+                "There is no active domain-result task; refresh the current semantic boundary",
+            )
+        if not isinstance(result, Mapping):
+            raise PlatformContractError(
+                "INVALID_DOMAIN_RESULT",
+                "DomainResult must be an object",
+                work_item_id=task_context.work_item_id,
+            )
+        registry = state.get("evidence_handle_registry")
+        bound_result = to_json_value(
+            self._resolve_task_handles(result, registry, task_context.work_item_id),
+            label="DomainResult",
+            work_item_id=task_context.work_item_id,
+        )
+        # ``to_json_value`` returns a detached JSON object.  Keep the public
+        # contract strict: a schema-valid value is the only value that may
+        # reach plugin semantic hooks, and no plugin can observe a mutable
+        # caller-owned mapping.
+        if not isinstance(bound_result, dict):
+            raise PlatformContractError(
+                "INVALID_DOMAIN_RESULT",
+                "DomainResult must be an object",
+                work_item_id=task_context.work_item_id,
+            )
+        _validate_agent_schema(
+            contract.result_schema, bound_result, work_item_id=task_context.work_item_id,
+            error_code="DOMAIN_RESULT_INVALID",
+            error_message="DomainResult does not satisfy the Run-frozen domain contract; correct the reported fields",
+        )
+        run: InteractivePlatformRun = state["run"]
+        packet = run.investigations.get(task_context.work_item_id)
+        if packet is None:
+            raise PlatformContractError(
+                "UNKNOWN_INVESTIGATION",
+                "The active domain-result task has no InvestigationPacket",
+                work_item_id=task_context.work_item_id,
+            )
+        agent_evidence_refs = validate_domain_evidence_references(
+            bound_result,
+            packet,
+        )
+        validator = getattr(state["plugin"], "validate_domain_result", None)
+        if callable(validator):
+            try:
+                validator(bound_result, packet, run.check, state["context"])
+            except PlatformContractError as error:
+                if error.code != "PLUGIN_SEMANTIC_INPUT_INVALID":
+                    raise PlatformContractError(
+                        "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                        "The plugin rejected schema-valid DomainResult outside its declared semantic error contract",
+                        work_item_id=task_context.work_item_id,
+                    ) from error
+                raise
+            except (AssertionError, KeyError, TypeError) as error:
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "The plugin failed while validating schema-valid DomainResult",
+                    work_item_id=task_context.work_item_id,
+                ) from error
+            except Exception as error:
+                raise PlatformContractError(
+                    "PLUGIN_RUNTIME_FAILURE",
+                    "The plugin failed unexpectedly while validating DomainResult",
+                    work_item_id=task_context.work_item_id,
+                ) from error
+        mapper = getattr(state["plugin"], "map_domain_result", None)
+        if not callable(mapper):
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "The domain-result plugin does not implement map_domain_result",
+                work_item_id=task_context.work_item_id,
+            )
+        try:
+            projected = mapper(bound_result, packet, run.check, state["context"])
+        except PlatformContractError as error:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "The plugin failed to map schema-valid DomainResult",
+                work_item_id=task_context.work_item_id,
+            ) from error
+        except (AssertionError, KeyError, TypeError) as error:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "The plugin failed while mapping schema-valid DomainResult",
+                work_item_id=task_context.work_item_id,
+            ) from error
+        except Exception as error:
+            raise PlatformContractError(
+                "PLUGIN_RUNTIME_FAILURE",
+                "The plugin failed unexpectedly while mapping DomainResult",
+                work_item_id=task_context.work_item_id,
+            ) from error
+        if not isinstance(projected, Mapping):
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "map_domain_result must return a Decision projection object",
+                work_item_id=task_context.work_item_id,
+            )
+        platform_fields = {
+            "runId", "run_id", "workItemId", "work_item_id", "taskDigest",
+            "task_digest", "contractDigest", "contract_digest", "checkpointId",
+            "checkpoint_id", "reviewCheckpointIds", "review_checkpoint_ids",
+            "finalization", "revision", "runRevision", "run_revision",
+            "checkId", "checkVersion",
+        }
+        leaked = sorted(platform_fields & set(projected))
+        if leaked:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "map_domain_result returned Host-owned platform fields: " + ", ".join(leaked),
+                work_item_id=task_context.work_item_id,
+            )
+        projected_evidence_refs = validate_domain_evidence_references(
+            projected,
+            packet,
+            error_code="PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+            error_message=(
+                "map_domain_result returned an Evidence reference "
+                "outside the current InvestigationPacket"
+            ),
+        )
+        decision = dict(projected)
+        canonical_evidence_refs = tuple(dict.fromkeys(
+            (*agent_evidence_refs, *projected_evidence_refs),
+        ))
+        if canonical_evidence_refs:
+            details = decision.get("details", {})
+            if not isinstance(details, Mapping):
+                raise PlatformContractError(
+                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                    "map_domain_result returned non-object Decision details",
+                    work_item_id=task_context.work_item_id,
+                )
+            details = dict(details)
+            details["evidenceRefs"] = list(canonical_evidence_refs)
+            decision["details"] = details
+        decision["workItemId"] = task_context.work_item_id
+        decision["checkId"] = run.check.check_id
+        decision["checkVersion"] = run.check.version
+        response = self.submit_decisions(run_id, (decision,))
+        state["task_context"] = None
+        return response
+
+    @staticmethod
+    def _resolve_task_handles(
+        value: Mapping[str, Any], registry: Any, task_key: str,
+    ) -> dict[str, Any]:
+        """Resolve task-local Agent handles before plugin semantic validation.
+
+        This is intentionally a compatibility bridge: legacy platform Evidence
+        references remain unchanged until the plugin contract migrates, while
+        opaque handles are translated only through the active Host registry.
+        """
+        if registry is None:
+            return dict(value)
+
+        def visit(current: Any) -> Any:
+            if isinstance(current, Mapping):
+                result: dict[str, Any] = {}
+                for key, item in current.items():
+                    if key in {"evidenceRefs", "evidence_refs", "classificationEvidenceRefs", "supportedBy", "supported_by"} and isinstance(item, (tuple, list)):
+                        resolved: list[Any] = []
+                        for ref in item:
+                            if isinstance(ref, str) and ref.startswith("R"):
+                                try:
+                                    bound = registry.resolve(ref, task_key=task_key)
+                                except PlatformContractError as error:
+                                    if error.code in {
+                                        "STALE_EVIDENCE_HANDLE",
+                                        "CROSS_TASK_EVIDENCE_HANDLE",
+                                    }:
+                                        raise
+                                    # Preserve the value so the normal Host
+                                    # evidence validator emits the canonical
+                                    # unknown-reference error.
+                                    resolved.append(ref)
+                                else:
+                                    resolved.append(bound.source_chunk_id or bound.evidence_id)
+                            else:
+                                resolved.append(ref)
+                        result[str(key)] = resolved
+                    else:
+                        result[str(key)] = visit(item)
+                return result
+            if isinstance(current, (tuple, list)):
+                return [visit(item) for item in current]
+            return current
+
+        return visit(value)
 
     def advance(
         self, run_id: str, *, review_checkpoint: Mapping[str, Any] | None = None,
         decision: Mapping[str, Any] | None = None,
+        domain_result: Mapping[str, Any] | None = None,
         closeout: Mapping[str, Any] | None = None,
         page_size: int | None = None,
     ) -> dict[str, Any]:
@@ -1748,15 +2592,25 @@ class InteractivePluginController:
         accepted_operation_id: str | None = None
         operation_replayed = False
         if closeout is not None:
-            if review_checkpoint is not None or decision is not None:
+            if review_checkpoint is not None or decision is not None or domain_result is not None:
                 raise PlatformContractError(
                     "WORKFLOW_INPUT_CONFLICT",
-                    "Run closeout cannot be combined with a review checkpoint or decision",
+                    "Run closeout cannot be combined with semantic input",
                 )
             return self.finish(
                 run_id, str(closeout["status"]), closeout.get("failures", ()),
             )
         size = min(page_size or DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE, MAX_EVIDENCE_COLLECTION_PAGE_SIZE)
+        semantic_inputs = sum(item is not None for item in (review_checkpoint, decision, domain_result))
+        if semantic_inputs > 1:
+            raise PlatformContractError(
+                "WORKFLOW_INPUT_CONFLICT",
+                "A Run advance accepts only one semantic input",
+            )
+        if domain_result is not None:
+            domain_response = self.submit_domain_result(run_id, domain_result)
+            accepted_operation_id = domain_response.get("operationId")
+            operation_replayed = bool(domain_response.get("replayed"))
         if review_checkpoint is not None:
             checkpoint_response = self.checkpoint_review(
                 run_id,
@@ -1766,6 +2620,7 @@ class InteractivePluginController:
                 review_checkpoint["payload"],
                 review_checkpoint.get("supersedesCheckpointId"),
                 review_checkpoint.get("contractDigest"),
+                review_checkpoint.get("taskDigest"),
             )
             accepted_operation_id = checkpoint_response.get("operationId")
             operation_replayed = bool(checkpoint_response.get("replayed"))
@@ -1954,6 +2809,30 @@ class InteractivePluginController:
             self._validate_decision_contract(state, item)
         assembled = tuple(self._assemble_checkpointed_decision(state, item) for item in decisions)
         proposals = tuple(_proposal(item, run.check.check_id, run.check.version) for item in assembled)
+        # Validate the platform delivery projection before a Decision becomes
+        # durable. A plugin contract/runtime mismatch must not surface for the
+        # first time during terminal publication, when rollback is no longer
+        # possible.
+        for proposal in proposals:
+            packet = run.investigations.get(proposal.work_item_id)
+            if packet is None:
+                raise PlatformContractError(
+                    "UNKNOWN_INVESTIGATION",
+                    "Decision references an uninvestigated WorkItem",
+                )
+            try:
+                extract_result_delivery(proposal, packet)
+            except PlatformContractError as error:
+                if (
+                    state.get("agent_contract") is not None
+                    and error.code == "RESULT_DELIVERY_INVALID"
+                ):
+                    raise PlatformContractError(
+                        "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                        "The plugin assembled terminal delivery data outside the platform result contract",
+                        work_item_id=proposal.work_item_id,
+                    ) from error
+                raise
         receipts: list[CommitReceipt] = []
         operation_ids: list[str] = []
         replayed: list[bool] = []
@@ -2001,6 +2880,9 @@ class InteractivePluginController:
             receipts.append(receipt)
             operation_ids.append(operation_id)
             replayed.append(replay)
+        state["active_semantic_task"] = None
+        state["task_context"] = None
+        state["active_semantic_task_payload"] = None
         return self._response(run_id, "decisions_committed", {
             "decisions": [{"workItemId": item.work_item_id, "result": item.result} for item in proposals],
             "receipts": [item.commit_id for item in receipts],
@@ -2092,10 +2974,18 @@ class InteractivePluginController:
         tool_name: str, arguments: Mapping[str, Any],
     ) -> dict[str, Any]:
         contract = state.get("agent_contract")
+        domain_contract = state.get("domain_result_contract")
         descriptor: dict[str, Any] = {
-            "contractDigest": contract.contract_digest if contract is not None else None,
+            "contractDigest": (
+                contract.contract_digest if contract is not None
+                else domain_contract.contract_digest if domain_contract is not None
+                else None
+            ),
             "workItemId": work_item_id or "run",
         }
+        if domain_contract is not None and contract is None:
+            descriptor["inputKind"] = "domainResult"
+            return descriptor
         submitted: Any = arguments
         if tool_name == "advance_plugin_run":
             submitted = arguments.get("reviewCheckpoint") or arguments.get("decision")
@@ -2148,6 +3038,7 @@ class InteractivePluginController:
         state = self._state(run_id)
         run: InteractivePlatformRun = state["run"]
         contract = state.get("agent_contract")
+        domain_contract = state.get("domain_result_contract")
         policy = boundary_error_policy(error.code)
         if run.status != "running":
             return {
@@ -2192,7 +3083,7 @@ class InteractivePluginController:
             and event.details.get("retryDisposition") == "agent_correction"
             for event in run.events
         )
-        strict_boundary = contract is not None
+        strict_boundary = contract is not None or domain_contract is not None
         exhausted = (
             strict_boundary
             and policy.retry_disposition == "agent_correction"
@@ -2246,6 +3137,13 @@ class InteractivePluginController:
                     "Agent correction budget was exhausted; the WorkItem was left "
                     "without a Decision and the Run was closed as partial"
                 )
+                if error.errors:
+                    details = "; ".join(
+                        f"{item.get('pointer', '/')}"
+                        f": {item.get('message', 'validation failed')}"
+                        for item in error.errors
+                    )
+                    outward_message += f". Original validation errors: {details}"
             terminal_policy = boundary_error_policy(outward_code)
             required_next_step = terminal_policy.required_next_step
             retry_disposition = terminal_policy.retry_disposition
@@ -2383,7 +3281,11 @@ class InteractivePluginController:
                 if value is not None:
                     if not isinstance(value, Mapping):
                         raise TypeError("plugin summary must be an object")
-                    summary = dict(value)
+                    summary = to_json_value(
+                        value,
+                        label="Plugin result summary",
+                        code="PLUGIN_SUMMARY_FAILED",
+                    )
             except PlatformContractError:
                 raise
             except Exception as error:
@@ -2420,6 +3322,9 @@ class InteractivePluginController:
         }
         if summary and status != "failed":
             full_result_payload["summary"] = summary
+        # Keep the publication boundary JSON-safe if a future result view
+        # contains another recursively frozen contract value.
+        full_result_payload = _plain(full_result_payload)
         full_result_digest = hashlib.sha256(json.dumps(
             full_result_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
@@ -2518,13 +3423,35 @@ class InteractivePluginController:
         elif uninspected:
             phase, lifecycle_state, next_step = "inspection", "running", "inspect_work_items"
         elif undecided and review_remaining:
-            phase, lifecycle_state, next_step = "semantic_review", "awaiting_agent_decision", "checkpoint_review"
+            phase, lifecycle_state = "semantic_review", "awaiting_agent_decision"
+            # DomainResult Runs do not expose the removed platform checkpoint
+            # protocol.  Keep the durable progress boundary aligned with the
+            # public MCP catalog so an Agent never follows a stale
+            # ``checkpoint_review`` instruction.
+            next_step = (
+                "advance_plugin_run"
+                if state.get("domain_result_contract") is not None
+                and state.get("agent_contract") is None
+                else "checkpoint_review"
+            )
         elif undecided:
-            phase, lifecycle_state, next_step = "semantic_review", "awaiting_agent_decision", "submit_decisions"
+            phase, lifecycle_state = "semantic_review", "awaiting_agent_decision"
+            next_step = (
+                "advance_plugin_run"
+                if state.get("domain_result_contract") is not None
+                and state.get("agent_contract") is None
+                else "submit_decisions"
+            )
         elif failed_ids:
             phase, lifecycle_state, next_step = "recovery", "blocked", "recover_work_item"
         else:
-            phase, lifecycle_state, next_step = "closeout", "ready_to_finish", "finish_plugin_run"
+            phase, lifecycle_state = "closeout", "ready_to_finish"
+            next_step = (
+                "advance_plugin_run"
+                if state.get("domain_result_contract") is not None
+                and state.get("agent_contract") is None
+                else "finish_plugin_run"
+            )
         return {
             "state": lifecycle_state,
             "phase": phase,

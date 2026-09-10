@@ -3,11 +3,20 @@
   "pluginId": "test-minimal",
   "pluginVersion": "1.0.0",
   "platformApiVersion": "1.0.0",
+  "compatibility": {
+    "protocolMinVersion": "1.2.0",
+    "protocolMaxVersion": "1.2.0",
+    "sdkMinVersion": "0.1.2",
+    "sdkMaxVersion": "0.1.2",
+    "capabilities": ["domain_result", "supported_by", "task_local_evidence_handles"],
+    "domainContractVersion": "1.0.0"
+  },
   "registration": "minimal_plugin:registration",
   "manifest": "src/minimal_plugin/manifest.json",
   "scopeSchema": "src/minimal_plugin/scope.schema.json",
   "runtimeSource": "src",
-  "semanticReview": "semantic-review.md",
+  "semanticReview": "src/minimal_plugin/semantic-review.md",
+  "releaseAcceptance": "minimal_plugin.acceptance:run",
   "fixtures": ["fixtures/smoke.json"],
   "packageMetadata": "pyproject.toml",
   "conformance": { "contractVersion": "1.0.0" }

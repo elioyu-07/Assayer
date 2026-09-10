@@ -95,6 +95,10 @@ class PluginManifest:
     subject_kinds: tuple[str, ...]
     checks: tuple[CheckContract, ...]
     execution_profile: ExecutionProfile
+    # Optional independent Host/SDK compatibility declaration.  Kept on the
+    # manifest so installed distributions can negotiate before plugin code is
+    # imported; legacy manifests receive the platform default window.
+    compatibility: Any = None
 
 
 @dataclass(frozen=True)

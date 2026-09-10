@@ -12,6 +12,9 @@ dependencies = ["assayer>=0.1.0,<0.2.0"]
 [project.entry-points."assayer.plugins"]
 test-minimal = "minimal_plugin:registration"
 
+[project.entry-points."assayer.release_acceptance"]
+test-minimal = "minimal_plugin.acceptance:run"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

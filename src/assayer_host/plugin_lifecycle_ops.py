@@ -40,13 +40,17 @@ from .plugin_intent import IntentStep
 # (its ``--registry`` / ``--registry-path`` defaults) via pull request; ``add``
 # and by-name install read from it. Override with ``--index``.
 DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/elioyu-07/assayer-registry/main/plugins.json"
+CATALOG_READ_TIMEOUT_SECONDS = 3
+PLUGIN_DOWNLOAD_TIMEOUT_SECONDS = 30
 
 _ALLOWED_OPERATIONS = frozenset({"install", "upgrade", "downgrade", "rollback", "uninstall"})
 
 
-def download_bytes(url: str) -> bytes:
+def download_bytes(
+    url: str, *, timeout_seconds: int = PLUGIN_DOWNLOAD_TIMEOUT_SECONDS,
+) -> bytes:
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
+        with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
             return response.read()
     except OSError as error:
         raise PlatformContractError(
@@ -59,7 +63,9 @@ def _read_catalog_text(index: str) -> str:
     """Read the raw catalog source text from a URL or a filesystem path."""
     if index.startswith(("http://", "https://")):
         try:
-            return download_bytes(index).decode("utf-8")
+            return download_bytes(
+                index, timeout_seconds=CATALOG_READ_TIMEOUT_SECONDS,
+            ).decode("utf-8")
         except UnicodeError as error:
             raise PlatformContractError(
                 "PLUGIN_CATALOG_INVALID",
@@ -444,6 +450,16 @@ def plugin_catalog(registry) -> list[dict]:
             "pluginId": manifest.plugin_id,
             "version": manifest.version,
             "platformApiVersion": manifest.platform_api_version,
+            "compatibility": (
+                {
+                    "protocolMinVersion": registration.compatibility.protocol_min_version,
+                    "protocolMaxVersion": registration.compatibility.protocol_max_version,
+                    "sdkMinVersion": registration.compatibility.sdk_min_version,
+                    "sdkMaxVersion": registration.compatibility.sdk_max_version,
+                    "capabilities": sorted(registration.compatibility.capabilities),
+                }
+                if registration.compatibility is not None else None
+            ),
             "domains": list(manifest.domains),
             "subjectKinds": list(manifest.subject_kinds),
             "capabilities": sorted(registration.capabilities),

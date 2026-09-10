@@ -1,9 +1,8 @@
 """Domain-neutral contracts and execution kernel for Assayer plugins."""
 
 from .agent_contract import (
-    AGENT_CONTRACT_CANONICALIZATION_VERSION,
-    AGENT_CONTRACT_SCHEMA_DIALECT,
-    AgentContractBundle,
+    DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION,
+    DomainResultContract,
 )
 
 from .contract import (
@@ -41,6 +40,30 @@ from .contract import (
     WorkFailure,
     WorkItem,
     PLATFORM_API_VERSION,
+)
+from .plugin_sdk import (
+    ENTITY_ID_PATTERN,
+    JsonScalar,
+    JsonValue,
+    PLUGIN_CONTRACT_VIOLATION,
+    PluginContractError,
+    to_json_value,
+    validate_entity_id,
+)
+from .evidence_handles import EvidenceHandle, EvidenceHandleRegistry
+from .plugin_compatibility import (
+    HOST_PROTOCOL_CAPABILITIES,
+    HOST_SUPPORTED_PROTOCOL_VERSIONS,
+    HOST_PROTOCOL_VERSION,
+    HOST_SDK_VERSION,
+    CompatibilityResult,
+    PluginCompatibility,
+    negotiate_plugin_compatibility,
+)
+from .evidence_reference import (
+    host_evidence_references,
+    resolve_evidence_references,
+    validate_domain_evidence_references,
 )
 from .kernel import ArtifactPublisher, DecisionCommitter, DomainPlugin, PlatformKernel, SemanticDecisionProvider
 from .ledger import JsonPlatformLedgerStore, PlatformLedgerStore
@@ -136,9 +159,8 @@ from .source_chunking import SOURCE_CHUNK_LIMIT, build_source_chunks, source_ref
 from .source_fact_index import build_source_fact_index
 
 __all__ = [
-    "AGENT_CONTRACT_CANONICALIZATION_VERSION",
-    "AGENT_CONTRACT_SCHEMA_DIALECT",
-    "AgentContractBundle",
+    "DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION",
+    "DomainResultContract",
     "Artifact",
     "ArtifactPublisher",
     "CapabilityProfile",
@@ -160,6 +182,15 @@ __all__ = [
     "InteractivePlatformSession",
     "InteractivePlatformRun",
     "InteractivePluginController",
+    "EvidenceHandle",
+    "EvidenceHandleRegistry",
+    "HOST_PROTOCOL_CAPABILITIES",
+    "HOST_SUPPORTED_PROTOCOL_VERSIONS",
+    "HOST_PROTOCOL_VERSION",
+    "HOST_SDK_VERSION",
+    "CompatibilityResult",
+    "PluginCompatibility",
+    "negotiate_plugin_compatibility",
     "INTERACTIVE_OPERATIONS",
     "INTERACTIVE_PROTOCOL_VERSION",
     "Operation",
@@ -187,6 +218,13 @@ __all__ = [
     "WorkFailure",
     "WorkItem",
     "PLATFORM_API_VERSION",
+    "ENTITY_ID_PATTERN",
+    "JsonScalar",
+    "JsonValue",
+    "PLUGIN_CONTRACT_VIOLATION",
+    "PluginContractError",
+    "to_json_value",
+    "validate_entity_id",
     "load_plugin_manifest",
     "validate_plugin_manifest",
     "load_evaluation_corpus",

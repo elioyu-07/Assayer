@@ -272,13 +272,19 @@ class PluginRegistryTest(unittest.TestCase):
             from assayer_platform import load_plugin_manifest
             load_plugin_manifest(manifest)
 
-    def test_review_payload_schema_is_optional_and_validated(self):
+    def test_interactive_review_payload_schema_is_rejected(self):
         registration = config_quality_registration()
         self.assertEqual(registration.review_payload_schema, {})
 
         schema = {"type": "object", "properties": {"status": {"enum": ["PASS"]}}}
         from assayer_platform import PluginRegistration
-        PluginRegistration(registration.manifest, scope_schema={"type": "object"}, review_payload_schema=schema)
+        with self.assertRaisesRegex(PlatformContractError, "review_payload_schema is unsupported"):
+            PluginRegistration(
+                registration.manifest,
+                scope_schema={"type": "object"},
+                execution_modes=frozenset({"interactive"}),
+                review_payload_schema=schema,
+            )
 
         with self.assertRaisesRegex(PlatformContractError, "review payload schema must be an object"):
             PluginRegistration(registration.manifest, scope_schema={"type": "object"}, review_payload_schema="not-an-object")

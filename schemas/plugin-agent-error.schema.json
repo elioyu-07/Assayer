@@ -37,6 +37,7 @@
         "additionalProperties": false,
         "required": ["pointer", "keyword", "message"],
         "properties": {
+          "ruleId": { "$ref": "common.schema.json#/$defs/entityId" },
           "pointer": { "type": "string", "pattern": "^/" },
           "keyword": { "type": "string", "minLength": 1 },
           "message": { "type": "string", "minLength": 1, "maxLength": 512 }

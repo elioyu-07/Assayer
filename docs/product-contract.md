@@ -2,8 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.3.0-draft |
+| Document version | 1.3.1-draft |
 | Created | 2026-08-30 |
+| Amended | 2026-09-10 |
 | Status | Alpha user-journey baseline awaiting confirmation |
 | Business owner | Product Owner |
 | Baseline | B12 Host smoke completed; C01 LLM investigation design baseline |
@@ -166,6 +167,20 @@ The Skill uses primarily Markdown, with rule parameters and state in YAML/JSON. 
 
 The Product Owner is the final owner of rule semantics. The Agent may interview and draft rules, but a rule cannot confirm issues until the owner approves it and its state is `enabled`.
 
+### 5.4 Platform and plugin change isolation
+
+The product treats the platform and audit plugins as independently evolving
+components. Platform-side improvements to interaction transport, response
+size, paging, recovery, persistence, observability, or lifecycle handling MUST
+not require changes to an existing plugin. The platform owns the compatibility
+adapter needed to preserve the plugin's public contract.
+
+A plugin change is required only when its domain behavior changes, when its
+declared Check/result contract changes, or when it explicitly opts into a new
+versioned capability. An internal Host optimization is not a reason to revise
+plugin code, manifests, or domain schemas. Any exception is a product-level
+contract migration and must be named, versioned, and accepted separately.
+
 ## 6. Audit Runtime Flow
 
 ```text
@@ -211,6 +226,20 @@ The first-version minimum tool set is:
 - `complete_audit`: optionally submit a completion rationale; the product Facade derives coverage from the persisted Host ledger and produces reports, with unfinished scope automatically yielding `partial`.
 
 An Agent-proposed object must be relocated and validated by the Host before entering the formal ledger.
+
+The semantic interaction has a deliberately small stable boundary:
+
+```text
+Host -> Agent: task, frozen applicable rule contract, and bounded evidence
+Agent -> Host: domain findings and evidence references
+Host: validate, persist, aggregate, and publish the decision
+```
+
+The rule meaning remains plugin-owned and the semantic conclusion remains
+Agent-owned; the Host owns delivery, evidence authority, validation, and
+storage. Host-side transport or payload optimizations MUST preserve this
+boundary and MUST NOT be implemented by changing a plugin merely to fit an
+internal wire format.
 
 ## 8. Safety and Data Rules
 

@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from assayer_platform import PlatformContext, PluginRegistration
+from assayer_platform import DomainResultContract, PlatformContext, PluginRegistration
 from assayer_platform.contract import (
     CheckContract,
     DimensionObservation,
@@ -33,6 +33,7 @@ from assayer_platform.registry import load_plugin_manifest
 
 _MANIFEST = Path(__file__).with_name("manifest.json")
 _SCOPE = Path(__file__).with_name("scope.schema.json")
+_SEMANTIC = Path(__file__).with_name("semantic-review.md")
 
 
 def _type_name(value: Any) -> str:
@@ -141,6 +142,45 @@ class MinimalPlugin:
             ))
         return packets
 
+    def map_domain_result(self, result, packet, check, context):
+        del packet, check, context
+        return {
+            "result": result["result"],
+            "findings": result["findings"],
+            "reason": result["reason"],
+        }
+
+
+DOMAIN_RESULT_CONTRACT = DomainResultContract(
+    contract_id="dev.assayer.test-minimal.review",
+    contract_version="1.0.0",
+    check_id="TST-001",
+    check_version="1.0.0",
+    result_schema={
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["result", "findings", "reason"],
+        "properties": {
+            "result": {"enum": ["issue_found", "scanned_no_issue", "needs_review"]},
+            "findings": {"type": "array", "minItems": 1, "items": {
+                "type": "object", "additionalProperties": False,
+                    "required": ["dimension", "status", "reason"],
+                    "properties": {
+                        "dimension": {"type": "string", "minLength": 1},
+                        "status": {"type": "string", "minLength": 1},
+                        "reason": {"type": "string", "minLength": 1},
+                        "evidenceRefs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                        "supportedBy": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                    },
+            }},
+            "reason": {"type": "string", "minLength": 1},
+        },
+    },
+    semantic_instructions_path="minimal_plugin/semantic-review.md",
+    semantic_instructions_sha256=hashlib.sha256(_SEMANTIC.read_bytes()).hexdigest(),
+)
+
 
 registration = PluginRegistration(
     MinimalPlugin.manifest,
@@ -149,7 +189,8 @@ registration = PluginRegistration(
     result_features=frozenset({"evidence_graph"}),
     execution_modes=frozenset({"interactive"}),
     scope_schema=json.loads(_SCOPE.read_text(encoding="utf-8")),
+    domain_result_contracts=(DOMAIN_RESULT_CONTRACT,),
 )
 
 
-__all__ = ["MinimalPlugin", "registration"]
+__all__ = ["DOMAIN_RESULT_CONTRACT", "MinimalPlugin", "registration"]

@@ -69,6 +69,15 @@ def _manifest_payload(manifest: PluginManifest) -> dict[str, Any]:
         "pluginId": manifest.plugin_id,
         "version": manifest.version,
         "platformApiVersion": manifest.platform_api_version,
+        **({"compatibility": {
+            "protocolMinVersion": manifest.compatibility.protocol_min_version,
+            "protocolMaxVersion": manifest.compatibility.protocol_max_version,
+            "sdkMinVersion": manifest.compatibility.sdk_min_version,
+            "sdkMaxVersion": manifest.compatibility.sdk_max_version,
+            "capabilities": sorted(manifest.compatibility.capabilities),
+            **({"domainContractVersion": manifest.compatibility.domain_contract_version}
+               if manifest.compatibility.domain_contract_version is not None else {}),
+        }} if manifest.compatibility is not None else {}),
         "domains": list(manifest.domains),
         "subjectKinds": list(manifest.subject_kinds),
         "checks": [{
@@ -246,6 +255,71 @@ def _inspect_agent_contracts(registration: Any) -> list[PluginConformanceIssue]:
     return issues
 
 
+def _inspect_domain_result_contracts(registration: Any) -> list[PluginConformanceIssue]:
+    """Validate the target domain-only contract surface when published."""
+    contracts = registration.domain_result_contracts
+    if not contracts:
+        return []
+    issues: list[PluginConformanceIssue] = []
+    if registration.agent_contracts:
+        issues.append(_issue(
+            "PLUGIN_DOMAIN_RESULT_LEGACY_CONTRACT_CONFLICT",
+            "PDSV2-DOMAIN-RESULT-CONTRACT",
+            "The interactive registration publishes both domain-result and legacy Agent contracts.",
+            "Publish only the domain-result contract; the old platform envelope is not a supported fallback.",
+        ))
+    if "interactive" not in registration.execution_modes:
+        issues.append(_issue(
+            "PLUGIN_DOMAIN_RESULT_CONTRACT_MODE_INVALID",
+            "PDSV2-DOMAIN-RESULT-CONTRACT",
+            "The registration publishes domain-result contracts without interactive execution mode.",
+            "Declare interactive execution mode or remove the domain-result contracts.",
+        ))
+    declared_refs = {check.ref for check in registration.manifest.checks}
+    seen_refs: set[tuple[str, str]] = set()
+    seen_ids: set[str] = set()
+    for contract in contracts:
+        payload = contract.as_dict()
+        schema = payload.get("resultSchema")
+        issues.extend(_inspect_agent_boundary_schema(
+            schema,
+            label=f"domain result schema for {contract.check_id}@{contract.check_version}",
+        ))
+        if contract.check_ref in seen_refs:
+            issues.append(_issue(
+                "PLUGIN_DOMAIN_RESULT_CONTRACT_DUPLICATE",
+                "PDSV2-DOMAIN-RESULT-COVERAGE",
+                f"More than one domain-result contract targets {contract.check_id}@{contract.check_version}.",
+                "Publish exactly one domain-result contract per interactive Check.",
+            ))
+        seen_refs.add(contract.check_ref)
+        if contract.contract_id in seen_ids:
+            issues.append(_issue(
+                "PLUGIN_DOMAIN_RESULT_CONTRACT_DUPLICATE",
+                "PDSV2-DOMAIN-RESULT-CONTRACT",
+                f"The domain-result contract ID is duplicated: {contract.contract_id}",
+                "Assign one globally namespaced contractId to each Check contract.",
+            ))
+        seen_ids.add(contract.contract_id)
+        if contract.check_ref not in declared_refs:
+            issues.append(_issue(
+                "PLUGIN_DOMAIN_RESULT_CONTRACT_CHECK_UNKNOWN",
+                "PDSV2-DOMAIN-RESULT-COVERAGE",
+                f"Domain-result contract references an undeclared Check: {contract.check_id}@{contract.check_version}",
+                "Bind each domain-result contract to a Check declared by the plugin manifest.",
+            ))
+    missing_refs = sorted(declared_refs - set(seen_refs))
+    if missing_refs:
+        issues.append(_issue(
+            "PLUGIN_DOMAIN_RESULT_CONTRACT_CHECK_COVERAGE_INCOMPLETE",
+            "PDSV2-DOMAIN-RESULT-COVERAGE",
+            "Domain-result contracts do not cover declared Checks: "
+            + ", ".join(f"{check_id}@{version}" for check_id, version in missing_refs),
+            "Publish exactly one domain-result contract for every interactive Check.",
+        ))
+    return issues
+
+
 def inspect_plugin_registration(
     registration: Any, *, construct_implementations: bool = False,
 ) -> PluginConformanceReport:
@@ -417,6 +491,7 @@ def inspect_plugin_registration(
             ))
 
     issues.extend(_inspect_agent_contracts(registration))
+    issues.extend(_inspect_domain_result_contracts(registration))
 
     profile = manifest.execution_profile
     if profile.failure_splitting == "allowed" and not profile.can_split_failed_inspection:
@@ -744,6 +819,24 @@ def inspect_plugin_package(package_root: str | Path) -> PluginConformanceReport:
                     "The release descriptor and manifest plugin identity or version differ.",
                     "Use one plugin ID, plugin version, and platform API version throughout the package.",
                 ))
+            manifest_compatibility = manifest.compatibility
+            declared_compatibility = descriptor.get("compatibility")
+            if manifest_compatibility is not None:
+                expected_compatibility = {
+                    "protocolMinVersion": manifest_compatibility.protocol_min_version,
+                    "protocolMaxVersion": manifest_compatibility.protocol_max_version,
+                    "sdkMinVersion": manifest_compatibility.sdk_min_version,
+                    "sdkMaxVersion": manifest_compatibility.sdk_max_version,
+                    "capabilities": sorted(manifest_compatibility.capabilities),
+                }
+                if manifest_compatibility.domain_contract_version is not None:
+                    expected_compatibility["domainContractVersion"] = manifest_compatibility.domain_contract_version
+                if declared_compatibility != expected_compatibility:
+                    issues.append(_package_issue(
+                        "PLUGIN_COMPATIBILITY_IDENTITY_MISMATCH",
+                        "The release descriptor and manifest compatibility declarations differ.",
+                        "Copy the manifest compatibility declaration into the release descriptor.",
+                    ))
     elif manifest_value is not None:
         issues.append(_package_issue(
             "INVALID_PLUGIN_MANIFEST",

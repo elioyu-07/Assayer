@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,8 +11,13 @@ from unittest.mock import patch
 
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.plugin_lifecycle import PluginLifecycleManager
+from assayer_platform.conformance import inspect_plugin_package
 from assayer_host.plugin_lifecycle_mcp import PluginLifecycleMcpToolTransport
-from assayer_host.plugin_lifecycle_ops import plan_plugin_change
+from assayer_host.plugin_lifecycle_ops import (
+    CATALOG_READ_TIMEOUT_SECONDS,
+    latest_available_from,
+    plan_plugin_change,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "tests" / "fixtures" / "plugins" / "minimal"
@@ -68,6 +74,19 @@ class PluginLifecycleMcpTest(unittest.TestCase):
             ["list_plugins", "get_plugin_info", "plan_plugin_change", "execute_plugin_change"],
         )
 
+    def test_read_only_catalog_lookup_has_one_three_second_attempt(self):
+        with patch(
+            "assayer_host.plugin_lifecycle_ops.urllib.request.urlopen",
+            side_effect=TimeoutError("catalog timeout"),
+        ) as request:
+            self.assertIsNone(latest_available_from("https://catalog.example/plugins.json"))
+
+        request.assert_called_once_with(
+            "https://catalog.example/plugins.json",
+            timeout=CATALOG_READ_TIMEOUT_SECONDS,
+        )
+        self.assertEqual(CATALOG_READ_TIMEOUT_SECONDS, 3)
+
     def test_plan_execute_install_info_uninstall_journey(self):
         with tempfile.TemporaryDirectory() as directory:
             transport = PluginLifecycleMcpToolTransport(str(Path(directory) / "store"))
@@ -84,6 +103,88 @@ class PluginLifecycleMcpTest(unittest.TestCase):
             info = transport.call_tool("get_plugin_info", {"pluginId": PLUGIN_ID})
             self.assertFalse(info["isError"])
             self.assertEqual(info["structuredContent"]["result"]["pluginId"], PLUGIN_ID)
+
+    def test_info_returns_installed_and_latest_version_in_one_lookup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transport = PluginLifecycleMcpToolTransport(
+                str(Path(directory) / "store"),
+            )
+            planned = transport.call_tool(
+                "plan_plugin_change", {"operation": "install", "plugin": str(PACKAGE)},
+            )
+            transport.call_tool("execute_plugin_change", {
+                "token": planned["structuredContent"]["result"]["token"],
+                "confirmed": True,
+            })
+
+            with patch(
+                "assayer_host.plugin_lifecycle_mcp.latest_available_from",
+                return_value=lambda plugin_id: "1.1.0",
+            ):
+                info = transport.call_tool(
+                    "get_plugin_info", {"pluginId": PLUGIN_ID},
+                )["structuredContent"]["result"]
+
+            self.assertEqual(info["activeVersion"], "1.0.0")
+            self.assertEqual(info["catalogStatus"], "available")
+            self.assertEqual(info["latestAvailableVersion"], "1.1.0")
+            self.assertTrue(info["latestVersionKnown"])
+            self.assertEqual(info["versionRelation"], "update_available")
+            self.assertEqual(info["state"], "upgradable")
+
+    def test_info_makes_unavailable_catalog_explicit_without_guessing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transport = PluginLifecycleMcpToolTransport(
+                str(Path(directory) / "store"),
+            )
+            planned = transport.call_tool(
+                "plan_plugin_change", {"operation": "install", "plugin": str(PACKAGE)},
+            )
+            transport.call_tool("execute_plugin_change", {
+                "token": planned["structuredContent"]["result"]["token"],
+                "confirmed": True,
+            })
+
+            with patch(
+                "assayer_host.plugin_lifecycle_mcp.latest_available_from",
+                return_value=None,
+            ):
+                info = transport.call_tool(
+                    "get_plugin_info", {"pluginId": PLUGIN_ID},
+                )["structuredContent"]["result"]
+
+            self.assertEqual(info["activeVersion"], "1.0.0")
+            self.assertEqual(info["catalogStatus"], "unavailable")
+            self.assertIsNone(info["latestAvailableVersion"])
+            self.assertFalse(info["latestVersionKnown"])
+            self.assertEqual(info["versionRelation"], "unknown")
+
+    def test_info_reports_when_installed_version_is_ahead_of_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transport = PluginLifecycleMcpToolTransport(
+                str(Path(directory) / "store"),
+            )
+            planned = transport.call_tool(
+                "plan_plugin_change", {"operation": "install", "plugin": str(PACKAGE)},
+            )
+            transport.call_tool("execute_plugin_change", {
+                "token": planned["structuredContent"]["result"]["token"],
+                "confirmed": True,
+            })
+
+            with patch(
+                "assayer_host.plugin_lifecycle_mcp.latest_available_from",
+                return_value=lambda plugin_id: "0.9.0",
+            ):
+                info = transport.call_tool(
+                    "get_plugin_info", {"pluginId": PLUGIN_ID},
+                )["structuredContent"]["result"]
+
+            self.assertEqual(info["activeVersion"], "1.0.0")
+            self.assertEqual(info["latestAvailableVersion"], "0.9.0")
+            self.assertEqual(
+                info["versionRelation"], "installed_ahead_of_catalog",
+            )
 
             unplanned = transport.call_tool("plan_plugin_change", {"operation": "uninstall", "pluginId": PLUGIN_ID})
             self.assertEqual(unplanned["structuredContent"]["result"]["plan"]["status"], "ready")
@@ -401,6 +502,31 @@ class PluginLifecycleMcpTest(unittest.TestCase):
             self.assertEqual(
                 result["structuredContent"]["result"]["error"]["code"], "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
             )
+
+    def test_plan_and_release_gate_share_the_complete_descriptor_validator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "package"
+            shutil.copytree(PACKAGE, package)
+            descriptor_path = package / "assayer-plugin-release.json"
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            descriptor["undeclaredInstallerField"] = True
+            descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+
+            release_report = inspect_plugin_package(package)
+            self.assertFalse(release_report.passed)
+            release_code = release_report.issues[0].code
+
+            store_root = root / "store"
+            transport = PluginLifecycleMcpToolTransport(str(store_root))
+            planned = transport.call_tool("plan_plugin_change", {
+                "operation": "install", "plugin": str(package),
+            })
+            self.assertTrue(planned["isError"])
+            error = planned["structuredContent"]["result"]["error"]
+            self.assertEqual(error["code"], release_code)
+            self.assertEqual(error["code"], "PLUGIN_RELEASE_DESCRIPTOR_INVALID")
+            self.assertFalse((store_root / "index.json").exists())
 
     def test_plan_local_package_nonexistent_path_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -27,44 +27,38 @@ with a `registration` attribute containing one.
 my_quality = "my_package.plugin:registration"
 ```
 
-The registration must provide a validated `PluginManifest` and factories for
-the plugin runtime and semantic decision provider.  A committer factory is
-optional for in-memory or caller-owned durable commit paths.
+The registration must provide a validated `PluginManifest` and a plugin
+factory. Interactive DomainResult plugins implement the domain validator and
+mapper on that plugin object; the Host invokes them after validating the
+published contract. A committer factory is optional for in-memory or
+caller-owned durable commit paths.
 
 Registrations must also publish a JSON-compatible `scope_schema`. The generic
 `list_plugins` MCP tool exposes this schema before `run_plugin` is called, so
 an Agent can discover required business inputs instead of guessing them.
 
-Each interactive Check that accepts Agent input must also publish a versioned
-`AgentContractBundle`. It maps each review-required Evidence `collectionId` to
-the exact checkpoint-page schema, declares the finalization schema, binds the
-semantic-review instructions, and is frozen by digest for the Run. A prompt,
-example, or Python validator cannot introduce a field that is absent from this
-bundle.
+Each interactive Check that accepts Agent input must publish a versioned
+`DomainResultContract`. It contains the executable domain-result Schema and
+semantic rules; the Host binds Run, WorkItem, Evidence, paging, checkpoint,
+Decision, and finalization state internally. A prompt, example, or Python
+validator cannot introduce a field absent from this contract. The legacy
+`AgentContractBundle` checkpoint envelope is not an Agent-facing fallback and
+is rejected at the hard-cut transport boundary.
 
 ```python
-from assayer_platform import AgentContractBundle, PluginRegistration
+from assayer_platform import DomainResultContract, PluginRegistration
 
-review_contract = AgentContractBundle(
+review_contract = DomainResultContract(
     contract_id="dev.example.my-quality.review",
     contract_version="1.0.0",
     check_id="MY-001",
     check_version="1.0.0",
-    checkpoint_payload_schemas={
-        "candidate-findings": {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["decisions"],
-            "properties": {"decisions": {"type": "array", "minItems": 1}},
-        },
-    },
-    finalization_schema={
+    result_schema={
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": False,
-        "required": ["summary"],
-        "properties": {"summary": {"type": "string", "minLength": 1}},
+        "required": ["findings"],
+        "properties": {"findings": {"type": "array", "minItems": 1}},
     },
     semantic_instructions_path="semantic-review.md",
     semantic_instructions_sha256="<64 lowercase hex characters>",
@@ -75,22 +69,21 @@ registration = PluginRegistration(
     plugin_factory=lambda runtime=None: MyPlugin(runtime),
     execution_modes=frozenset({"interactive"}),
     scope_schema={"type": "object"},
-    agent_contracts=(review_contract,),
+    domain_result_contracts=(review_contract,),
 )
 ```
 
-Registration copies the schemas into canonical JSON and computes an immutable
-`sha256:` contract digest. The current migration window still accepts a legacy
-interactive registration without `agent_contracts`; such a registration does
-not conform to the new standard and will be rejected after its plugin migration
-and the release-enforcement slice are complete. Registrations that declare a
-bundle already use the strict Host boundary.
+Registration copies the schema into canonical JSON and computes an immutable
+`sha256:` contract digest. An interactive Check that accepts Agent input MUST
+publish a domain-result contract; a registration without one is non-conformant
+and must not be used for a production Run.
 
-Interactive protocol 1.2 adds `agentContract` to strict semantic tasks and
-accepts `contractDigest` in checkpoint and Decision envelopes. The generic
-transport keeps the field optional only so legacy registrations can complete
-their bounded migration; the Host requires an exact digest whenever the active
-Run froze a bundle.
+The semantic task publishes `domainContract` and a minimal `agentView` with
+bounded domain data and task-local handles. Explicitly negotiated plugins do
+not receive the legacy `investigation` or top-level `evidenceHandles` views.
+The submission contains only `domainResult`; new findings cite `supportedBy`
+handles while the Host retains all platform identity, Evidence lineage,
+checkpoint state, and Decision metadata.
 
 Strict-boundary errors follow
 [`plugin-agent-error.schema.json`](../schemas/plugin-agent-error.schema.json).
@@ -229,21 +222,16 @@ resume_plugin_run(runId) -> advance_plugin_run* after Host interruption
 
 The `advance_plugin_run` operation is the normal Host-driven product path. It
 performs deterministic discovery and inspection, then pauses at an explicit
-semantic boundary. After the Agent supplies a checkpoint or decision, the Host
-continues paging, coverage validation, decision assembly, and eligible closeout
-without requiring one tool call for each bookkeeping step. It also accepts an
-explicit `partial` or `failed` closeout when a blocked Run cannot continue. The
-normal product MCP catalog exposes `start_plugin_run`, `resume_plugin_run`,
-`advance_plugin_run`, `expand_evidence_collection`, `get_plugin_result`,
-`recover_work_item`, and `get_plugin_progress` for this lifecycle. Evidence
-expansion is bounded and read-only; normal state changes still go exclusively
-through `advance_plugin_run`. Resume uses the opaque Run ID retained from
-start; Host startup never resumes implicitly. The lower-level
-`discover_work_items`, `inspect_work_items`, `expand_investigation`,
-`checkpoint_review`, `submit_decisions`, and `finish_plugin_run` operations
-remain available for compatibility and diagnostics through the standalone
-interactive transport; they are intentionally absent from the normal product
-catalog.
+domain-result boundary. The Agent returns only `domainResult`; the Host owns
+paging, Evidence resolution, checkpointing, Decision assembly, and eligible
+closeout. The normal product MCP catalog exposes
+`start_plugin_run`, `resume_plugin_run`, `advance_plugin_run`,
+`expand_evidence_collection`, `get_plugin_result`, `recover_work_item`, and
+`get_plugin_progress`. Evidence expansion is bounded and read-only; normal
+state changes still go exclusively through `advance_plugin_run`. Resume uses
+the opaque Run ID retained from start; Host startup never resumes implicitly.
+The old checkpoint, preflight, Decision, and finish operations are private Host
+migration primitives and return `UNSUPPORTED_PROTOCOL` at the Agent boundary.
 
 Terminal delivery is summary-first for every plugin. The platform recursively
 replaces non-empty arrays and oversized text in the Agent response with stable
@@ -360,6 +348,17 @@ Platform decision while still allowing a browser, API, or repository ledger to
 hold a compatibility projection.
 
 ## Product compatibility
+
+### Protocol and SDK compatibility declaration
+
+Interactive registrations may declare a `PluginCompatibility` object with
+independent protocol and SDK min/max versions plus protocol capabilities. The
+Host negotiates this declaration before plugin initialization or Run creation;
+unsupported combinations fail with a stable compatibility error and produce
+no partial Run state. Registrations created before this handshake use the
+documented legacy window while they migrate. A declaration can be embedded in
+`manifest.json` under `compatibility` or supplied directly on
+`PluginRegistration`.
 
 The current frontend MCP names (`discover_scope`, `investigate_object`, and
 `prepare_decision`) remain a compatibility surface for the first browser

@@ -1,6 +1,6 @@
 {
   "name": "assayer",
-  "version": "0.1.1+codex.20260907080649",
+  "version": "0.1.2+codex.20260909231840",
   "description": "Evidence-backed audits for web interfaces and installed plugins in Codex",
   "author": {
     "name": "Assayer maintainers"
