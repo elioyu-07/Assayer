@@ -15,7 +15,7 @@
 | `assayer-plugin-sdk` | `assayer_plugin_sdk` | `jsonschema` | — | **split** |
 | `assayer-plugin-frontend-audit` | `assayer_frontend_audit` | `assayer-plugin-sdk` | `assayer.plugins` → `assayer.frontend-audit` | **split** |
 | `assayer-platform` | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | pending |
-| `assayer-provider-markdown` | `assayer_document_navigation` | `assayer-plugin-sdk` | `assayer.providers` → `markdown` | pending |
+| `assayer-provider-markdown` | `assayer_document_navigation` | `assayer-plugin-sdk` | `assayer.providers` → `markdown` | **split** |
 | `assayer-agent` | `assayer_agent` | `assayer-plugin-sdk` | — | pending |
 | `assayer` (dev meta) | all of the above re-exported | each of the above | all | current root build, unchanged |
 
@@ -28,6 +28,7 @@ that builds from the shared `src/` tree:
 packages/
   assayer-plugin-sdk/pyproject.toml
   assayer-plugin-frontend-audit/pyproject.toml
+  assayer-provider-markdown/pyproject.toml
 ```
 
 Build a wheel:
@@ -59,11 +60,6 @@ SDK-only where required.
 
 ## 4. Remaining work
 
-- **Provider split** requires moving `ProviderRegistration` and
-  `load_provider_descriptor` into the SDK (they currently live in
-  `assayer_platform.provider_registry`) with `capability-provider.schema.json`
-  and `common.schema.json` in the SDK schema set, then switching
-  `assayer_document_navigation` to SDK-only imports.
 - **Agent split** and the **platform** distribution follow the same pattern.
 - The root `pyproject.toml` is reduced to the development meta once every
   component has its own build config.

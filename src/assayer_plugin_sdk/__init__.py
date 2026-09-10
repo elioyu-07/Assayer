@@ -90,6 +90,11 @@ from .plugin_sdk import (  # noqa: F401
     to_json_value,
     validate_entity_id,
 )
+from .provider import (  # noqa: F401
+    ProviderRegistration,
+    load_provider_descriptor,
+    validate_provider_descriptor,
+)
 from .registration import PluginRegistration  # noqa: F401
 from .review_protocol import (  # noqa: F401
     REVIEW_DISPOSITIONS,

@@ -93,6 +93,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         for name in (
             "common.schema.json",
             "plugin-manifest.schema.json",
+            "capability-provider.schema.json",
             "evidence-claim.schema.json",
             "actionable-result.schema.json",
             "evaluation-corpus.schema.json",
@@ -105,6 +106,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         for name in (
             "common.schema.json",
             "plugin-manifest.schema.json",
+            "capability-provider.schema.json",
             "evidence-claim.schema.json",
             "actionable-result.schema.json",
             "evaluation-corpus.schema.json",
@@ -162,6 +164,15 @@ class PluginSdkDistributionTest(unittest.TestCase):
         self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in dependencies))
         self.assertFalse(
             any("assayer-platform" in dep or "assayer-host" in dep for dep in dependencies)
+        )
+
+        provider = tomllib.loads(
+            (ROOT / "packages" / "assayer-provider-markdown" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        provider_dependencies = provider["project"]["dependencies"]
+        self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in provider_dependencies))
+        self.assertFalse(
+            any("assayer-platform" in dep or "assayer-host" in dep for dep in provider_dependencies)
         )
 
 
