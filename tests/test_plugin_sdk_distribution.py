@@ -85,6 +85,47 @@ class PluginSdkDistributionTest(unittest.TestCase):
                 else:
                     os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
 
+    def test_sdk_schema_root_is_self_contained(self) -> None:
+        from assayer_plugin_sdk.resources import schema_root
+
+        expected = (ROOT / "src" / "assayer_plugin_sdk" / "schemas").resolve()
+        self.assertEqual(expected, schema_root())
+        for name in (
+            "common.schema.json",
+            "evidence-claim.schema.json",
+            "actionable-result.schema.json",
+            "evaluation-corpus.schema.json",
+        ):
+            self.assertTrue((expected / name).is_file(), name)
+
+    def test_sdk_schema_copies_do_not_drift_from_the_repo(self) -> None:
+        sdk = ROOT / "src" / "assayer_plugin_sdk" / "schemas"
+        repo = ROOT / "schemas"
+        for name in (
+            "common.schema.json",
+            "evidence-claim.schema.json",
+            "actionable-result.schema.json",
+            "evaluation-corpus.schema.json",
+        ):
+            self.assertEqual(
+                (repo / name).read_bytes(), (sdk / name).read_bytes(), name,
+            )
+
+    def test_schema_root_fails_closed_for_a_missing_override(self) -> None:
+        from assayer_plugin_sdk.plugin_sdk import PluginContractError
+        from assayer_plugin_sdk.resources import schema_root
+
+        previous = os.environ.get("ASSAYER_SDK_SCHEMA_ROOT")
+        os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = "/nonexistent/assayer-plugin-sdk"
+        try:
+            with self.assertRaises(PluginContractError):
+                schema_root()
+        finally:
+            if previous is None:
+                del os.environ["ASSAYER_SDK_SCHEMA_ROOT"]
+            else:
+                os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
+
     def test_plugin_facing_validators_use_the_sdk_schema_root(self) -> None:
         sdk = ROOT / "src" / "assayer_plugin_sdk"
         for name in ("actionable_result.py", "evidence_claim.py", "evaluation.py"):

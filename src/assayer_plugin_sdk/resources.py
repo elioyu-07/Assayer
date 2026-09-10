@@ -29,8 +29,8 @@ def schema_root() -> Path:
         if candidate.is_dir():
             return candidate
         raise PluginContractError(
-            "SDK_SCHEMA_ROOT_UNAVAILABLE",
             f"ASSAYER_SDK_SCHEMA_ROOT does not contain plugin SDK schemas: {configured}",
+            code="SDK_SCHEMA_ROOT_UNAVAILABLE",
         )
     bundled = _PACKAGE_ROOT / "schemas"
     if bundled.is_dir():
@@ -39,9 +39,9 @@ def schema_root() -> Path:
     if repo.is_dir():
         return repo
     raise PluginContractError(
-        "SDK_SCHEMA_ROOT_UNAVAILABLE",
         "Plugin SDK schemas are unavailable; install the assayer-plugin-sdk package "
         "or set ASSAYER_SDK_SCHEMA_ROOT",
+        code="SDK_SCHEMA_ROOT_UNAVAILABLE",
     )
 
 

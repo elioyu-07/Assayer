@@ -44,3 +44,4 @@ markdown = "assayer_document_navigation:markdown_registration"
 
 [tool.setuptools.package-data]
 "assayer_frontend_audit" = ["manifest.json", "semantic-review.md"]
+"assayer_plugin_sdk" = ["schemas/*.json"]
