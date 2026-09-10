@@ -108,7 +108,7 @@ class ProviderReleaseGateTests(unittest.TestCase):
             "[project]\n"
             "name = \"fixture-assayer-provider\"\n"
             "version = \"1.0.0\"\n"
-            "dependencies = [\"assayer>=0.1.0,<0.2.0\"]\n"
+            "dependencies = [\"assayer-plugin-sdk>=0.1.2,<0.2.0\"]\n"
             "[project.entry-points.\"assayer.providers\"]\n"
             "fixture = \"fixture_provider.provider:registration\"\n"
             "[tool.setuptools.packages.find]\n"

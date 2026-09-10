@@ -305,13 +305,13 @@ def inspect_provider_package(package_root: str | Path) -> ProviderConformanceRep
             dependencies = project.get("dependencies", [])
             if not isinstance(dependencies, list) or not any(
                 isinstance(item, str)
-                and re.match(r"^\s*assayer(?:\s|$|[<>=!~;\[])", item, re.IGNORECASE)
+                and re.match(r"^\s*assayer-plugin-sdk(?:\s|$|[<>=!~;\[])", item, re.IGNORECASE)
                 for item in dependencies
             ):
                 issues.append(_issue(
-                    "PROVIDER_PLATFORM_DEPENDENCY_MISSING",
-                    "Python package metadata does not declare an Assayer platform dependency.",
-                    "Declare a compatible assayer version range in project.dependencies.",
+                    "PROVIDER_SDK_DEPENDENCY_MISSING",
+                    "Python package metadata does not declare an Assayer plugin SDK dependency.",
+                    "Declare a compatible assayer-plugin-sdk version range in project.dependencies.",
                 ))
             if release["registration"] not in entry_points.values():
                 issues.append(_issue(

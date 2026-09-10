@@ -95,7 +95,7 @@ class PluginReleaseGateTest(unittest.TestCase):
             "[project]\n"
             "name = \"fixture-assayer-plugin\"\n"
             "version = \"1.0.0\"\n"
-            "dependencies = [\"assayer>=0.1.0,<0.2.0\"]\n"
+            "dependencies = [\"assayer-plugin-sdk>=0.1.2,<0.2.0\"]\n"
             "[project.entry-points.\"assayer.plugins\"]\n"
             "fixture = \"fixture_plugin.plugin:registration\"\n"
             "[tool.setuptools.packages.find]\n"
@@ -498,16 +498,16 @@ def run(*, registration, output_root, transport_factory):
             "PLUGIN_ENTRY_POINT_MISSING",
         }.issubset(codes))
 
-    def test_package_requires_an_explicit_platform_dependency(self):
+    def test_package_requires_an_explicit_sdk_dependency(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
             metadata = package / "pyproject.toml"
             metadata.write_text(metadata.read_text().replace(
-                'dependencies = ["assayer>=0.1.0,<0.2.0"]\n', "",
+                'dependencies = ["assayer-plugin-sdk>=0.1.2,<0.2.0"]\n', "",
             ))
             report = inspect_plugin_package(package)
         self.assertIn(
-            "PLUGIN_PLATFORM_DEPENDENCY_MISSING",
+            "PLUGIN_SDK_DEPENDENCY_MISSING",
             {issue.code for issue in report.issues},
         )
 
