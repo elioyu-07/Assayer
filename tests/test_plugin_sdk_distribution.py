@@ -175,6 +175,46 @@ class PluginSdkDistributionTest(unittest.TestCase):
             any("assayer-platform" in dep or "assayer-host" in dep for dep in provider_dependencies)
         )
 
+    def test_split_distribution_dag_and_entry_point_ownership(self) -> None:
+        import tomllib
+
+        def config(name: str) -> dict:
+            return tomllib.loads(
+                (ROOT / "packages" / name / "pyproject.toml").read_text(encoding="utf-8")
+            )
+
+        expected_packages = {
+            "assayer-plugin-sdk": ["assayer_plugin_sdk"],
+            "assayer-plugin-frontend-audit": ["assayer_frontend_audit"],
+            "assayer-provider-markdown": ["assayer_document_navigation"],
+            "assayer-platform": ["assayer_platform", "assayer_host", "assayer_agent"],
+        }
+        for name, packages in expected_packages.items():
+            self.assertEqual(
+                packages, config(name)["tool"]["setuptools"]["packages"], name,
+            )
+
+        platform = config("assayer-platform")
+        self.assertTrue(
+            any(dep.startswith("assayer-plugin-sdk") for dep in platform["project"]["dependencies"])
+        )
+        entry_points = platform["project"].get("entry-points", {})
+        self.assertNotIn("assayer.plugins", entry_points)
+        self.assertNotIn("assayer.providers", entry_points)
+
+        sdk_entry_points = config("assayer-plugin-sdk")["project"].get("entry-points", {})
+        self.assertNotIn("assayer.plugins", sdk_entry_points)
+        self.assertNotIn("assayer.providers", sdk_entry_points)
+
+        self.assertIn(
+            "assayer.frontend-audit",
+            config("assayer-plugin-frontend-audit")["project"]["entry-points"]["assayer.plugins"],
+        )
+        self.assertIn(
+            "markdown",
+            config("assayer-provider-markdown")["project"]["entry-points"]["assayer.providers"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

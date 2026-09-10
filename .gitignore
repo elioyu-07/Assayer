@@ -10,5 +10,6 @@ __pycache__/
 /build/
 /dist/
 plugins/*/build/
+packages/*/build/
 *.swp
 *.swo
