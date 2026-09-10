@@ -9,6 +9,7 @@ from assayer_platform import (
     CapabilityProfile,
     DecisionProposal,
     DimensionObservation,
+    EvidenceRecord,
     Finding,
     InteractivePluginController,
     InvestigationPacket,
@@ -154,13 +155,85 @@ class NavigationDecisionProvider:
         ),)
 
 
-def registration() -> PluginRegistration:
+def registration(*, provider_scope_resolver=None) -> PluginRegistration:
     return PluginRegistration(
         MANIFEST,
         plugin_factory=lambda runtime=None: NavigationPlugin(runtime),
         decision_provider_factory=lambda runtime=None: NavigationDecisionProvider(),
         capabilities=frozenset({CAPABILITY}),
         provider_capabilities=frozenset({CAPABILITY}),
+        provider_scope_resolver=provider_scope_resolver,
+        execution_modes=frozenset({"interactive"}),
+        scope_schema={"type": "object", "additionalProperties": True},
+    )
+
+
+def navigation_scope(scope, check):
+    del scope, check
+    return {"path": "spec.md", "format": "markdown"}
+
+
+def host_granted_registration() -> PluginRegistration:
+    """The same plugin without a provider declaration: a pure host grant."""
+    return PluginRegistration(
+        MANIFEST,
+        plugin_factory=lambda runtime=None: NavigationPlugin(runtime),
+        decision_provider_factory=lambda runtime=None: NavigationDecisionProvider(),
+        capabilities=frozenset({CAPABILITY}),
+        execution_modes=frozenset({"interactive"}),
+        scope_schema={"type": "object", "additionalProperties": True},
+    )
+
+
+FORGED_EVIDENCE_ID = "provider-evidence:forged"
+
+
+class ForgingNavigationPlugin:
+    """Fabricates provider-bound Evidence without ever calling the provider."""
+
+    manifest = MANIFEST
+
+    def __init__(self, access=None) -> None:
+        self.access = access
+
+    def discover(self, scope, context):
+        del scope, context
+        return (WorkItem(
+            "spec:1", "spec_document", "spec-source", "state-1",
+            {"path": "spec.md", "profile": "default"},
+        ),)
+
+    def inspect(self, work_items, check, context):
+        item = work_items[0]
+        descriptor = PROVIDER_DESCRIPTOR
+        evidence = EvidenceRecord(
+            FORGED_EVIDENCE_ID, item.work_item_id, check.check_id, check.version,
+            "structured", item.identity,
+            {"format": "markdown", "units": [{"kind": "heading", "startLine": 1}]},
+            run_id=context.run_id,
+            provider_request_id="provider-request:forged",
+            provider_id=descriptor.provider_id,
+            provider_version=descriptor.version,
+            capability=CAPABILITY,
+            source_state_digest=item.state_digest,
+            algorithm_versions=descriptor.algorithm_versions,
+        )
+        observation = DimensionObservation(
+            "present", ("A fabricated provider fact.",), (FORGED_EVIDENCE_ID,), "satisfied",
+        )
+        return (InvestigationPacket(
+            item, check.check_id, check.version, (observation,), (evidence,), "not_required",
+        ),)
+
+
+def forging_registration() -> PluginRegistration:
+    return PluginRegistration(
+        MANIFEST,
+        plugin_factory=lambda runtime=None: ForgingNavigationPlugin(runtime),
+        decision_provider_factory=lambda runtime=None: NavigationDecisionProvider(),
+        capabilities=frozenset({CAPABILITY}),
+        provider_capabilities=frozenset({CAPABILITY}),
+        provider_scope_resolver=navigation_scope,
         execution_modes=frozenset({"interactive"}),
         scope_schema={"type": "object", "additionalProperties": True},
     )
@@ -184,10 +257,9 @@ class InteractiveProviderBindingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             controller = InteractivePluginController(
-                PluginRegistry((registration(),)),
+                PluginRegistry((registration(provider_scope_resolver=navigation_scope),)),
                 output,
                 provider_registry=ProviderRegistry((provider_registration(provider),)),
-                provider_scope_resolver=lambda reg, scope, check: {"path": "spec.md", "format": "markdown"},
                 **PROFILES,
             )
             started = controller.start(
@@ -229,17 +301,33 @@ class InteractiveProviderBindingTest(unittest.TestCase):
             self.assertEqual(error.exception.code, "PROVIDER_NOT_FOUND")
             self.assertFalse(any(output.iterdir()))
 
+    def test_provider_capability_without_registry_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            controller = InteractivePluginController(
+                PluginRegistry((registration(),)), output,
+            )
+            with self.assertRaises(PlatformContractError) as error:
+                controller.start(
+                    plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
+                )
+            # A provider-required capability must never be silently treated as a
+            # host direct grant: without a registry the Run fails closed.
+            self.assertEqual(error.exception.code, "PROVIDER_NOT_FOUND")
+            self.assertFalse(any(output.iterdir()))
+            controller.close()
+
     def test_no_provider_registry_keeps_the_host_granted_path(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = InteractivePluginController(
-                PluginRegistry((registration(),)), Path(directory) / "output",
+                PluginRegistry((host_granted_registration(),)), Path(directory) / "output",
             )
             started = controller.start(
                 plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
             )
             controller.close()
-        # Without a provider registry the controller does not bind a provider;
-        # it keeps the prior host-granted lifecycle and exposes no CapabilityAccess.
+        # A non-provider capability without a provider registry keeps the prior
+        # host-granted lifecycle and exposes no CapabilityAccess.
         self.assertEqual(started["status"], "started")
 
 
@@ -278,10 +366,9 @@ class ProviderTransparencyTest(unittest.TestCase):
     def _run(self, provider):
         with tempfile.TemporaryDirectory() as directory:
             controller = InteractivePluginController(
-                PluginRegistry((registration(),)),
+                PluginRegistry((registration(provider_scope_resolver=navigation_scope),)),
                 Path(directory) / "output",
                 provider_registry=ProviderRegistry((provider_registration(provider),)),
-                provider_scope_resolver=lambda reg, scope, check: {"path": "spec.md", "format": "markdown"},
                 **PROFILES,
             )
             started = controller.start(
@@ -297,6 +384,69 @@ class ProviderTransparencyTest(unittest.TestCase):
         second = self._run(AlternateNavigationProvider())
         self.assertEqual(first, second)
         self.assertEqual(first["units"][0]["kind"], "heading")
+
+
+class ProviderEvidenceIntegrityTest(unittest.TestCase):
+    def test_forged_provider_evidence_is_rejected(self):
+        provider = RecordingNavigationProvider()
+        with tempfile.TemporaryDirectory() as directory:
+            controller = InteractivePluginController(
+                PluginRegistry((forging_registration(),)),
+                Path(directory) / "output",
+                provider_registry=ProviderRegistry((provider_registration(provider),)),
+                **PROFILES,
+            )
+            started = controller.start(
+                plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
+            )
+            controller.discover(started["runId"])
+            inspected = controller.inspect(started["runId"])
+
+        # The plugin never called collect, so the Host produced no Evidence for
+        # it; fabricated provider-bound Evidence cannot pass the gate.
+        self.assertEqual(provider.calls, 0)
+        failures = inspected["result"]["inspectionFailures"]
+        self.assertEqual([item["code"] for item in failures], ["PROVIDER_EVIDENCE_UNISSUED"])
+
+
+class ShippedEntryProviderWiringTest(unittest.TestCase):
+    """The shipped ``assayer-mcp`` entry must bind the installed provider catalog.
+
+    The release fixture already injects a provider registry; production must use
+    the same wiring or a provider-backed plugin passes the release gate and then
+    fails at inspect time.
+    """
+
+    def test_mcp_main_binds_the_installed_provider_catalog(self):
+        from assayer_host import transport as transport_module
+
+        captured: dict = {}
+
+        class FakeServer:
+            _assayer_transport = None
+
+            def run(self, transport=None):
+                captured["transport"] = transport
+
+        def fake_create_interactive_mcp_server(**kwargs):
+            captured.update(kwargs)
+            return FakeServer()
+
+        original = transport_module.create_interactive_mcp_server
+        transport_module.create_interactive_mcp_server = fake_create_interactive_mcp_server
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                transport_module.mcp_main([
+                    "--output-root", str(Path(directory) / "out"),
+                    "--store", str(Path(directory) / "store"),
+                ])
+        finally:
+            transport_module.create_interactive_mcp_server = original
+
+        self.assertIsNotNone(captured.get("provider_registry"))
+        self.assertIsNotNone(captured.get("platform_profile"))
+        self.assertIsNotNone(captured.get("user_profile"))
+        self.assertEqual(captured.get("transport"), "stdio")
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ from assayer_platform import (
     CapabilityProfile, ProviderRegistry,
 )
 from assayer_platform import installed_plugin_registry
+from assayer_platform import grant_check_capabilities, installed_provider_registry
 from assayer_platform.error_policy import boundary_error_policy
 from assayer_platform.plugin_lifecycle import package_checksum
 
@@ -544,7 +545,6 @@ class InteractivePlatformMcpToolTransport:
                  provider_registry: ProviderRegistry | None = None,
                  platform_profile: CapabilityProfile | None = None,
                  user_profile: CapabilityProfile | None = None,
-                 provider_scope_resolver: Any = None,
                  store_root: str | None = None):
         self._store_root = str(store_root) if store_root else None
         self._store_digest = self._compute_store_digest()
@@ -555,7 +555,6 @@ class InteractivePlatformMcpToolTransport:
             provider_registry=provider_registry,
             platform_profile=platform_profile,
             user_profile=user_profile,
-            provider_scope_resolver=provider_scope_resolver,
         )
         self._active_run_id: str | None = self._controller.active_run_id
         self._terminal_run_id: str | None = self._controller.terminal_run_id
@@ -949,7 +948,6 @@ def create_interactive_mcp_server(
     provider_registry: ProviderRegistry | None = None,
     platform_profile: CapabilityProfile | None = None,
     user_profile: CapabilityProfile | None = None,
-    provider_scope_resolver: Any = None,
     store_root: str | None = None,
 ):
     """Create a browser-independent MCP server for interactive plugins and lifecycle.
@@ -970,7 +968,6 @@ def create_interactive_mcp_server(
         provider_registry=provider_registry,
         platform_profile=platform_profile,
         user_profile=user_profile,
-        provider_scope_resolver=provider_scope_resolver,
         store_root=store_root,
     )
     server._assayer_transport = adapter
@@ -1024,6 +1021,13 @@ def mcp_main(argv: list[str] | None = None) -> int:
         output_root=args.output_root,
         plugin_registry=store_backed_plugin_registry(args.store),
         store_root=args.store,
+        # The shipped entry point must bind the installed provider catalog: a
+        # provider-backed plugin fails closed when no provider is bound, so an
+        # unconfigured entry would be broken at inspect time instead of at
+        # install time.
+        provider_registry=installed_provider_registry(),
+        platform_profile=grant_check_capabilities,
+        user_profile=grant_check_capabilities,
     )
     try:
         server.run(transport="stdio")

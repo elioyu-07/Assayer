@@ -26,6 +26,20 @@ def provider_required_capabilities(
     return tuple(sorted(required))
 
 
+def grant_check_capabilities(
+    registration: PluginRegistration, check: CheckContract,
+) -> CapabilityProfile:
+    """Grant exactly the capabilities a Check declares.
+
+    This is the default Host authorization profile for a standalone Assayer
+    runtime: it keeps a provider-backed Check runnable while the provider still
+    has to supply every declared capability.  Embedding products may pass a
+    stricter profile.
+    """
+    del registration
+    return CapabilityProfile(frozenset(check.required_capabilities))
+
+
 def bind_capability_provider(
     registration: PluginRegistration,
     check: CheckContract,

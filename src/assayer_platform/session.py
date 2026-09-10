@@ -297,6 +297,7 @@ class InteractivePlatformRun:
     def record_investigation(
         self, packet: InvestigationPacket, *,
         provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
+        issued_provider_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         self._require_running()
         from .kernel import PlatformKernel
@@ -306,6 +307,7 @@ class InteractivePlatformRun:
         PlatformKernel._validate_packets(
             (packet,), (item,), self.check,
             provider_evidence_expectation=provider_evidence_expectation,
+            issued_provider_evidence=issued_provider_evidence,
         )
         existing = self.investigations.get(item.work_item_id)
         if existing is not None and existing != packet:

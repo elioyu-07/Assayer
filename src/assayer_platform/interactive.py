@@ -884,7 +884,6 @@ class InteractivePluginController:
         provider_registry: ProviderRegistry | None = None,
         platform_profile: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None = None,
         user_profile: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None = None,
-        provider_scope_resolver: Callable[[PluginRegistration, Any, Any], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.registry = registry
         self.output_root = Path(output_root).expanduser().resolve()
@@ -894,7 +893,6 @@ class InteractivePluginController:
         self.provider_registry = provider_registry
         self.platform_profile = platform_profile
         self.user_profile = user_profile
-        self.provider_scope_resolver = provider_scope_resolver
         self._controller_epoch = uuid.uuid4().hex
         self._runs: dict[str, dict[str, Any]] = {}
         self._ownership_locks: dict[str, Any] = {}
@@ -921,8 +919,16 @@ class InteractivePluginController:
         required = frozenset(check.required_capabilities)
         host_caps = frozenset(host_capabilities)
         provider_required = required & frozenset(getattr(registration, "provider_capabilities", ()))
-        if self.provider_registry is None or not provider_required:
+        if not provider_required:
             return None, required | host_caps
+        if self.provider_registry is None:
+            # A declared provider capability must never degrade to a Host direct
+            # grant: without a provider registry the Host cannot bind the
+            # provider, so fail closed before any Run or ledger is created.
+            raise PlatformContractError(
+                "PROVIDER_NOT_FOUND",
+                "The Check requires provider capabilities but the Host has no provider registry configured",
+            )
         platform_profile = self._resolve_profile(self.platform_profile, registration, check)
         if platform_profile is None:
             raise PlatformContractError(
@@ -934,12 +940,7 @@ class InteractivePluginController:
         )
         provider_scope: Mapping[str, Any] = {}
         registration_resolver = getattr(registration, "provider_scope_resolver", None)
-        if self.provider_scope_resolver is not None:
-            resolved = self.provider_scope_resolver(registration, scope, check)
-        elif registration_resolver is not None:
-            resolved = registration_resolver(scope, check)
-        else:
-            resolved = None
+        resolved = registration_resolver(scope, check) if registration_resolver is not None else None
         if resolved is not None:
             if not isinstance(resolved, Mapping):
                 raise PlatformContractError(
@@ -1612,9 +1613,13 @@ class InteractivePluginController:
             try:
                 batch_packets = tuple(state["plugin"].inspect(batch, run.check, state["context"]))
                 from .kernel import PlatformKernel
+                issued_provider_evidence = (
+                    bound_provider.issued_evidence() if bound_provider is not None else None
+                )
                 PlatformKernel._validate_packets(
                     batch_packets, batch, run.check,
                     provider_evidence_expectation=provider_evidence_expectation,
+                    issued_provider_evidence=issued_provider_evidence,
                 )
                 batch_collections = {
                     packet.work_item.work_item_id: _evidence_collections(packet)
@@ -1631,6 +1636,7 @@ class InteractivePluginController:
                 run.record_investigation(
                     packet,
                     provider_evidence_expectation=provider_evidence_expectation,
+                    issued_provider_evidence=issued_provider_evidence,
                 )
                 state["evidence_collections"][packet.work_item.work_item_id] = batch_collections[
                     packet.work_item.work_item_id

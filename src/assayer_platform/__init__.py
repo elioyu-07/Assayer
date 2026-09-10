@@ -92,6 +92,7 @@ from .provider_registry import (
     validate_provider_descriptor,
 )
 from .provider_catalog import builtin_provider_registry, installed_provider_registry
+from .provider_binding import grant_check_capabilities
 from .provider_conformance import (
     ProviderConformanceIssue,
     ProviderConformanceReport,
@@ -241,6 +242,7 @@ __all__ = [
     "ProviderRegistry",
     "builtin_provider_registry",
     "installed_provider_registry",
+    "grant_check_capabilities",
     "load_provider_descriptor",
     "validate_provider_descriptor",
     "ProviderConformanceIssue",

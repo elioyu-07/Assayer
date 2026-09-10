@@ -154,6 +154,7 @@ class BoundCapabilityProvider:
             str(item["code"]): str(item["retry"]) for item in descriptor.failure_policy
         }
         self._results: dict[str, ProviderCollectionResult] = {}
+        self._issued_evidence: dict[str, EvidenceRecord] = {}
         self._lock = threading.Lock()
         self._active = 0
         self._request_count = 0
@@ -247,6 +248,16 @@ class BoundCapabilityProvider:
                 "providerRequestCount": self._request_count,
                 "providerRequestDurationMs": self._summed_request_duration_ms,
             }
+
+    def issued_evidence(self) -> dict[str, EvidenceRecord]:
+        """Return the exact Evidence the Host produced for this bound provider.
+
+        The Kernel validates a packet's provider-bound Evidence against this
+        ledger, so a plugin cannot fabricate or tamper with provider Evidence it
+        never received from ``collect``.
+        """
+        with self._lock:
+            return dict(self._issued_evidence)
 
     def close(self) -> None:
         close = getattr(self.provider, "close", None)
@@ -417,7 +428,7 @@ class BoundCapabilityProvider:
                 "index": index,
                 "fact": fact,
             })
-            evidence.append(EvidenceRecord(
+            record = EvidenceRecord(
                 f"provider-evidence:{evidence_digest[:32]}",
                 work_item.work_item_id,
                 check_id=request.check_id,
@@ -432,7 +443,10 @@ class BoundCapabilityProvider:
                 capability=request.capability,
                 source_state_digest=fact.state_digest,
                 algorithm_versions=self.registration.descriptor.algorithm_versions,
-            ))
+            )
+            with self._lock:
+                self._issued_evidence[record.evidence_id] = record
+            evidence.append(record)
         return ProviderCollectionResult(request, tuple(evidence))
 
 

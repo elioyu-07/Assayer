@@ -230,10 +230,20 @@ class MarkdownNavigationProvider:
             # WorkItems in the platform kernel historically carry the raw
             # SHA-256 value, while the provider payload uses an algorithm-
             # qualified digest.  Accept both equivalent spellings at this
-            # boundary.  A multi-document WorkItem may instead declare the
-            # single source digest in ``sourceDigest``; the file is still
-            # verified against it, and the returned Evidence stays bound to the
-            # exact request state digest validated by the Host.
+            # boundary.  A composite WorkItem (its state digest covers several
+            # sources) may instead declare the single source digest in
+            # ``sourceDigest``; the file is still verified against it, and the
+            # returned Evidence stays bound to the exact request state digest
+            # validated by the Host.
+            #
+            # Trust note: the provider cannot prove that the WorkItem is
+            # composite, because the WorkItem is produced by the plugin.  For a
+            # single-source WorkItem the Host-validated ``state_digest`` is the
+            # authoritative pin; a plugin that supplies a ``sourceDigest`` equal
+            # to the *current* file digest can defeat source-change detection
+            # here.  Restoring a Host-enforced single-source pin requires a
+            # Host-known member-source digest on the WorkItem (tracked as a
+            # phase 5/6 residual).
             declared = scope.get("sourceDigest")
             accepted = {digest_value, digest}
             if request.state_digest not in accepted and declared not in accepted:

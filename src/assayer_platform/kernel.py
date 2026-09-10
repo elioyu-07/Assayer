@@ -796,6 +796,7 @@ class PlatformKernel:
         check: CheckContract,
         *,
         provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
+        issued_provider_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         expected_by_id = {item.work_item_id: item for item in expected}
         seen: set[str] = set()
@@ -825,6 +826,7 @@ class PlatformKernel:
                 packet,
                 check,
                 provider_evidence_expectation,
+                issued_provider_evidence,
             )
             for dimension in packet.dimensions:
                 if not all(reference in evidence for reference in dimension.evidence_refs):
@@ -843,6 +845,7 @@ class PlatformKernel:
         packet: InvestigationPacket,
         check: CheckContract,
         expectation: ProviderEvidenceExpectation | None,
+        issued_provider_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         bound = tuple(item for item in packet.evidence if item.provider_bound)
         if expectation is None:
@@ -881,6 +884,18 @@ class PlatformKernel:
                     "PROVIDER_EVIDENCE_IDENTITY_MISMATCH",
                     "Provider Evidence identity does not match the frozen execution provider",
                 )
+            if issued_provider_evidence is not None:
+                issued = issued_provider_evidence.get(evidence.evidence_id)
+                if issued is None:
+                    raise PlatformContractError(
+                        "PROVIDER_EVIDENCE_UNISSUED",
+                        "Provider Evidence references a request the Host never issued",
+                    )
+                if issued != evidence:
+                    raise PlatformContractError(
+                        "PROVIDER_EVIDENCE_TAMPERED",
+                        "Provider Evidence differs from the record the Host produced",
+                    )
             allowed_kinds = expectation.capability_evidence_kinds.get(evidence.capability)
             if allowed_kinds is None or evidence.capability not in check.required_capabilities:
                 raise PlatformContractError(
