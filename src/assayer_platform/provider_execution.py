@@ -159,6 +159,7 @@ class BoundCapabilityProvider:
         self._active = 0
         self._request_count = 0
         self._summed_request_duration_ms = 0
+        self._closed = False
 
     @property
     def evidence_expectation(self) -> ProviderEvidenceExpectation:
@@ -260,6 +261,9 @@ class BoundCapabilityProvider:
             return dict(self._issued_evidence)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         close = getattr(self.provider, "close", None)
         if callable(close):
             close()

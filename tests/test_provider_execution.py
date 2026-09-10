@@ -94,6 +94,7 @@ class RecordingProvider:
         self.calls = 0
         self.requests = []
         self.closed = False
+        self.close_calls = 0
 
     def collect(self, request, context):
         self.calls += 1
@@ -137,6 +138,7 @@ class RecordingProvider:
 
     def close(self):
         self.closed = True
+        self.close_calls += 1
 
 
 def provider_registration(provider, descriptor=None):
@@ -272,6 +274,13 @@ class ProviderExecutionTests(unittest.TestCase):
             run_id="run-provider",
             scope={"source": "fixture"},
         )
+
+    def test_bound_provider_close_is_idempotent(self):
+        provider = RecordingProvider(provider_descriptor())
+        bound = self.bind(provider)
+        bound.close()
+        bound.close()
+        self.assertEqual(provider.close_calls, 1)
 
     def test_host_creates_bounded_idempotent_request_and_evidence(self):
         provider = RecordingProvider(provider_descriptor())
