@@ -71,6 +71,10 @@ depends on the root `assayer` meta package.
 - `scripts/install_matrix.py` is green: `root-meta` installs `0/0`, and the
   duplicate-entry-point case still fails closed with `PLUGIN_CONFLICT` via a
   synthetic shadow distribution.
+- The install-matrix gate inspects the freshly built root wheel and fails if it
+  leaks any non-platform top-level module; `build_root` cleans the reusable
+  `build/lib` before and after every root build so a stale meta-package build
+  cannot ship plugin/provider modules silently.
 - `scripts/build_plugin_bundle.py` produces a bundle whose wheelhouse holds the
   SDK, frontend plugin, and markdown provider wheels; its clean-venv smoke check
   asserts one plugin and one provider entry point, a loadable registry, and the

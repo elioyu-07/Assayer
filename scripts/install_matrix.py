@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,7 +38,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from build_distributions import ROOT, build as build_split  # noqa: E402
+from build_distributions import (  # noqa: E402
+    ROOT,
+    build as build_split,
+    build_root,
+    root_wheel,
+)
 
 
 THIRD_PARTY = ("jsonschema==4.26.0",)
@@ -169,16 +173,35 @@ def build_duplicate_plugin_wheel(wheelhouse: Path) -> Path:
     return wheel
 
 
+PLATFORM_TOP_LEVEL = frozenset({"assayer_platform", "assayer_host", "assayer_agent"})
+
+
+def assert_root_wheel_is_platform_only(wheelhouse: Path) -> None:
+    """Guard the platform-only root wheel against stale ``build/lib`` leakage.
+
+    The install matrix builds the real root wheel, so this is the release-gate
+    check that a stale meta-package build cannot silently ship plugin/provider
+    modules inside the platform-only ``assayer`` distribution.
+    """
+    wheel = root_wheel(wheelhouse)
+    with zipfile.ZipFile(wheel) as archive:
+        top_level = {name.split("/", 1)[0] for name in archive.namelist()}
+    modules = {
+        name for name in top_level
+        if "." not in name and not name.endswith((".dist-info", ".data"))
+    }
+    leaked = modules - PLATFORM_TOP_LEVEL
+    if leaked:
+        raise SystemExit(
+            f"{wheel.name} leaks non-platform top-level modules: {sorted(leaked)}"
+        )
+
+
 def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
     wheelhouse.mkdir(parents=True, exist_ok=True)
     build_split(wheelhouse, python=python, isolated=False)
-    try:
-        _run([python, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
-              "--wheel-dir", str(wheelhouse), str(ROOT)])
-    finally:
-        for egg_info in (ROOT / "src").glob("*.egg-info"):
-            shutil.rmtree(egg_info, ignore_errors=True)
-        shutil.rmtree(ROOT / "build", ignore_errors=True)
+    build_root(wheelhouse, python=python, isolated=False, no_deps=True)
+    assert_root_wheel_is_platform_only(wheelhouse)
     _run([python, "-m", "pip", "download", "--dest", str(wheelhouse), *THIRD_PARTY])
     build_duplicate_plugin_wheel(wheelhouse)
 

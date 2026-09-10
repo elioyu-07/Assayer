@@ -75,7 +75,7 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
     scripts = str(Path(__file__).resolve().parent)
     if scripts not in sys.path:
         sys.path.insert(0, scripts)
-    from build_distributions import build as build_split
+    from build_distributions import build as build_split, build_root
 
     build_split(
         wheel_dir, python=python, isolated=False,
@@ -85,16 +85,9 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
             "assayer-provider-markdown",
         ),
     )
-    try:
-        _run([
-            python, "-m", "pip", "wheel", ".[browser,mcp]",
-            "--find-links", str(wheel_dir),
-            "--wheel-dir", str(wheel_dir),
-        ])
-    finally:
-        for egg_info in (ROOT / "src").glob("*.egg-info"):
-            shutil.rmtree(egg_info, ignore_errors=True)
-        shutil.rmtree(ROOT / "build", ignore_errors=True)
+    build_root(
+        wheel_dir, python=python, extras="browser,mcp", find_links=wheel_dir,
+    )
 
 
 def build(output: Path, *, python: str) -> tuple[Path, Path]:

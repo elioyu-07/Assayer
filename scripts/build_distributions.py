@@ -11,6 +11,7 @@ staging artifacts so a development checkout stays matchable to a clean venv.
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Matches ``assayer-0.1.2-...whl`` but not ``assayer-plugin-sdk-...`` or
+# ``assayer_plugin_sdk-...``.
+_ROOT_WHEEL = re.compile(r"^assayer-\d")
 
 # Order is informational only: ``--no-deps`` makes each build independent.
 DISTRIBUTIONS = (
@@ -58,6 +63,41 @@ def build(
     finally:
         _clean_staging()
     return built
+
+
+def root_wheel(output: Path) -> Path:
+    """Return the single root ``assayer`` wheel in ``output``."""
+    matches = [wheel for wheel in output.glob("assayer-*.whl") if _ROOT_WHEEL.match(wheel.name)]
+    if len(matches) != 1:
+        raise SystemExit(f"expected exactly one root assayer wheel in {output}, found {matches}")
+    return matches[0]
+
+
+def build_root(
+    output: Path, *, python: str, extras: str | None = None,
+    find_links: Path | None = None, isolated: bool = True, no_deps: bool = False,
+) -> Path:
+    """Build the root ``assayer`` wheel with explicit staging cleanup.
+
+    Setuptools reuses ``build/lib`` across runs, so a stale meta-package build
+    leaks plugin/provider modules into the platform-only root wheel.  Clean
+    before and after so every caller shares the same guard instead of relying on
+    a neighbouring build having cleaned up.
+    """
+    requirement = f".[{extras}]" if extras else "."
+    command = [python, "-m", "pip", "wheel", requirement, "--wheel-dir", str(output)]
+    if no_deps:
+        command.append("--no-deps")
+    if not isolated:
+        command.append("--no-build-isolation")
+    if find_links is not None:
+        command += ["--find-links", str(find_links)]
+    _clean_staging()
+    try:
+        subprocess.run(command, cwd=ROOT, check=True)
+    finally:
+        _clean_staging()
+    return root_wheel(output)
 
 
 def main() -> int:

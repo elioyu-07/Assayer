@@ -112,6 +112,50 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
                 plugins=["assayer.frontend-audit"], plugin_count=0,
             ))
 
+    def test_root_wheel_platform_only_passes(self):
+        import tempfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "assayer-0.1.2-py3-none-any.whl"
+            with zipfile.ZipFile(path, "w") as archive:
+                for name in ("assayer_platform", "assayer_host", "assayer_agent"):
+                    archive.writestr(f"{name}/__init__.py", "")
+                archive.writestr("assayer-0.1.2.dist-info/METADATA", "Metadata-Version: 2.1\n")
+            matrix.assert_root_wheel_is_platform_only(Path(directory))
+
+    def test_root_wheel_with_leaked_modules_fails(self):
+        import tempfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "assayer-0.1.2-py3-none-any.whl"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("assayer_platform/__init__.py", "")
+                archive.writestr("assayer_plugin_sdk/__init__.py", "")
+            with self.assertRaises(SystemExit):
+                matrix.assert_root_wheel_is_platform_only(Path(directory))
+
+    def test_clean_staging_removes_stale_build_outputs(self):
+        import tempfile
+
+        import build_distributions as build_dists
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src" / "assayer.egg-info").mkdir(parents=True)
+            (root / "build" / "lib" / "assayer_plugin_sdk").mkdir(parents=True)
+            (root / "packages" / "x" / "build").mkdir(parents=True)
+            original = build_dists.ROOT
+            build_dists.ROOT = root
+            try:
+                build_dists._clean_staging()
+            finally:
+                build_dists.ROOT = original
+            self.assertFalse((root / "build").exists())
+            self.assertFalse((root / "src" / "assayer.egg-info").exists())
+            self.assertFalse((root / "packages" / "x" / "build").exists())
+
     def test_entry_point_outside_site_packages_fails(self):
         case = matrix.Case("u", ("assayer",), 1, 0)
         with self.assertRaises(SystemExit):
