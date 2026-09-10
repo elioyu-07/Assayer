@@ -13,9 +13,10 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, RefResolver
 
+from assayer_plugin_sdk.resources import schema_root
+
 from .contract import DecisionProposal, InvestigationPacket, PlatformContractError
 from .evidence_claim import validate_evidence_claims
-from .registry import _schema_root
 
 
 def _plain(value: Any) -> Any:
@@ -39,7 +40,7 @@ def _array(value: Any, label: str) -> Sequence[Any]:
 
 
 def _validator() -> Draft202012Validator:
-    root = _schema_root()
+    root = schema_root()
     schemas: dict[str, Any] = {}
     for path in root.glob("*.schema.json"):
         schema = json.loads(path.read_text(encoding="utf-8"))

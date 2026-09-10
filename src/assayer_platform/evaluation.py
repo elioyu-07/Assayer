@@ -9,11 +9,11 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, RefResolver
 
-from .registry import _schema_root
+from assayer_plugin_sdk.resources import schema_root
 
 
 def _validator() -> Draft202012Validator:
-    root = _schema_root()
+    root = schema_root()
     schema = json.loads((root / "evaluation-corpus.schema.json").read_text(encoding="utf-8"))
     common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
     resolver = RefResolver(schema["$id"], schema, store={

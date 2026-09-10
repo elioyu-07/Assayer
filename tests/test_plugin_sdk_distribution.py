@@ -1,4 +1,6 @@
 import ast
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -67,6 +69,28 @@ class PluginSdkDistributionTest(unittest.TestCase):
 
         self.assertIs(sdk.PlatformContractError, platform.PlatformContractError)
         self.assertIs(sdk.DomainResultContract, platform.DomainResultContract)
+
+    def test_sdk_resolves_its_own_schema_root(self) -> None:
+        from assayer_plugin_sdk.resources import schema_root
+
+        self.assertTrue((schema_root() / "common.schema.json").is_file())
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("ASSAYER_SDK_SCHEMA_ROOT")
+            os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = directory
+            try:
+                self.assertEqual(Path(directory).resolve(), schema_root())
+            finally:
+                if previous is None:
+                    del os.environ["ASSAYER_SDK_SCHEMA_ROOT"]
+                else:
+                    os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
+
+    def test_plugin_facing_validators_use_the_sdk_schema_root(self) -> None:
+        platform = ROOT / "src" / "assayer_platform"
+        for name in ("actionable_result.py", "evidence_claim.py", "evaluation.py"):
+            text = (platform / name).read_text(encoding="utf-8")
+            self.assertNotIn("_schema_root", text, name)
+            self.assertIn("assayer_plugin_sdk.resources", text, name)
 
 
 if __name__ == "__main__":
