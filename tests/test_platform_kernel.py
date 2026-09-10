@@ -463,7 +463,8 @@ class PlatformKernelTest(unittest.TestCase):
 
     def test_explicit_resource_root_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict("os.environ", {"ASSAYER_RESOURCE_ROOT": directory}, clear=False):
+            missing = str(Path(directory) / "missing")
+            with patch.dict("os.environ", {"ASSAYER_SDK_SCHEMA_ROOT": missing}, clear=False):
                 with self.assertRaisesRegex(PlatformContractError, "does not contain"):
                     load_plugin_manifest({})
 

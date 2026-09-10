@@ -13,6 +13,7 @@ The plugin SDK ships copies of the schemas its own validators need in
 `src/assayer_plugin_sdk/schemas/`:
 
 - `common.schema.json`
+- `plugin-manifest.schema.json`
 - `evidence-claim.schema.json`
 - `actionable-result.schema.json`
 - `evaluation-corpus.schema.json`
@@ -47,9 +48,7 @@ This debt is closed when:
 - the SDK schema directory is the canonical source for plugin-facing schemas;
 - the platform resolves plugin-facing schemas through
   `assayer_plugin_sdk.resources.schema_root()` (or a generated copy at build);
-- the byte-equality drift guard is removed because there is no second copy;
-- `plugin-manifest.schema.json` is added to the SDK set when
-  `load_plugin_manifest` moves onto the SDK resolver.
+- the byte-equality drift guard is removed because there is no second copy.
 
 ## 4. Known trap
 

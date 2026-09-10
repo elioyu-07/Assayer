@@ -64,6 +64,10 @@ from .evidence_reference import (  # noqa: F401
     validate_domain_evidence_references,
 )
 from .identity import digest_bytes, document_state_digest  # noqa: F401
+from .manifest import (  # noqa: F401
+    load_plugin_manifest,
+    validate_plugin_manifest,
+)
 from .evaluation import (  # noqa: F401
     load_evaluation_corpus,
     validate_evaluation_corpus,

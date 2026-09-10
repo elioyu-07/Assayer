@@ -92,6 +92,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         self.assertEqual(expected, schema_root())
         for name in (
             "common.schema.json",
+            "plugin-manifest.schema.json",
             "evidence-claim.schema.json",
             "actionable-result.schema.json",
             "evaluation-corpus.schema.json",
@@ -103,6 +104,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         repo = ROOT / "schemas"
         for name in (
             "common.schema.json",
+            "plugin-manifest.schema.json",
             "evidence-claim.schema.json",
             "actionable-result.schema.json",
             "evaluation-corpus.schema.json",
