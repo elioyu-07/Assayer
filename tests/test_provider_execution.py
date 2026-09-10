@@ -300,6 +300,36 @@ class ProviderExecutionTests(unittest.TestCase):
             dict(provider.descriptor.algorithm_versions),
         )
 
+    def test_per_request_scope_overrides_the_run_scope(self):
+        provider = RecordingProvider(provider_descriptor())
+        bound = self.bind(provider)
+        check = CHECK_MANIFEST.checks[0]
+        item = WorkItem("fixture-item", "fixture_item", "fixture-source", "fixture-state")
+
+        first = bound.collect(item, check, "structured_read", scope={"source": "other"})
+        second = bound.collect(item, check, "structured_read", scope={"source": "other"})
+        third = bound.collect(item, check, "structured_read")
+
+        self.assertIs(first, second)
+        self.assertIsNot(first, third)
+        self.assertEqual(provider.calls, 2)
+        self.assertEqual(dict(provider.requests[0][0].scope), {"source": "other"})
+        self.assertEqual(dict(provider.requests[1][0].scope), {"source": "fixture"})
+        self.assertNotEqual(
+            provider.requests[0][0].idempotency_key,
+            provider.requests[1][0].idempotency_key,
+        )
+
+    def test_per_request_scope_must_satisfy_the_provider_scope_schema(self):
+        bound = self.bind(RecordingProvider(provider_descriptor()))
+        item = WorkItem("fixture-item", "fixture_item", "fixture-source", "fixture-state")
+        with self.assertRaises(PlatformContractError) as error:
+            bound.collect(
+                item, CHECK_MANIFEST.checks[0], "structured_read",
+                scope={"unexpected": True},
+            )
+        self.assertEqual(error.exception.code, "PROVIDER_SCOPE_INVALID")
+
     def test_response_identity_source_state_and_kind_must_match(self):
         expected = {
             "wrong_request": "PROVIDER_RESPONSE_IDENTITY_MISMATCH",

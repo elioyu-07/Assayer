@@ -178,8 +178,15 @@ class BoundCapabilityProvider:
         work_item: WorkItem,
         check: CheckContract,
         capability: str,
+        scope: Mapping[str, Any] | None = None,
     ) -> ProviderCollectionResult:
-        """Collect once and return only Host-validated Evidence or a safe failure."""
+        """Collect once and return only Host-validated Evidence or a safe failure.
+
+        ``scope`` overrides the Run-level provider scope for this request after
+        validating it against the provider's registered business-input schema;
+        it lets a plugin read distinct per-work-item sources under one bound
+        provider.
+        """
         if capability not in check.required_capabilities:
             raise PlatformContractError(
                 "PROVIDER_CAPABILITY_UNREQUESTED",
@@ -190,7 +197,7 @@ class BoundCapabilityProvider:
                 "PROVIDER_CAPABILITY_NOT_GRANTED",
                 "The provider capability is outside the negotiated context",
             )
-        request = self._request(work_item, check, capability)
+        request = self._request(work_item, check, capability, scope)
         replay = self._results.get(request.idempotency_key)
         if replay is not None:
             return replay
@@ -248,8 +255,10 @@ class BoundCapabilityProvider:
 
     def _request(
         self, work_item: WorkItem, check: CheckContract, capability: str,
+        scope: Mapping[str, Any] | None = None,
     ) -> ProviderRequest:
         descriptor = self.registration.descriptor
+        request_scope = self.scope if scope is None else self._validated_scope(scope)
         identity_material = {
             "runId": self.context.run_id,
             "workItemId": work_item.work_item_id,
@@ -260,7 +269,7 @@ class BoundCapabilityProvider:
             "providerId": descriptor.provider_id,
             "providerVersion": descriptor.version,
             "capability": capability,
-            "scope": self.scope,
+            "scope": request_scope,
             "limits": dict(self.context.limits),
         }
         try:
@@ -282,7 +291,7 @@ class BoundCapabilityProvider:
             capability,
             work_item.identity,
             work_item.state_digest,
-            self.scope,
+            request_scope,
             self.context.limits,
         )
         try:
@@ -293,6 +302,26 @@ class BoundCapabilityProvider:
                 "Provider request does not satisfy the execution contract",
             ) from error
         return request
+
+    def _validated_scope(self, scope: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Validate a per-request scope against the provider business-input schema."""
+        material = _plain(scope)
+        if not isinstance(material, Mapping):
+            raise PlatformContractError(
+                "PROVIDER_SCOPE_INVALID",
+                "Provider request scope must be an object",
+            )
+        descriptor = self.registration.descriptor
+        error = next(
+            Draft202012Validator(_plain(descriptor.scope_schema)).iter_errors(material),
+            None,
+        )
+        if error is not None:
+            raise PlatformContractError(
+                "PROVIDER_SCOPE_INVALID",
+                "Provider request scope does not satisfy the registered business-input schema",
+            )
+        return _freeze(dict(material))
 
     def _validate_response(
         self,

@@ -219,8 +219,19 @@ class CapabilityAccess(Protocol):
     """
 
     def collect(
-        self, work_item: WorkItem, check: CheckContract, capability: str,
-    ) -> ProviderCollectionResult: ...
+        self,
+        work_item: WorkItem,
+        check: CheckContract,
+        capability: str,
+        scope: Mapping[str, Any] | None = None,
+    ) -> ProviderCollectionResult:
+        """Collect facts for ``work_item`` under an optional per-request scope.
+
+        ``scope`` is the provider business-input scope for this request (for
+        example a document path).  When ``None`` the Run-level scope bound at
+        negotiation is used.
+        """
+        ...
 
 
 @dataclass(frozen=True)
