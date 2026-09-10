@@ -160,6 +160,7 @@ def registration() -> PluginRegistration:
         plugin_factory=lambda runtime=None: NavigationPlugin(runtime),
         decision_provider_factory=lambda runtime=None: NavigationDecisionProvider(),
         capabilities=frozenset({CAPABILITY}),
+        provider_capabilities=frozenset({CAPABILITY}),
         execution_modes=frozenset({"interactive"}),
         scope_schema={"type": "object", "additionalProperties": True},
     )

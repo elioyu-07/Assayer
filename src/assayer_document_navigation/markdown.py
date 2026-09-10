@@ -189,6 +189,12 @@ def _descriptor() -> CapabilityProviderDescriptor:
             "properties": {
                 "path": {"type": "string", "minLength": 1},
                 "format": {"const": "markdown"},
+                # A multi-document WorkItem carries a composite state digest, so
+                # the caller may declare the exact digest of the single source in
+                # ``path``.  The provider still verifies the file against this
+                # digest before returning facts; the Evidence state digest
+                # remains the WorkItem state validated by the Host.
+                "sourceDigest": {"type": "string", "minLength": 1},
                 "page": {"type": "object", "additionalProperties": False, "properties": {
                     "cursor": {"type": ["string", "null"]},
                     "size": {"type": "integer", "minimum": 1, "maximum": 1000},
@@ -224,9 +230,13 @@ class MarkdownNavigationProvider:
             # WorkItems in the platform kernel historically carry the raw
             # SHA-256 value, while the provider payload uses an algorithm-
             # qualified digest.  Accept both equivalent spellings at this
-            # boundary; the returned Evidence remains bound to the exact
-            # request state digest validated by the Host.
-            if request.state_digest not in {digest_value, digest}:
+            # boundary.  A multi-document WorkItem may instead declare the
+            # single source digest in ``sourceDigest``; the file is still
+            # verified against it, and the returned Evidence stays bound to the
+            # exact request state digest validated by the Host.
+            declared = scope.get("sourceDigest")
+            accepted = {digest_value, digest}
+            if request.state_digest not in accepted and declared not in accepted:
                 return ProviderResponse(request.request_id, request.provider_id, request.provider_version, request.capability, "failed", failure=ProviderFailure("source_changed", "The Markdown source changed after discovery."))
             payload = parse_markdown(raw, path=str(path))
             page = scope.get("page") or {}

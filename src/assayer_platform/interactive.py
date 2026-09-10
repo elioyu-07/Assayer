@@ -882,8 +882,8 @@ class InteractivePluginController:
         runtime_resolver: Callable[[PluginRegistration, Any], Any] | None = None,
         capabilities_resolver: Callable[[PluginRegistration, Any], Sequence[str]] | None = None,
         provider_registry: ProviderRegistry | None = None,
-        platform_profile: CapabilityProfile | None = None,
-        user_profile: CapabilityProfile | None = None,
+        platform_profile: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None = None,
+        user_profile: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None = None,
         provider_scope_resolver: Callable[[PluginRegistration, Any, Any], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.registry = registry
@@ -920,35 +920,56 @@ class InteractivePluginController:
         """
         required = frozenset(check.required_capabilities)
         host_caps = frozenset(host_capabilities)
-        if self.provider_registry is None or not required:
+        provider_required = required & frozenset(getattr(registration, "provider_capabilities", ()))
+        if self.provider_registry is None or not provider_required:
             return None, required | host_caps
-        if self.platform_profile is None:
+        platform_profile = self._resolve_profile(self.platform_profile, registration, check)
+        if platform_profile is None:
             raise PlatformContractError(
                 "PROVIDER_NOT_FOUND",
                 "The Check requires provider capabilities but no platform capability profile is configured",
             )
-        provider_registration = self.provider_registry.select_for_capabilities(sorted(required))
+        provider_registration = self.provider_registry.select_for_capabilities(
+            sorted(provider_required),
+        )
         provider_scope: Mapping[str, Any] = {}
+        registration_resolver = getattr(registration, "provider_scope_resolver", None)
         if self.provider_scope_resolver is not None:
             resolved = self.provider_scope_resolver(registration, scope, check)
-            if resolved is not None:
-                if not isinstance(resolved, Mapping):
-                    raise PlatformContractError(
-                        "PROVIDER_SCOPE_INVALID",
-                        "Provider scope resolver must return a mapping or None",
-                    )
-                provider_scope = resolved
+        elif registration_resolver is not None:
+            resolved = registration_resolver(scope, check)
+        else:
+            resolved = None
+        if resolved is not None:
+            if not isinstance(resolved, Mapping):
+                raise PlatformContractError(
+                    "PROVIDER_SCOPE_INVALID",
+                    "Provider scope resolver must return a mapping or None",
+                )
+            provider_scope = resolved
         negotiation = CapabilityNegotiator().negotiate(
             provider_registration,
-            sorted(required),
-            self.platform_profile,
-            user_profile=self.user_profile,
+            sorted(provider_required),
+            platform_profile,
+            user_profile=self._resolve_profile(self.user_profile, registration, check),
             scope=provider_scope,
         )
         bound = BoundCapabilityProvider(
             provider_registration, negotiation, run_id=run_id, scope=provider_scope,
         )
         return bound, host_caps | frozenset(negotiation.granted)
+
+    @staticmethod
+    def _resolve_profile(
+        value: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None,
+        registration: PluginRegistration,
+        check: Any,
+    ) -> CapabilityProfile | None:
+        if value is None:
+            return None
+        if callable(value):
+            return value(registration, check)
+        return value
 
     @staticmethod
     def _close_bound_provider(state: Mapping[str, Any] | None) -> None:

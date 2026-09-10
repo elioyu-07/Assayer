@@ -29,6 +29,7 @@ from .conformance import (
     inspect_plugin_lifecycle,
 )
 from .contract import (
+    CapabilityProfile,
     CheckContract,
     DecisionProposal,
     Finding,
@@ -39,6 +40,7 @@ from .contract import (
 from .kernel import PlatformKernel
 from .interactive import InteractivePluginController
 from .plugin_registry import PluginRegistration, PluginRegistry
+from .provider_catalog import installed_provider_registry
 from .registry import load_plugin_manifest
 from .result_conformance import inspect_result_conformance
 
@@ -199,13 +201,29 @@ def _entry_point_release_acceptance(
     return value, []
 
 
+def _grant_check_capabilities(
+    registration: PluginRegistration, check: CheckContract,
+) -> CapabilityProfile:
+    """Grant exactly the capabilities a release Check declares."""
+    del registration
+    return CapabilityProfile(frozenset(check.required_capabilities))
+
+
 class _ReleaseAcceptanceTransport:
     """Small platform-only adapter used by installed release fixtures."""
-
     def __init__(
         self, root: Path, registry: PluginRegistry, tracker: dict[str, Any],
     ) -> None:
-        self._controller = InteractivePluginController(registry, root)
+        # A release fixture may require capability providers; bind them from the
+        # installed entry-point catalog so the same provider contract used in
+        # production is exercised here.  Profiles grant exactly the capabilities
+        # the selected Check declares.
+        self._controller = InteractivePluginController(
+            registry, root,
+            provider_registry=installed_provider_registry(),
+            platform_profile=_grant_check_capabilities,
+            user_profile=_grant_check_capabilities,
+        )
         self._active_run_id: str | None = None
         self._terminal_run_id = self._controller.terminal_run_id
         self._tracker = tracker

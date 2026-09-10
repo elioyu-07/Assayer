@@ -33,10 +33,21 @@ class PluginRegistration:
     decision_provider_factory: Callable[..., Any] | None = None
     committer_factory: Callable[..., Any] | None = None
     capabilities: frozenset[str] = frozenset()
+    # Subset of the Check capabilities the plugin consumes from a Host-bound
+    # capability provider rather than a Host direct grant.  Declaring them lets
+    # the Host fail closed when a provider is missing instead of silently
+    # treating a provider capability as host-granted.
+    provider_capabilities: frozenset[str] = frozenset()
     result_features: frozenset[str] = frozenset()
     execution_modes: frozenset[str] = frozenset({"batch"})
     scope_schema: Mapping[str, Any] = field(default_factory=dict)
     review_payload_schema: Mapping[str, Any] = field(default_factory=dict)
+    # Optional plugin-declared mapping from the plugin's business scope to the
+    # capability provider authorization scope.  It keeps domain knowledge in
+    # the plugin while letting the Host stay domain-agnostic; the Host invokes
+    # it as ``resolver(scope, check)`` and validates the result against the
+    # provider schema during capability negotiation.
+    provider_scope_resolver: Callable[[Any, Any], Mapping[str, Any] | None] | None = None
     agent_contracts: tuple[AgentContractBundle, ...] = ()
     domain_result_contracts: tuple[DomainResultContract, ...] = ()
     # Independent protocol/SDK compatibility declaration.  Defaults preserve
@@ -52,6 +63,7 @@ class PluginRegistration:
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", frozenset(self.capabilities))
         object.__setattr__(self, "protocol_capabilities", frozenset(self.protocol_capabilities))
+        object.__setattr__(self, "provider_capabilities", frozenset(self.provider_capabilities))
         modes = frozenset(self.execution_modes)
         if not modes or not modes.issubset({"batch", "interactive"}):
             raise PlatformContractError(
