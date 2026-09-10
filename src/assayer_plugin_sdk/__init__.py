@@ -86,6 +86,7 @@ from .plugin_sdk import (  # noqa: F401
     to_json_value,
     validate_entity_id,
 )
+from .registration import PluginRegistration  # noqa: F401
 from .review_protocol import (  # noqa: F401
     REVIEW_DISPOSITIONS,
     build_review_task,
