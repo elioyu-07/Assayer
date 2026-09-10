@@ -63,3 +63,16 @@ be closed at WS3/WS10.
 The guards currently run in the fast verification suite. Wiring them into the
 release gate (the same place the §3.13 isolation regression runs) is tracked by
 WS8 and is not yet done.
+
+## 6. WS3 migration checklist
+
+When plugin-facing schemas leave the platform resource directory in WS3:
+
+- the platform sentinel in `registry._schema_root()` MUST be a platform-owned
+  schema that stays in the platform directory (`platform-ledger.schema.json`),
+  never an SDK-owned schema such as `plugin-manifest.schema.json`;
+- `result_conformance.py` and other loaders that glob `*.schema.json` from a
+  single directory MUST still find `platform-ledger.schema.json` in the platform
+  schema set;
+- the SDK package data MUST keep shipping every schema its validators and
+  manifest loader read.

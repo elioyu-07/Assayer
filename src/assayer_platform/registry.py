@@ -20,6 +20,12 @@ from assayer_plugin_sdk.manifest import (  # noqa: F401
 from .contract import PlatformContractError
 
 
+# A platform-owned schema that stays in the platform resource directory after
+# the plugin-facing schemas move to the SDK (WS3).  Do not use an SDK-owned
+# schema (such as plugin-manifest.schema.json) as an existence sentinel here.
+_PLATFORM_SCHEMA_SENTINEL = "platform-ledger.schema.json"
+
+
 def _version_core(value: str) -> tuple[int, int, int]:
     core = value.split("-", 1)[0].split("+", 1)[0]
     major, minor, patch = core.split(".")
@@ -30,10 +36,10 @@ def _schema_root() -> Path:
     configured = os.environ.get("ASSAYER_RESOURCE_ROOT")
     if configured:
         candidate = Path(configured).expanduser().resolve() / "schemas"
-        if (candidate / "plugin-manifest.schema.json").is_file():
+        if (candidate / _PLATFORM_SCHEMA_SENTINEL).is_file():
             return candidate
         raise PlatformContractError(
-            "RESOURCE_UNAVAILABLE", "ASSAYER_RESOURCE_ROOT does not contain plugin manifest schemas",
+            "RESOURCE_UNAVAILABLE", "ASSAYER_RESOURCE_ROOT does not contain platform schemas",
         )
     candidates = (
         Path(sys.prefix) / "share" / "assayer" / "schemas",
@@ -41,9 +47,9 @@ def _schema_root() -> Path:
         Path(__file__).resolve().parents[2] / "schemas",
     )
     for candidate in candidates:
-        if (candidate / "plugin-manifest.schema.json").is_file():
+        if (candidate / _PLATFORM_SCHEMA_SENTINEL).is_file():
             return candidate
-    raise PlatformContractError("RESOURCE_UNAVAILABLE", "Plugin manifest schemas are unavailable")
+    raise PlatformContractError("RESOURCE_UNAVAILABLE", "Platform schemas are unavailable")
 
 
 __all__ = ["_schema_root", "_version_core", "load_plugin_manifest", "validate_plugin_manifest"]
