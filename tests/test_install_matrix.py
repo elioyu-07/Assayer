@@ -28,11 +28,13 @@ def _load_matrix_module():
 matrix = _load_matrix_module()
 
 
-def observed(*, plugins=(), providers=(), origins=None, plugin_count=None, conflict=None):
+def observed(*, plugins=(), providers=(), origins=None, plugin_count=None,
+             conflict=None, purelib="/venv/site-packages"):
     return {
         "plugins": list(plugins),
         "providers": list(providers),
         "origins": origins or {},
+        "purelib": purelib,
         "plugin_count": plugin_count,
         "conflict": conflict,
     }
@@ -53,7 +55,10 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
         matrix._assert_case(case, observed(
             plugins=["assayer.frontend-audit"],
             providers=["markdown"],
-            origins={"assayer.frontend-audit": "/one", "markdown": "/two"},
+            origins={
+                "assayer.frontend-audit": "/venv/site-packages/assayer_frontend_audit/__init__.py",
+                "markdown": "/venv/site-packages/assayer_document_navigation/__init__.py",
+            },
             plugin_count=1,
         ))
 
@@ -89,13 +94,21 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
                 plugins=["assayer.frontend-audit"], plugin_count=0,
             ))
 
-    def test_overlapping_module_origins_fail(self):
-        case = matrix.Case("u", ("assayer",), 1, 1)
+    def test_entry_point_outside_site_packages_fails(self):
+        case = matrix.Case("u", ("assayer",), 1, 0)
         with self.assertRaises(SystemExit):
             matrix._assert_case(case, observed(
                 plugins=["assayer.frontend-audit"],
-                providers=["markdown"],
-                origins={"assayer.frontend-audit": "/same", "markdown": "/same"},
+                origins={"assayer.frontend-audit": "/somewhere/else/__init__.py"},
+                plugin_count=1,
+            ))
+
+    def test_unresolved_entry_point_fails(self):
+        case = matrix.Case("v", ("assayer",), 1, 0)
+        with self.assertRaises(SystemExit):
+            matrix._assert_case(case, observed(
+                plugins=["assayer.frontend-audit"],
+                origins={"assayer.frontend-audit": None},
                 plugin_count=1,
             ))
 

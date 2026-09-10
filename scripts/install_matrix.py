@@ -13,6 +13,16 @@ a local wheelhouse, and asserts:
 
 The wheelhouse bundles every third-party dependency, so the matrix itself runs
 offline; only populating the wheelhouse needs network.
+
+Boundary: this matrix proves installation, entry-point ownership, and registry
+loading.  Executing a Check end to end belongs to the A-plan phase-3 bundle
+acceptance, not here.
+
+Forward note (phase 3): once the root ``assayer`` wheel becomes platform-only,
+the ``root-meta`` case expects ``0/0`` and ``root+split-conflict`` no longer
+overlaps.  Do **not** drop that negative case — repurpose it into a genuine
+duplicate (two distributions exporting the same plugin id, or two versions of
+one wheel) so ``PLUGIN_CONFLICT`` coverage survives the flip.
 """
 
 from __future__ import annotations
@@ -72,6 +82,7 @@ CASES = (
 CHECK_SCRIPT = r"""
 import importlib.util
 import json
+import sysconfig
 from importlib import metadata
 
 
@@ -103,6 +114,7 @@ print(json.dumps({
     "plugins": [entry.name for entry in plugins],
     "providers": [entry.name for entry in providers],
     "origins": origins,
+    "purelib": sysconfig.get_paths()["purelib"],
     "plugin_count": plugin_count,
     "conflict": conflict,
 }))
@@ -168,9 +180,14 @@ def _assert_case(case: Case, observed: dict) -> None:
             raise SystemExit(
                 f"{case.name}: expected {case.conflict}, observed {observed['conflict']}"
             )
-    origins = [origin for origin in observed["origins"].values() if origin]
-    if len(origins) != len(set(origins)):
-        raise SystemExit(f"{case.name}: entry-point modules resolve from overlapping origins")
+    purelib = observed.get("purelib") or ""
+    for name, origin in observed["origins"].items():
+        if not origin:
+            raise SystemExit(f"{case.name}: entry point {name} did not resolve to a module")
+        if purelib and not Path(origin).is_relative_to(purelib):
+            raise SystemExit(
+                f"{case.name}: entry point {name} resolves outside the venv site-packages: {origin}"
+            )
 
 
 def run_matrix(wheelhouse: Path, *, keep: bool = False) -> list[dict]:
