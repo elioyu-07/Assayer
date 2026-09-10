@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assayer-plugin-sdk"
+version = "0.1.2"
+description = "The stable, platform-independent Assayer plugin SDK"
+requires-python = ">=3.11"
+dependencies = ["jsonschema==4.26.0"]
+
+[tool.setuptools]
+package-dir = { "" = "../../src" }
+packages = ["assayer_plugin_sdk"]
+
+[tool.setuptools.package-data]
+assayer_plugin_sdk = ["schemas/*.json"]

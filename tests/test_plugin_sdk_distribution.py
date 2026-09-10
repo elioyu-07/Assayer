@@ -142,6 +142,28 @@ class PluginSdkDistributionTest(unittest.TestCase):
                 "assayer_platform", path.read_text(encoding="utf-8"), path.name,
             )
 
+    def test_split_distribution_configs_are_sdk_only(self) -> None:
+        import tomllib
+
+        sdk = tomllib.loads(
+            (ROOT / "packages" / "assayer-plugin-sdk" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual("assayer-plugin-sdk", sdk["project"]["name"])
+        self.assertEqual(["assayer_plugin_sdk"], sdk["tool"]["setuptools"]["packages"])
+        self.assertIn(
+            "schemas/*.json",
+            sdk["tool"]["setuptools"]["package-data"]["assayer_plugin_sdk"],
+        )
+
+        plugin = tomllib.loads(
+            (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        dependencies = plugin["project"]["dependencies"]
+        self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in dependencies))
+        self.assertFalse(
+            any("assayer-platform" in dep or "assayer-host" in dep for dep in dependencies)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
