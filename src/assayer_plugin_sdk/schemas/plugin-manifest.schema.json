@@ -38,7 +38,7 @@
           "decisionStates": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/decisionResult" } },
           "requiredEvidenceKinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
           "requiredCapabilities": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } },
-          "capabilityMissingOutcome": { "enum": ["needs_review", "blocked"] },
+          "capabilityMissingOutcome": { "enum": ["needs_review", "blocked"], "$comment": "Reserved/unreachable on the normal path: missing capabilities fail fast (PROVIDER_NOT_FOUND or CAPABILITY_NEGOTIATION_BLOCKED) and never degrade. See docs/platform-contract.md 5.1." },
           "invalidationSignals": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/nonEmptyString" } }
         }
       }

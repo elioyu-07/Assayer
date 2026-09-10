@@ -141,6 +141,23 @@ Every check must declare:
 - capability prerequisites;
 - execution constraints and invalidation conditions.
 
+> **Capability failure semantics (fail-fast, WS8).** Missing capabilities are
+> not degraded. On the provider-backed path a Check whose
+> `requiredCapabilities` no installed provider supplies fails immediately with
+> `PROVIDER_NOT_FOUND`; a capability that is supplied but denied by platform
+> policy or user scope fails with `CAPABILITY_NEGOTIATION_BLOCKED`. Neither
+> path writes a ledger or emits a `needs_review` Decision.
+>
+> Consequently `capabilityMissingOutcome` (manifest) and the negotiation
+> `provider_absent` code are **reserved/unreachable** on the normal path:
+> provider selection already requires
+> `requiredCapabilities ⊆ provider.declaredCapabilities`, and interactive Runs
+> are granted `registration.capabilities` directly. On the interactive path the
+> declared capabilities are descriptive only and are enforced through
+> `requiredEvidenceKinds`. Do not read either field as a supported degradation
+> mechanism until the semantics are explicitly changed and covered by the
+> release gate.
+
 ### 5.2 Domain operations
 
 The platform invokes these conceptual operations:

@@ -437,6 +437,35 @@ class ProviderExecutionTests(unittest.TestCase):
         self.assertEqual(provider_calls["calls"], 0)
         self.assertEqual(plugin_calls["calls"], 0)
 
+    def test_missing_provider_fails_fast_without_needs_review(self):
+        """A required capability with no supplying provider is a hard, no-ledger failure.
+
+        This pins the fail-fast semantics decided for WS8: the run raises
+        ``PROVIDER_NOT_FOUND`` before any ledger is written and never degrades
+        to a ``needs_review`` Decision, so manifest ``capabilityMissingOutcome``
+        is unreachable on the provider-backed path.
+        """
+        plugin_calls = {"calls": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            runner = PlatformRunner(
+                PluginRegistry((plugin_registration(factory_counter=plugin_calls),)),
+                directory,
+            )
+            with self.assertRaises(PlatformContractError) as error:
+                runner.run_with_provider(
+                    plugin_id="fixture.provider-plugin",
+                    check_id="FIX-101",
+                    scope={},
+                    provider_registry=ProviderRegistry(()),
+                    provider_scope={"source": "fixture"},
+                    platform_profile=CapabilityProfile(frozenset({"structured_read"})),
+                    user_profile=CapabilityProfile(frozenset({"structured_read"})),
+                    run_id="run-missing-provider",
+                )
+            self.assertEqual(error.exception.code, "PROVIDER_NOT_FOUND")
+            self.assertFalse((Path(directory) / "run-missing-provider").exists())
+        self.assertEqual(plugin_calls["calls"], 0)
+
     def test_provider_bound_runner_persists_complete_evidence_identity(self):
         provider = RecordingProvider(provider_descriptor())
         with tempfile.TemporaryDirectory() as directory:
