@@ -11,7 +11,8 @@ from .contract import (
     CheckContract, CommitReceipt, DecisionProposal, DimensionObservation,
     EvidenceRecord, Finding, InvestigationPacket, Operation, PlatformContext,
     PlatformContractError, PlatformEvent, PlatformLedger, PlatformRun,
-    PlatformRunResult, PluginManifest, ReviewCheckpoint, WorkFailure, WorkItem,
+    PlatformRunResult, PluginManifest, ProviderEvidenceExpectation,
+    ReviewCheckpoint, WorkFailure, WorkItem,
 )
 from .decision import validate_decision_shape
 from .ledger import PlatformLedgerStore
@@ -293,13 +294,19 @@ class InteractivePlatformRun:
         self._record_operation("discover", "succeeded")
         self._save()
 
-    def record_investigation(self, packet: InvestigationPacket) -> None:
+    def record_investigation(
+        self, packet: InvestigationPacket, *,
+        provider_evidence_expectation: ProviderEvidenceExpectation | None = None,
+    ) -> None:
         self._require_running()
         from .kernel import PlatformKernel
         item = self.work_items.get(packet.work_item.work_item_id)
         if item is None:
             raise PlatformContractError("UNKNOWN_WORK_ITEM", "Investigation references an undiscovered WorkItem")
-        PlatformKernel._validate_packets((packet,), (item,), self.check)
+        PlatformKernel._validate_packets(
+            (packet,), (item,), self.check,
+            provider_evidence_expectation=provider_evidence_expectation,
+        )
         existing = self.investigations.get(item.work_item_id)
         if existing is not None and existing != packet:
             raise PlatformContractError("INVESTIGATION_CONFLICT", "Investigation changed within the active Run")

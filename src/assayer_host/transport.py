@@ -31,6 +31,7 @@ from .plugin_store_registry import default_store_root, store_backed_plugin_regis
 from .resources import default_schema_root
 from assayer_platform import (
     PlatformRunner, PlatformContractError, PluginRegistry, InteractivePluginController,
+    CapabilityProfile, ProviderRegistry,
 )
 from assayer_platform import installed_plugin_registry
 from assayer_platform.error_policy import boundary_error_policy
@@ -540,6 +541,10 @@ class InteractivePlatformMcpToolTransport:
                  *, plugin_registry: PluginRegistry | None = None,
                  runtime_resolver: Any = None,
                  capabilities_resolver: Any = None,
+                 provider_registry: ProviderRegistry | None = None,
+                 platform_profile: CapabilityProfile | None = None,
+                 user_profile: CapabilityProfile | None = None,
+                 provider_scope_resolver: Any = None,
                  store_root: str | None = None):
         self._store_root = str(store_root) if store_root else None
         self._store_digest = self._compute_store_digest()
@@ -547,6 +552,10 @@ class InteractivePlatformMcpToolTransport:
             plugin_registry or installed_plugin_registry(), output_root,
             runtime_resolver=runtime_resolver,
             capabilities_resolver=capabilities_resolver,
+            provider_registry=provider_registry,
+            platform_profile=platform_profile,
+            user_profile=user_profile,
+            provider_scope_resolver=provider_scope_resolver,
         )
         self._active_run_id: str | None = self._controller.active_run_id
         self._terminal_run_id: str | None = self._controller.terminal_run_id
@@ -937,6 +946,10 @@ def create_interactive_mcp_server(
     plugin_registry: PluginRegistry | None = None,
     runtime_resolver: Any = None,
     capabilities_resolver: Any = None,
+    provider_registry: ProviderRegistry | None = None,
+    platform_profile: CapabilityProfile | None = None,
+    user_profile: CapabilityProfile | None = None,
+    provider_scope_resolver: Any = None,
     store_root: str | None = None,
 ):
     """Create a browser-independent MCP server for interactive plugins and lifecycle.
@@ -954,6 +967,10 @@ def create_interactive_mcp_server(
         output_root, plugin_registry=plugin_registry,
         runtime_resolver=runtime_resolver,
         capabilities_resolver=capabilities_resolver,
+        provider_registry=provider_registry,
+        platform_profile=platform_profile,
+        user_profile=user_profile,
+        provider_scope_resolver=provider_scope_resolver,
         store_root=store_root,
     )
     server._assayer_transport = adapter

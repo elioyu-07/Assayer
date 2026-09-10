@@ -22,7 +22,9 @@ from typing import Any, Callable
 from jsonschema import Draft202012Validator
 
 from .agent_contract import AgentContractBundle, DomainResultContract
+from .capability_negotiation import CapabilityNegotiator
 from .contract import (
+    CapabilityProfile,
     CommitReceipt,
     DecisionProposal,
     Finding,
@@ -35,6 +37,8 @@ from .contract import (
     WorkItem,
 )
 from .plugin_registry import PluginRegistry, PluginRegistration
+from .provider_execution import BoundCapabilityProvider
+from .provider_registry import ProviderRegistry
 from .plugin_sdk import to_json_value, validate_entity_id
 from .result_delivery import StagedResultDocument
 from .canonical_result import validate_canonical_result
@@ -877,12 +881,20 @@ class InteractivePluginController:
         *,
         runtime_resolver: Callable[[PluginRegistration, Any], Any] | None = None,
         capabilities_resolver: Callable[[PluginRegistration, Any], Sequence[str]] | None = None,
+        provider_registry: ProviderRegistry | None = None,
+        platform_profile: CapabilityProfile | None = None,
+        user_profile: CapabilityProfile | None = None,
+        provider_scope_resolver: Callable[[PluginRegistration, Any, Any], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.registry = registry
         self.output_root = Path(output_root).expanduser().resolve()
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.runtime_resolver = runtime_resolver
         self.capabilities_resolver = capabilities_resolver
+        self.provider_registry = provider_registry
+        self.platform_profile = platform_profile
+        self.user_profile = user_profile
+        self.provider_scope_resolver = provider_scope_resolver
         self._controller_epoch = uuid.uuid4().hex
         self._runs: dict[str, dict[str, Any]] = {}
         self._ownership_locks: dict[str, Any] = {}
@@ -890,6 +902,61 @@ class InteractivePluginController:
         self._resume_error: PlatformContractError | None = None
         self._terminal_error: PlatformContractError | None = None
         self._restore_latest_terminal_result()
+
+    def _bind_capability_provider(
+        self,
+        run_id: str,
+        registration: PluginRegistration,
+        check: Any,
+        scope: Any,
+        host_capabilities: Sequence[str],
+    ) -> tuple[BoundCapabilityProvider | None, frozenset[str]]:
+        """Bind a negotiated provider when the Check requires provider capabilities.
+
+        Returns the bound provider (or ``None`` when no provider registry is
+        configured) and the effective capability set for the Run context.  A
+        required capability with no supplying provider fails closed with
+        ``PROVIDER_NOT_FOUND`` instead of degrading to ``needs_review``.
+        """
+        required = frozenset(check.required_capabilities)
+        host_caps = frozenset(host_capabilities)
+        if self.provider_registry is None or not required:
+            return None, required | host_caps
+        if self.platform_profile is None:
+            raise PlatformContractError(
+                "PROVIDER_NOT_FOUND",
+                "The Check requires provider capabilities but no platform capability profile is configured",
+            )
+        provider_registration = self.provider_registry.select_for_capabilities(sorted(required))
+        provider_scope: Mapping[str, Any] = {}
+        if self.provider_scope_resolver is not None:
+            resolved = self.provider_scope_resolver(registration, scope, check)
+            if resolved is not None:
+                if not isinstance(resolved, Mapping):
+                    raise PlatformContractError(
+                        "PROVIDER_SCOPE_INVALID",
+                        "Provider scope resolver must return a mapping or None",
+                    )
+                provider_scope = resolved
+        negotiation = CapabilityNegotiator().negotiate(
+            provider_registration,
+            sorted(required),
+            self.platform_profile,
+            user_profile=self.user_profile,
+            scope=provider_scope,
+        )
+        bound = BoundCapabilityProvider(
+            provider_registration, negotiation, run_id=run_id, scope=provider_scope,
+        )
+        return bound, host_caps | frozenset(negotiation.granted)
+
+    @staticmethod
+    def _close_bound_provider(state: Mapping[str, Any] | None) -> None:
+        if not isinstance(state, Mapping):
+            return
+        provider = state.get("capability_provider")
+        if provider is not None:
+            provider.close()
 
     @property
     def operations(self) -> tuple[str, ...]:
@@ -956,21 +1023,35 @@ class InteractivePluginController:
             raise PlatformContractError(
                 "RUN_CONFLICT", "An interactive Run with this ID already has durable state; use explicit resume",
             )
-        resolved_runtime = runtime
-        if self.runtime_resolver is not None:
-            resolved_runtime = self.runtime_resolver(registration, scope)
-        caps = tuple(capabilities) if capabilities is not None else tuple(
+        requested_caps = tuple(capabilities) if capabilities is not None else tuple(
             self.capabilities_resolver(registration, scope)
             if self.capabilities_resolver is not None else registration.capabilities
         )
-        context = PlatformContext(run_id, frozenset(caps))
+        bound_provider, effective_caps = self._bind_capability_provider(
+            run_id, registration, check, scope, requested_caps,
+        )
+        if bound_provider is not None:
+            resolved_runtime = bound_provider
+            caps = tuple(sorted(effective_caps))
+            context = PlatformContext(
+                run_id, effective_caps, dict(bound_provider.context.limits),
+            )
+        else:
+            resolved_runtime = runtime
+            if self.runtime_resolver is not None:
+                resolved_runtime = self.runtime_resolver(registration, scope)
+            caps = requested_caps
+            context = PlatformContext(run_id, frozenset(caps))
         try:
             plugin = registration.create_plugin(resolved_runtime)
         except PlatformContractError:
+            self._close_bound_provider({"capability_provider": bound_provider})
             raise
         except Exception as error:
+            self._close_bound_provider({"capability_provider": bound_provider})
             raise PlatformContractError("PLUGIN_INITIALIZATION_FAILED", "Interactive plugin could not be initialized") from error
         if getattr(plugin, "manifest", None) != registration.manifest:
+            self._close_bound_provider({"capability_provider": bound_provider})
             raise PlatformContractError("PLUGIN_IDENTITY_MISMATCH", "Plugin factory returned different registered metadata")
         if domain_result_contract is not None:
             missing = [
@@ -982,6 +1063,7 @@ class InteractivePluginController:
                 # problem.  Detect it before ownership/ledger creation so a
                 # malformed release cannot reach a semantic boundary and
                 # consume the Agent correction budget.
+                self._close_bound_provider({"capability_provider": bound_provider})
                 raise PlatformContractError(
                     "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
                     "The domain-result plugin is missing required operation(s): "
@@ -1011,9 +1093,11 @@ class InteractivePluginController:
                 "evidence_handle_registry": None,
                 "compatibility": compatibility,
                 "validated_checkpoint_draft": None,
+                "capability_provider": bound_provider,
             }
             self._write_resume_descriptor(run_id, registration, scope, caps)
         except Exception:
+            self._close_bound_provider({"capability_provider": bound_provider})
             self._runs.pop(run_id, None)
             self._release_ownership(run_id, reason="start_failed")
             raise
@@ -1285,6 +1369,7 @@ class InteractivePluginController:
                 "RUN_RESUME_FAILED", "No recoverable Run exists for the requested Run ID",
             )
         self._claim_ownership(run_id)
+        bound_provider: BoundCapabilityProvider | None = None
         try:
             descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
             if descriptor.get("runId") != run_id:
@@ -1341,11 +1426,26 @@ class InteractivePluginController:
                     "The active Run requires a different executable domain-result contract",
                 )
             scope = descriptor["scope"]
-            resolved_runtime = None
-            if self.runtime_resolver is not None:
-                resolved_runtime = self.runtime_resolver(registration, scope)
-            capabilities = tuple(str(item) for item in descriptor.get("capabilities", ()))
-            context = PlatformContext(run_id, frozenset(capabilities))
+            check = self.registry.check(
+                registration,
+                (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
+            )
+            requested_caps = tuple(str(item) for item in descriptor.get("capabilities", ()))
+            bound_provider, effective_caps = self._bind_capability_provider(
+                run_id, registration, check, scope, requested_caps,
+            )
+            if bound_provider is not None:
+                capabilities = tuple(sorted(effective_caps))
+                context = PlatformContext(
+                    run_id, effective_caps, dict(bound_provider.context.limits),
+                )
+                resolved_runtime = bound_provider
+            else:
+                capabilities = requested_caps
+                context = PlatformContext(run_id, frozenset(capabilities))
+                resolved_runtime = None
+                if self.runtime_resolver is not None:
+                    resolved_runtime = self.runtime_resolver(registration, scope)
             plugin = registration.create_plugin(resolved_runtime)
             if getattr(plugin, "manifest", None) != registration.manifest:
                 raise PlatformContractError(
@@ -1360,9 +1460,7 @@ class InteractivePluginController:
                     "RUN_SCOPE_MISMATCH", "Resume scope does not match the active Run ledger",
                 )
             run = InteractivePlatformRun.restore(
-                registration.manifest,
-                self.registry.check(registration, (str(descriptor["checkId"]), str(descriptor["checkVersion"]))),
-                context, store, ledger,
+                registration.manifest, check, context, store, ledger,
             )
             collections = {
                 work_item_id: _evidence_collections(packet)
@@ -1382,16 +1480,19 @@ class InteractivePluginController:
                 "evidence_handle_registry": None,
                 "compatibility": compatibility,
                 "validated_checkpoint_draft": None,
+                "capability_provider": bound_provider,
             }
             self._write_resume_descriptor(run_id, registration, scope, capabilities)
             response = self.advance(run_id)
             response["resumed"] = True
             return response
         except PlatformContractError as error:
+            self._close_bound_provider({"capability_provider": bound_provider})
             self._runs.pop(run_id, None)
             self._release_ownership(run_id, reason="resume_failed")
             raise
         except Exception as error:
+            self._close_bound_provider({"capability_provider": bound_provider})
             self._runs.pop(run_id, None)
             self._release_ownership(run_id, reason="resume_failed")
             raise PlatformContractError(
@@ -1417,6 +1518,8 @@ class InteractivePluginController:
 
     def close(self) -> None:
         """Release live writer locks without deleting recoverable Run state."""
+        for state in tuple(self._runs.values()):
+            self._close_bound_provider(state)
         for run_id in tuple(self._ownership_locks):
             self._release_ownership(run_id, reason="shutdown")
 
@@ -1475,6 +1578,10 @@ class InteractivePluginController:
         attempts = 0
         splits = 0
         successful_batch_sizes: list[int] = []
+        bound_provider = state.get("capability_provider")
+        provider_evidence_expectation = (
+            bound_provider.evidence_expectation if bound_provider is not None else None
+        )
 
         def inspect_batch(batch: Sequence[WorkItem]) -> None:
             nonlocal attempts, splits
@@ -1484,7 +1591,10 @@ class InteractivePluginController:
             try:
                 batch_packets = tuple(state["plugin"].inspect(batch, run.check, state["context"]))
                 from .kernel import PlatformKernel
-                PlatformKernel._validate_packets(batch_packets, batch, run.check)
+                PlatformKernel._validate_packets(
+                    batch_packets, batch, run.check,
+                    provider_evidence_expectation=provider_evidence_expectation,
+                )
                 batch_collections = {
                     packet.work_item.work_item_id: _evidence_collections(packet)
                     for packet in batch_packets
@@ -1497,7 +1607,10 @@ class InteractivePluginController:
                 return
             successful_batch_sizes.append(len(batch))
             for packet in batch_packets:
-                run.record_investigation(packet)
+                run.record_investigation(
+                    packet,
+                    provider_evidence_expectation=provider_evidence_expectation,
+                )
                 state["evidence_collections"][packet.work_item.work_item_id] = batch_collections[
                     packet.work_item.work_item_id
                 ]
@@ -3384,6 +3497,7 @@ class InteractivePluginController:
         # The durable ledger and complete result artifact are the history
         # boundary. Remove live plugin objects while retaining only the latest
         # compact paging document for this MCP session.
+        self._close_bound_provider(self._runs.get(run_id))
         self._runs.pop(run_id, None)
         (self.output_root / run_id / "platform-resume.json").unlink(missing_ok=True)
         self._release_ownership(run_id, reason="terminal")
