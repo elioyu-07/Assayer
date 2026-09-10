@@ -41,6 +41,7 @@ from .kernel import PlatformKernel
 from .interactive import InteractivePluginController
 from .plugin_registry import PluginRegistration, PluginRegistry
 from .provider_catalog import installed_provider_registry
+from .provider_binding import bind_capability_provider, check_for
 from .registry import load_plugin_manifest
 from .result_conformance import inspect_result_conformance
 
@@ -460,21 +461,36 @@ def _run_fixture(
             "Correct the fixture scope or the registered business-input schema.",
         )]
     try:
-        plugin = registration.create_plugin(None)
-        provider = (
-            registration.create_decision_provider(None)
-            if "batch" in registration.execution_modes
-            else _PacketDecisionProvider()
+        check = check_for(registration, check_id, fixture.get("checkVersion"))
+        bound = (
+            bind_capability_provider(registration, check, scope, f"conformance:{fixture_id}")
+            if check is not None else None
         )
-        result = PlatformKernel().run(
-            plugin,
-            scope,
-            check_id,
-            provider,
-            PlatformContext(
-                f"conformance:{fixture_id}", registration.capabilities,
-            ),
-        )
+        try:
+            plugin = registration.create_plugin(bound)
+            provider = (
+                registration.create_decision_provider(bound)
+                if "batch" in registration.execution_modes
+                else _PacketDecisionProvider()
+            )
+            context = (
+                bound.context if bound is not None
+                else PlatformContext(f"conformance:{fixture_id}", registration.capabilities)
+            )
+            result = PlatformKernel().run(
+                plugin,
+                scope,
+                check_id,
+                provider,
+                context,
+                check_version=fixture.get("checkVersion"),
+                provider_evidence_expectation=(
+                    bound.evidence_expectation if bound is not None else None
+                ),
+            )
+        finally:
+            if bound is not None:
+                bound.close()
     except Exception as error:
         return [_fixture_issue(
             "PLUGIN_FIXTURE_EXECUTION_FAILED",
@@ -485,6 +501,7 @@ def _run_fixture(
     lifecycle = inspect_plugin_lifecycle(
         registration, scope, check_id,
         PlatformContext(f"conformance:{fixture_id}", registration.capabilities),
+        check_version=fixture.get("checkVersion"),
         decision_provider=provider,
     )
     if not lifecycle.passed:

@@ -576,10 +576,20 @@ def inspect_plugin_lifecycle(
             "Provide a valid business scope fixture for the plugin lifecycle gate.",
         ),))
     kernel = PlatformKernel()
+    from .provider_binding import bind_capability_provider, check_for
+    check = check_for(registration, check_id, check_version)
+    bound = (
+        bind_capability_provider(
+            registration, check, scope, f"lifecycle:{registration.manifest.plugin_id}",
+        )
+        if check is not None else None
+    )
+    run_context = bound.context if bound is not None else context
+    expectation = bound.evidence_expectation if bound is not None else None
     result = kernel.run_registered(
-        registry, scope, check_id, context, plugin_id=registration.manifest.plugin_id,
+        registry, scope, check_id, run_context, plugin_id=registration.manifest.plugin_id,
         check_version=check_version, decision_provider=decision_provider,
-        committer=committer,
+        committer=committer, provider_evidence_expectation=expectation,
     )
     result_report = inspect_result_conformance(result)
     issues = list(base.issues)
@@ -607,9 +617,9 @@ def inspect_plugin_lifecycle(
                         "Commit exactly the decisions produced by the review assembly stage.",
                     ))
     replay = kernel.run_registered(
-        registry, scope, check_id, context, plugin_id=registration.manifest.plugin_id,
+        registry, scope, check_id, run_context, plugin_id=registration.manifest.plugin_id,
         check_version=check_version, decision_provider=decision_provider,
-        committer=committer,
+        committer=committer, provider_evidence_expectation=expectation,
     )
     replay_report = inspect_result_conformance(replay)
     if replay.status != result.status or tuple(replay.failures) != tuple(result.failures):
@@ -658,6 +668,8 @@ def inspect_plugin_lifecycle(
     issues.extend(_issue(
         item.code, item.invariant, item.message, item.next_action,
     ) for item in result_report.issues)
+    if bound is not None:
+        bound.close()
     return PluginConformanceReport(registration.manifest.plugin_id, tuple(issues))
 
 
