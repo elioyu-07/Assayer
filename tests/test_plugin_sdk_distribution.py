@@ -53,6 +53,8 @@ class PluginSdkDistributionTest(unittest.TestCase):
             "PluginManifest",
             "PlatformContext",
             "EvidenceRecord",
+            "CapabilityAccess",
+            "ProviderCollectionResult",
             "ExecutionProfile",
             "PlatformContractError",
             "PluginContractError",

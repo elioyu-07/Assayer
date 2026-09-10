@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 
 DECISION_STATES = frozenset({
@@ -204,6 +204,23 @@ class ProviderCollectionResult:
     evidence: tuple["EvidenceRecord", ...] = ()
     failure: ProviderFailure | None = None
     retry: str | None = None
+
+
+@runtime_checkable
+class CapabilityAccess(Protocol):
+    """Host-bound capability access a plugin consumes instead of a provider library.
+
+    A plugin declares the capabilities its Check needs; the Host negotiates and
+    binds a provider for the Run, then passes a ``CapabilityAccess`` to the
+    plugin factory's ``runtime`` argument.  The plugin calls :meth:`collect` and
+    reads the SDK-owned :class:`ProviderCollectionResult`; it never imports a
+    concrete provider implementation.  This is the dependency-inversion seam
+    required by the Platform Constitution section 3.13.
+    """
+
+    def collect(
+        self, work_item: WorkItem, check: CheckContract, capability: str,
+    ) -> ProviderCollectionResult: ...
 
 
 @dataclass(frozen=True)
