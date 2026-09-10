@@ -135,6 +135,13 @@ class PluginSdkDistributionTest(unittest.TestCase):
             self.assertNotIn("_schema_root", text, name)
             self.assertIn("assayer_plugin_sdk.resources", text, name)
 
+    def test_in_repo_plugin_depends_only_on_the_sdk(self) -> None:
+        plugin_root = ROOT / "src" / "assayer_frontend_audit"
+        for path in plugin_root.glob("*.py"):
+            self.assertNotIn(
+                "assayer_platform", path.read_text(encoding="utf-8"), path.name,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

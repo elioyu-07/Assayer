@@ -1,12 +1,13 @@
 """Standalone frontend-audit plugin (independent from the platform kernel).
 
-This package is the externalized Frontend audit domain.  It depends on the
-Assayer platform (``assayer``) and exposes one ``assayer.plugins`` entry point,
-``registration``, that the platform loads after static package validation.
+This package is the externalized Frontend audit domain.  It depends only on
+the Assayer plugin SDK (``assayer-plugin-sdk``) and exposes one
+``assayer.plugins`` entry point, ``registration``, that the platform loads after
+static package validation.
 
-The module bodies in ``runtime.py`` and ``legacy_runtime.py`` are relocated
-from the platform source and use absolute ``assayer_platform`` imports; this
-package is the single source of truth for the Frontend domain.
+The module bodies in ``runtime.py`` and ``legacy_runtime.py`` use absolute
+``assayer_plugin_sdk`` imports; this package is the single source of truth for
+the Frontend domain.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from assayer_platform import DomainResultContract, PluginRegistration
+from assayer_plugin_sdk import DomainResultContract, PluginRegistration
 
 from .runtime import FrontendAuditPlugin, FrontendDecisionProvider
 from .legacy_runtime import (
