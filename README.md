@@ -212,7 +212,13 @@ the browser are user-supplied prerequisites, not bundled dependencies:
 
 ```bash
 python3 -m venv .venv
-uv pip install --python .venv/bin/python -e '.[test]'
+# The root `assayer` distribution is platform-only; the SDK, plugin, and
+# provider ship as separate local distributions built from the same src/ tree.
+uv pip install --python .venv/bin/python -e packages/assayer-plugin-sdk
+uv pip install --python .venv/bin/python \
+  -e packages/assayer-plugin-frontend-audit \
+  -e packages/assayer-provider-markdown \
+  -e '.[test]'
 .venv/bin/python -m pip install playwright
 ```
 

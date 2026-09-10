@@ -33,9 +33,15 @@ def _clean_staging() -> None:
         shutil.rmtree(egg_info, ignore_errors=True)
     for build in (ROOT / "packages").glob("*/build"):
         shutil.rmtree(build, ignore_errors=True)
+    # The root ``build/lib`` is reused across builds; left behind it can leak
+    # stale modules into the platform-only root wheel.
+    shutil.rmtree(ROOT / "build", ignore_errors=True)
 
 
-def build(output: Path, *, python: str, isolated: bool) -> list[Path]:
+def build(
+    output: Path, *, python: str, isolated: bool,
+    distributions: tuple[str, ...] = DISTRIBUTIONS,
+) -> list[Path]:
     output.mkdir(parents=True, exist_ok=True)
     command = [
         python, "-m", "pip", "wheel",
@@ -46,7 +52,7 @@ def build(output: Path, *, python: str, isolated: bool) -> list[Path]:
         command.append("--no-build-isolation")
     built: list[Path] = []
     try:
-        for distribution in DISTRIBUTIONS:
+        for distribution in distributions:
             subprocess.run(command + [str(ROOT / "packages" / distribution)], cwd=ROOT, check=True)
         built = sorted(output.glob("*.whl"))
     finally:

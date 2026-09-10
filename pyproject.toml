@@ -7,7 +7,7 @@ name = "assayer"
 version = "0.1.2"
 description = "Protocol and operation core for Assayer Host"
 requires-python = ">=3.11"
-dependencies = ["jsonschema==4.26.0"]
+dependencies = ["assayer-plugin-sdk>=0.1.2,<0.2.0", "jsonschema==4.26.0"]
 
 [project.optional-dependencies]
 browser = ["playwright==1.62.0"]
@@ -31,17 +31,11 @@ assayer-provider-check = "assayer_platform.provider_conformance:main"
 assayer-provider-package-check = "assayer_platform.provider_package_conformance:main"
 assayer-provider-install-check = "assayer_platform.provider_installation_conformance:main"
 
-[project.entry-points."assayer.providers"]
-markdown = "assayer_document_navigation:markdown_registration"
-
-[project.entry-points."assayer.plugins"]
-"assayer.frontend-audit" = "assayer_frontend_audit:registration"
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["assayer_platform", "assayer_host", "assayer_agent"]
 
 [tool.setuptools.data-files]
 "share/assayer/schemas" = ["schemas/*.json"]
 "share/assayer/schemas/protocol" = ["schemas/protocol/*.json"]
 "share/assayer/rules" = ["rules/*.md", "rules/registry.json"]
-
-[tool.setuptools.package-data]
-"assayer_frontend_audit" = ["manifest.json", "semantic-review.md"]
-"assayer_plugin_sdk" = ["schemas/*.json"]

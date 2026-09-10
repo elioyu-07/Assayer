@@ -55,18 +55,33 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertEqual(data_files["share/assayer/schemas/protocol"], ["schemas/protocol/*.json"])
         self.assertIn("rules/registry.json", data_files["share/assayer/rules"])
 
-    def test_distribution_includes_frontend_plugin_manifest(self):
-        setuptools = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
-        package_data = setuptools["package-data"]
-        self.assertIn("manifest.json", package_data["assayer_frontend_audit"])
-        self.assertNotIn("assayer_platform.builtin_plugins", package_data)
+    def test_platform_only_root_ships_no_plugin_packages(self):
+        root = tomllib.loads((ROOT / "pyproject.toml").read_text())
+        setuptools = root["tool"]["setuptools"]
+        self.assertEqual(
+            ["assayer_platform", "assayer_host", "assayer_agent"],
+            setuptools["packages"],
+        )
+        self.assertNotIn("package-data", setuptools)
+        self.assertNotIn("entry-points", root["project"])
+        self.assertTrue(
+            any(dep.startswith("assayer-plugin-sdk") for dep in root["project"]["dependencies"])
+        )
+        # The plugin manifest ships from its own split distribution now.
+        plugin = tomllib.loads(
+            (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").read_text()
+        )
+        self.assertIn(
+            "manifest.json",
+            plugin["tool"]["setuptools"]["package-data"]["assayer_frontend_audit"],
+        )
         self.assertTrue((ROOT / "src" / "assayer_frontend_audit" / "manifest.json").is_file())
         self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins").exists())
 
     def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
         source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
         validation = source.index("_validate_plugin_releases()", source.index("def build("))
-        wheel = source.index('"wheel"', source.index("def build("))
+        wheel = source.index("_build_wheelhouse(", source.index("def build("))
         self.assertLess(validation, wheel)
 
     def test_bundle_declares_every_runtime_extra_it_builds(self):

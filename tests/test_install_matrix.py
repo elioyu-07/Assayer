@@ -44,11 +44,29 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
     def test_matrix_covers_the_split_shapes_and_the_conflict(self):
         names = {case.name for case in matrix.CASES}
         self.assertIn("all-split", names)
-        self.assertIn("root+split-conflict", names)
-        conflict = next(case for case in matrix.CASES if case.name == "root+split-conflict")
+        self.assertIn("duplicate-plugin-conflict", names)
+        conflict = next(case for case in matrix.CASES if case.name == "duplicate-plugin-conflict")
         self.assertEqual("PLUGIN_CONFLICT", conflict.conflict)
+        self.assertEqual((2, 0), (conflict.plugins, conflict.providers))
         split = next(case for case in matrix.CASES if case.name == "all-split")
         self.assertEqual((1, 1), (split.plugins, split.providers))
+
+    def test_root_meta_is_platform_only_after_the_flip(self):
+        root = next(case for case in matrix.CASES if case.name == "root-meta")
+        self.assertEqual((0, 0), (root.plugins, root.providers))
+
+    def test_duplicate_plugin_wheel_declares_the_shared_entry_point(self):
+        import tempfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            wheel = matrix.build_duplicate_plugin_wheel(Path(directory))
+            self.assertTrue(wheel.is_file())
+            with zipfile.ZipFile(wheel) as archive:
+                names = archive.namelist()
+                entry_points = next(name for name in names if name.endswith("entry_points.txt"))
+                text = archive.read(entry_points).decode("utf-8")
+            self.assertIn("assayer.frontend-audit-shadow = assayer_frontend_audit:registration", text)
 
     def test_valid_observation_passes(self):
         case = matrix.Case("ok", ("assayer",), 1, 1)

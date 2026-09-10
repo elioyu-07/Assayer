@@ -6,10 +6,9 @@ combination the harness builds a fresh virtual environment, installs only from
 a local wheelhouse, and asserts:
 
 * the expected ``assayer.plugins`` / ``assayer.providers`` entry points appear;
-* each entry-point module resolves from exactly one location;
+* each entry-point module resolves inside the venv's site-packages;
 * the platform registry loads the expected plugins, or fails closed with
-  ``PLUGIN_CONFLICT`` when a distribution overlaps another (the root meta wheel
-  beside the split frontend plugin).
+  ``PLUGIN_CONFLICT`` when two distributions export the same plugin id.
 
 The wheelhouse bundles every third-party dependency, so the matrix itself runs
 offline; only populating the wheelhouse needs network.
@@ -18,11 +17,11 @@ Boundary: this matrix proves installation, entry-point ownership, and registry
 loading.  Executing a Check end to end belongs to the A-plan phase-3 bundle
 acceptance, not here.
 
-Forward note (phase 3): once the root ``assayer`` wheel becomes platform-only,
-the ``root-meta`` case expects ``0/0`` and ``root+split-conflict`` no longer
-overlaps.  Do **not** drop that negative case — repurpose it into a genuine
-duplicate (two distributions exporting the same plugin id, or two versions of
-one wheel) so ``PLUGIN_CONFLICT`` coverage survives the flip.
+Phase 3 flipped the root ``assayer`` wheel to platform-only, so ``root-meta``
+now installs ``0/0`` and the old ``root + split`` overlap is gone.  The
+duplicate-entry-point negative case is preserved with a synthetic shadow
+distribution that re-exports the frontend plugin id, keeping
+``PLUGIN_CONFLICT`` coverage.
 """
 
 from __future__ import annotations
@@ -34,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import venv
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +43,11 @@ from build_distributions import ROOT, build as build_split  # noqa: E402
 
 
 THIRD_PARTY = ("jsonschema==4.26.0",)
+
+# Synthetic distribution used only by the duplicate-entry-point negative case.
+# It carries metadata and an ``assayer.plugins`` entry point that re-exports the
+# real frontend plugin, so two installed distributions claim the same plugin id.
+DUPLICATE_PLUGIN_DIST = "assayer-plugin-frontend-audit-shadow"
 
 
 @dataclass(frozen=True)
@@ -70,11 +75,14 @@ CASES = (
         ),
         1, 1,
     ),
-    Case("root-meta", ("assayer",), 1, 1),
+    Case("root-meta", ("assayer",), 0, 0),
     Case(
-        "root+split-conflict",
-        ("assayer", "assayer-plugin-frontend-audit"),
-        2, 1, conflict="PLUGIN_CONFLICT",
+        "duplicate-plugin-conflict",
+        (
+            "assayer-platform", "assayer-plugin-sdk",
+            "assayer-plugin-frontend-audit", DUPLICATE_PLUGIN_DIST,
+        ),
+        2, 0, conflict="PLUGIN_CONFLICT",
     ),
 )
 
@@ -125,6 +133,42 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+def build_duplicate_plugin_wheel(wheelhouse: Path) -> Path:
+    """Write a metadata-only wheel that re-exports an installed plugin id.
+
+    Combined with the real frontend-audit wheel, two ``assayer.plugins`` entry
+    points resolve to the same plugin id, which the platform registry must
+    reject with ``PLUGIN_CONFLICT``.
+    """
+    module = "assayer_plugin_frontend_audit_shadow"
+    version = "0.0.0"
+    info = f"{module}-{version}.dist-info"
+    files = {
+        f"{info}/METADATA": (
+            "Metadata-Version: 2.1\n"
+            f"Name: {DUPLICATE_PLUGIN_DIST}\n"
+            f"Version: {version}\n"
+            "Requires-Python: >=3.11\n"
+        ),
+        f"{info}/WHEEL": (
+            "Wheel-Version: 1.0\n"
+            "Generator: assayer-install-matrix\n"
+            "Root-Is-Purelib: true\n"
+            "Tag: py3-none-any\n"
+        ),
+        f"{info}/entry_points.txt": (
+            "[assayer.plugins]\n"
+            "assayer.frontend-audit-shadow = assayer_frontend_audit:registration\n"
+        ),
+    }
+    files[f"{info}/RECORD"] = "".join(f"{path},,\n" for path in (*files, f"{info}/RECORD"))
+    wheel = wheelhouse / f"{module}-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for path, content in files.items():
+            archive.writestr(path, content)
+    return wheel
+
+
 def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
     wheelhouse.mkdir(parents=True, exist_ok=True)
     build_split(wheelhouse, python=python, isolated=False)
@@ -134,7 +178,9 @@ def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
     finally:
         for egg_info in (ROOT / "src").glob("*.egg-info"):
             shutil.rmtree(egg_info, ignore_errors=True)
+        shutil.rmtree(ROOT / "build", ignore_errors=True)
     _run([python, "-m", "pip", "download", "--dest", str(wheelhouse), *THIRD_PARTY])
+    build_duplicate_plugin_wheel(wheelhouse)
 
 
 def _venv_python(venv_dir: Path) -> Path:

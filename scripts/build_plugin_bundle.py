@@ -28,8 +28,14 @@ def _validate_plugin_releases() -> None:
     from assayer_platform import installed_plugin_registry
     from assayer_platform.conformance import inspect_plugin_registrations
 
+    registrations = installed_plugin_registry().list()
+    if not registrations:
+        raise SystemExit(
+            "no ``assayer.plugins`` entry points are installed; install the split "
+            "plugin distributions (packages/assayer-plugin-frontend-audit) before building"
+        )
     reports = inspect_plugin_registrations(
-        installed_plugin_registry().list(), construct_implementations=True,
+        registrations, construct_implementations=True,
     )
     failed = [report.as_dict() for report in reports if not report.passed]
     if failed:
@@ -58,6 +64,39 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
+    """Populate the bundle wheelhouse with the split runtime dependencies.
+
+    The root ``assayer`` wheel is platform-only and depends on the separately
+    built SDK; the plugins and providers ship as their own wheels.  Build the
+    three split wheels first, then resolve the root wheel (plus Playwright and
+    the MCP SDK) against them so no unpublished distribution is fetched.
+    """
+    scripts = str(Path(__file__).resolve().parent)
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    from build_distributions import build as build_split
+
+    build_split(
+        wheel_dir, python=python, isolated=False,
+        distributions=(
+            "assayer-plugin-sdk",
+            "assayer-plugin-frontend-audit",
+            "assayer-provider-markdown",
+        ),
+    )
+    try:
+        _run([
+            python, "-m", "pip", "wheel", ".[browser,mcp]",
+            "--find-links", str(wheel_dir),
+            "--wheel-dir", str(wheel_dir),
+        ])
+    finally:
+        for egg_info in (ROOT / "src").glob("*.egg-info"):
+            shutil.rmtree(egg_info, ignore_errors=True)
+        shutil.rmtree(ROOT / "build", ignore_errors=True)
+
+
 def build(output: Path, *, python: str) -> tuple[Path, Path]:
     _validate_plugin_releases()
     package_version, plugin_version = _versions(PLUGIN_SOURCE)
@@ -73,15 +112,7 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
     wheel_dir = release_root / "runtime" / "wheels"
     shutil.rmtree(wheel_dir)
     wheel_dir.mkdir(parents=True)
-    _run([
-        python,
-        "-m",
-        "pip",
-        "wheel",
-        ".[browser,mcp]",
-        "--wheel-dir",
-        str(wheel_dir),
-    ])
+    _build_wheelhouse(wheel_dir, python=python)
 
     wheels = []
     for wheel in sorted(wheel_dir.glob("*.whl")):
@@ -115,10 +146,20 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "--find-links",
             str(wheel_dir),
             f"assayer[browser,mcp]=={package_version}",
+            "assayer-plugin-frontend-audit",
+            "assayer-provider-markdown",
         ])
         _run([
             str(venv_python),
             "-c",
+            "from importlib import metadata; "
+            "plugins=[e.name for e in metadata.entry_points().select(group='assayer.plugins')]; "
+            "providers=[e.name for e in metadata.entry_points().select(group='assayer.providers')]; "
+            "assert plugins==['assayer.frontend-audit'], plugins; "
+            "assert providers==['markdown'], providers; "
+            "from assayer_platform import installed_plugin_registry, installed_provider_registry; "
+            "installed_plugin_registry().select(plugin_id='assayer.frontend-audit'); "
+            "installed_provider_registry().select(capability='document_navigation'); "
             "from assayer_host.core import HostCore; from assayer_host.transport import McpToolTransport; "
             "h=HostCore(); assert len(McpToolTransport(h).list_tools()) == 17",
         ])

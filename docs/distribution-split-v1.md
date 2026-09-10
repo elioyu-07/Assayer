@@ -4,7 +4,7 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-10 |
-| Status | SDK and frontend-audit split implemented; provider, agent, and the root meta remain |
+| Status | SDK, plugin, and provider split implemented; root `assayer` is platform-only; agent folded into platform |
 | Owner | Assayer maintainers |
 | Authority | Platform--Plugin Boundary Contract v1 §5, plugin-version-axes-v1 |
 
@@ -14,10 +14,9 @@
 |---|---|---|---|---|
 | `assayer-plugin-sdk` | `assayer_plugin_sdk` | `jsonschema` | — | **split** |
 | `assayer-plugin-frontend-audit` | `assayer_frontend_audit` | `assayer-plugin-sdk` | `assayer.plugins` → `assayer.frontend-audit` | **split** |
-| `assayer-platform` | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | pending |
+| `assayer-platform` | `assayer_platform`, `assayer_host`, `assayer_agent` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | **split** |
 | `assayer-provider-markdown` | `assayer_document_navigation` | `assayer-plugin-sdk` | `assayer.providers` → `markdown` | **split** |
-| `assayer-agent` | `assayer_agent` | `assayer-plugin-sdk` | — | pending |
-| `assayer` (dev meta) | all of the above re-exported | each of the above | all | current root build, unchanged |
+| `assayer` (product base) | `assayer_platform`, `assayer_host`, `assayer_agent` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | platform-only |
 
 ## 2. Layout
 
@@ -29,6 +28,7 @@ packages/
   assayer-plugin-sdk/pyproject.toml
   assayer-plugin-frontend-audit/pyproject.toml
   assayer-provider-markdown/pyproject.toml
+  assayer-platform/pyproject.toml
 ```
 
 Build a wheel:
@@ -37,16 +37,29 @@ Build a wheel:
 python -m pip wheel --no-deps --no-build-isolation -w dist packages/assayer-plugin-sdk
 ```
 
+Build every distribution and clean the staging metadata in one step:
+
+```bash
+python scripts/build_distributions.py
+```
+
 > Building a split wheel writes a `<package>.egg-info` directory under `src/`.
 > These are gitignored, but they pollute `importlib.metadata.entry_points()` in
 > the current environment and can duplicate plugin entry points during tests.
-> Run split-wheel builds in a dedicated/clean CI job, or remove the stray
-> `src/*.egg-info` directories (except `src/assayer.egg-info`) before tests.
+> `scripts/build_distributions.py` removes them after every build; do the same
+> by hand if you build a split wheel directly.
 
-The root `pyproject.toml` continues to build one development distribution so a
-single `pip install -e .` keeps the whole tree importable and all entry points
-registered. The split is a packaging change only; source imports are already
-SDK-only where required.
+The root `pyproject.toml` is **platform-only**: it ships `assayer_platform`,
+`assayer_host`, and `assayer_agent`, depends on `assayer-plugin-sdk`, and no
+longer declares the plugin/provider packages or their entry points. A clean
+development environment installs the SDK first, then the plugin and provider
+distributions alongside the platform root:
+
+```bash
+pip install -e packages/assayer-plugin-sdk
+pip install -e packages/assayer-plugin-frontend-audit \
+            -e packages/assayer-provider-markdown -e '.[test]'
+```
 
 ## 3. Rules
 
@@ -60,6 +73,8 @@ SDK-only where required.
 
 ## 4. Remaining work
 
-- **Agent split** and the **platform** distribution follow the same pattern.
-- The root `pyproject.toml` is reduced to the development meta once every
-  component has its own build config.
+- A standalone `assayer-agent` distribution remains an optional, deferred
+  decision; `assayer_agent` currently ships inside `assayer-platform` and the
+  platform-only root.
+- Single-sourcing the schema copies still shipped by the platform wheel lands at
+  WS4/WS10; a drift test guards the copies today.
