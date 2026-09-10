@@ -32,6 +32,21 @@ from .contract import (  # noqa: F401
     ReviewCheckpoint,
     WorkItem,
 )
+from .evidence_graph import (  # noqa: F401
+    CANDIDATE_DISPOSITIONS,
+    EvidenceCandidate,
+    EvidenceGraph,
+    FindingRecord,
+    RootCauseGroup,
+    build_candidate_envelope,
+    build_candidate_evidence_graph,
+    canonicalize_candidate,
+    candidate_dispositions_from_decisions,
+    conservative_root_cause_groups,
+    render_candidate_evidence_graph,
+    stable_candidate_fingerprint,
+    validate_candidate_evidence_graph_projection,
+)
 from .evidence_handles import (  # noqa: F401
     EvidenceHandle,
     EvidenceHandleRegistry,
@@ -41,6 +56,7 @@ from .evidence_reference import (  # noqa: F401
     resolve_evidence_references,
     validate_domain_evidence_references,
 )
+from .identity import digest_bytes, document_state_digest  # noqa: F401
 from .plugin_compatibility import (  # noqa: F401
     HOST_PROTOCOL_CAPABILITIES,
     HOST_PROTOCOL_VERSION,
@@ -59,3 +75,14 @@ from .plugin_sdk import (  # noqa: F401
     to_json_value,
     validate_entity_id,
 )
+from .review_protocol import (  # noqa: F401
+    REVIEW_DISPOSITIONS,
+    build_review_task,
+    validate_review_submission,
+)
+from .source_chunking import (  # noqa: F401
+    SOURCE_CHUNK_LIMIT,
+    build_source_chunks,
+    source_ref_for_line,
+)
+from .source_fact_index import build_source_fact_index  # noqa: F401
