@@ -30,12 +30,12 @@ M0 committed 71 files, 5488 insertions / 1299 deletions.
 |---|---|---|
 | M0 | Baseline freeze (SDK v2 DomainResult boundary) | `83c9ebd` |
 | WS1 + WS5 | Protocol envelope schema + version axes | `19bf65e` |
-| WS2 | SDK extraction (contract, helpers, validators, registration, manifest, provider) with platform re-export shims | `07dba51`, `5e42085`, `a025ca4`, `cf17081`, `f0d955c`, `8d64219` |
+| WS2 | SDK extraction (contract, helpers, validators, registration, manifest) with platform re-export shims | `07dba51`, `5e42085`, `a025ca4`, `cf17081`, `f0d955c` |
 | WS2c | In-repo frontend plugin switched to SDK-only imports | `27b0e67` |
 | WS4 | SDK schema resolver + self-contained SDK schemas | `dc00415`, `baf520b` |
 | WS3 (partial) | Buildable split distributions: sdk / frontend-audit / provider-markdown | `517866d`, `8d64219` |
 | WS4/WS3 debt | Interim schema-copy debt recorded; platform schema sentinel hardened | `da054ec`, `efec93c` |
-| WS8 (partial) | Fail-fast capability failure semantics pinned + reserved fields marked | `8e4d087` |
+| WS8 (partial) | Fail-fast capability failure semantics pinned (both `PROVIDER_NOT_FOUND` and `CAPABILITY_NEGOTIATION_BLOCKED`, no ledger / no `needs_review`) + reserved fields marked | `8e4d087` + follow-up |
 
 ## Known open items carried into WS3
 
@@ -48,3 +48,7 @@ M0 committed 71 files, 5488 insertions / 1299 deletions.
   publishing decoupled versions).
 - SDK ships interim schema copies guarded by a drift test; single-source closes
   at WS3/WS10.
+- WS8 is only partially closed: the two fail-fast capability codes are pinned
+  and in the fast gate, but the surface gate ("artifacts depend on the SDK
+  only"), the §3.13 regression fixture, and the release-gate aggregation remain
+  (A-plan phase 5).

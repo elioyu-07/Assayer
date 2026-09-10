@@ -433,6 +433,9 @@ class ProviderExecutionTests(unittest.TestCase):
                     platform_profile=CapabilityProfile(frozenset()),
                     user_profile=CapabilityProfile(frozenset({"structured_read"})),
                 )
+            # Denial is fail-fast too: no Run directory or ledger is written, so
+            # no needs_review Decision can be produced (WS8).
+            self.assertEqual(list(Path(directory).iterdir()), [])
         self.assertEqual(error.exception.code, "CAPABILITY_NEGOTIATION_BLOCKED")
         self.assertEqual(provider_calls["calls"], 0)
         self.assertEqual(plugin_calls["calls"], 0)
