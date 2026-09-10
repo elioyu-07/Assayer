@@ -17,7 +17,7 @@ from assayer_platform.surface_conformance import inspect_plugin_surface
 
 class PublicSurfaceTests(unittest.TestCase):
     def test_surface_is_versioned(self) -> None:
-        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.4.0")
+        self.assertEqual(PUBLIC_SURFACE_VERSION, "1.5.0")
 
     def test_every_symbol_resolves_in_its_module(self) -> None:
         for module_name, names in PUBLIC_SURFACE.items():
@@ -116,6 +116,34 @@ class SurfaceConformanceTests(unittest.TestCase):
         root = Path(__file__).parent / "fixtures" / "plugins" / "minimal" / "src"
         report = inspect_plugin_surface(root)
         self.assertTrue(report.passed, [i.as_dict() for i in report.issues])
+
+    def test_provider_implementation_import_is_flagged(self) -> None:
+        root = self._write({
+            "plugin_mod.py": "from assayer_document_navigation import parse_markdown\n",
+        })
+        report = inspect_plugin_surface(root)
+        self.assertFalse(report.passed)
+        self.assertTrue(any(
+            issue.code == "PLUGIN_IMPORT_PROVIDER_IMPLEMENTATION"
+            for issue in report.issues
+        ))
+
+    def test_plugin_own_assayer_package_import_is_allowed(self) -> None:
+        root = self._write({
+            "assayer_fixture_plugin/__init__.py": "",
+            "assayer_fixture_plugin/runtime.py": (
+                "from assayer_fixture_plugin.helpers import value\n"
+            ),
+            "assayer_fixture_plugin/helpers.py": "value = 1\n",
+        })
+        report = inspect_plugin_surface(root)
+        self.assertTrue(report.passed, [i.as_dict() for i in report.issues])
+
+    def test_sdk_import_is_allowed(self) -> None:
+        root = self._write({
+            "plugin_mod.py": "from assayer_plugin_sdk import PlatformContext\n",
+        })
+        self.assertTrue(inspect_plugin_surface(root).passed)
 
 
 if __name__ == "__main__":

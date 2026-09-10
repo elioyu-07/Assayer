@@ -12,7 +12,7 @@ the newly public symbol.
 
 from __future__ import annotations
 
-PUBLIC_SURFACE_VERSION = "1.4.0"
+PUBLIC_SURFACE_VERSION = "1.5.0"
 
 PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     "assayer_platform": frozenset({

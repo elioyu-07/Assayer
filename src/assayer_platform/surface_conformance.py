@@ -23,11 +23,36 @@ from .public_surface import PUBLIC_SURFACE, PUBLIC_SURFACE_VERSION
 
 _SURFACE_INVARIANT = "PBV1-PUBLIC-SURFACE"
 
+# A plugin runtime may import the SDK contract and the legacy public platform
+# surface.  Any other ``assayer*`` top-level module is a concrete
+# implementation (for example the ``assayer_document_navigation`` capability
+# provider) that a plugin must reach through the Host instead of importing.
+_ALLOWED_ASSAYER_ROOTS = frozenset({"assayer_plugin_sdk", "assayer_platform"})
+
 
 def _surface_issue(
     code: str, message: str, next_action: str,
 ) -> "PluginConformanceIssue":
     return _issue(code, _SURFACE_INVARIANT, message, next_action)
+
+
+def _provider_import_issues(
+    path: Path, root: Path, modules: list[str], *, location: str,
+) -> list["PluginConformanceIssue"]:
+    issues: list["PluginConformanceIssue"] = []
+    for module_name in modules:
+        top = module_name.split(".", 1)[0]
+        if not top.startswith("assayer") or top in _ALLOWED_ASSAYER_ROOTS:
+            continue
+        if (root / top).is_dir() or (root / f"{top}.py").is_file():
+            continue
+        issues.append(_surface_issue(
+            "PLUGIN_IMPORT_PROVIDER_IMPLEMENTATION",
+            f"{location}: imports concrete implementation `{module_name}`.",
+            "Depend only on assayer-plugin-sdk and consume capabilities through "
+            "the Host-bound CapabilityAccess contract.",
+        ))
+    return issues
 
 
 def _module_issues(
@@ -67,7 +92,7 @@ def _symbol_issues(
     return issues
 
 
-def _file_issues(path: Path) -> list["PluginConformanceIssue"]:
+def _file_issues(path: Path, root: Path) -> list["PluginConformanceIssue"]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, UnicodeError, SyntaxError) as error:
@@ -77,9 +102,11 @@ def _file_issues(path: Path) -> list["PluginConformanceIssue"]:
             "Fix the Python source before running the surface check.",
         )]
     issues: list["PluginConformanceIssue"] = []
+    imported_modules: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
+                imported_modules.append(alias.name)
                 if alias.name == "assayer_platform":
                     continue
                 if alias.name.startswith("assayer_platform."):
@@ -89,12 +116,16 @@ def _file_issues(path: Path) -> list["PluginConformanceIssue"]:
         elif isinstance(node, ast.ImportFrom):
             if node.level != 0 or not node.module:
                 continue
+            imported_modules.append(node.module)
             if node.module == "assayer_platform" or node.module.startswith("assayer_platform."):
                 issues.extend(_symbol_issues(
                     node.module,
                     [alias.name for alias in node.names],
                     location=f"{path}:{node.lineno}",
                 ))
+    issues.extend(_provider_import_issues(
+        path, root, imported_modules, location=f"{path}",
+    ))
     return issues
 
 
@@ -121,7 +152,7 @@ def inspect_plugin_surface(source_root: str | Path) -> PluginConformanceReport:
         ),))
     issues: list["PluginConformanceIssue"] = []
     for path in sorted(root.rglob("*.py")):
-        issues.extend(_file_issues(path))
+        issues.extend(_file_issues(path, root))
     return PluginConformanceReport(_plugin_id(root), tuple(issues))
 
 

@@ -243,5 +243,61 @@ class InteractiveProviderBindingTest(unittest.TestCase):
         self.assertEqual(started["status"], "started")
 
 
+class AlternateNavigationProvider:
+    """A second implementation of the same capability contract.
+
+    It shares ``PROVIDER_DESCRIPTOR`` but computes its facts through different
+    internal code, proving a provider implementation change is transparent to
+    the plugin that consumes it (Constitution section 3.13).
+    """
+
+    descriptor = PROVIDER_DESCRIPTOR
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def collect(self, request, context):
+        del context
+        units = []
+        for kind, line in (("heading", 1),):
+            units.append({"kind": kind, "startLine": line})
+        fact = ProviderFact(
+            "structured", request.source_identity, request.state_digest,
+            {"format": "markdown", "units": units},
+        )
+        return ProviderResponse(
+            request.request_id, request.provider_id, request.provider_version,
+            request.capability, "succeeded", (fact,),
+        )
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class ProviderTransparencyTest(unittest.TestCase):
+    def _run(self, provider):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = InteractivePluginController(
+                PluginRegistry((registration(),)),
+                Path(directory) / "output",
+                provider_registry=ProviderRegistry((provider_registration(provider),)),
+                provider_scope_resolver=lambda reg, scope, check: {"path": "spec.md", "format": "markdown"},
+                **PROFILES,
+            )
+            started = controller.start(
+                plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
+            )
+            controller.discover(started["runId"])
+            inspected = controller.inspect(started["runId"])
+            controller.close()
+        return inspected["result"]["investigations"][0]["evidence"][0]["payload"]
+
+    def test_provider_implementation_change_is_transparent_to_the_plugin(self):
+        first = self._run(RecordingNavigationProvider())
+        second = self._run(AlternateNavigationProvider())
+        self.assertEqual(first, second)
+        self.assertEqual(first["units"][0]["kind"], "heading")
+
+
 if __name__ == "__main__":
     unittest.main()
