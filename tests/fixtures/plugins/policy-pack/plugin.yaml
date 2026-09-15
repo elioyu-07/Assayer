@@ -1,0 +1,7 @@
+id: test.policy-pack
+name: Zero Python policy fixture
+description: Detects a missing overview without authored Python.
+version: 1.0.0
+input: markdown
+checks: checks.yaml
+instructions: semantic-review.md

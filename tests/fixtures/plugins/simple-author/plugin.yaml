@@ -1,0 +1,7 @@
+id: test.simple-author
+name: Simple author fixture
+description: Exercises compiler-owned plugin mechanics.
+version: 1.0.0
+input: markdown
+checks: checks.yaml
+instructions: semantic-review.md

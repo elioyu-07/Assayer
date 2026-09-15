@@ -1,0 +1,4 @@
+input: ready.md
+expect:
+  candidate_rules: []
+  final: ready

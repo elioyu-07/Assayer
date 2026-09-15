@@ -1,0 +1,8 @@
+checks:
+  - id: SIMPLE-001
+    title: Required overview
+    description: Reviews whether the document has an overview.
+    applicability: Markdown documents under review.
+    default_severity: P2
+    recommendation: Add a concise overview.
+    unknown_when: The complete document is unavailable.

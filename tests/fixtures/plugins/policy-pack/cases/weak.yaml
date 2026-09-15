@@ -1,0 +1,4 @@
+input: weak.md
+expect:
+  candidate_rules: [POLICY-001]
+  final: rework

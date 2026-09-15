@@ -1,0 +1,9 @@
+checks:
+  - id: FUA-10
+    title: Frontend filter behavior
+    description: The filter interaction must be present, usable, resettable, and bound to the displayed list.
+    applicability: Frontend pages that expose a filter over a result list.
+    default_severity: P2
+    recommendation: Provide a visible filter, a usable query action, a working reset action, and an explicit binding to the displayed list.
+    unknown_when: The frozen browser snapshot does not contain enough evidence to determine one or more filter dimensions.
+    dimensions: [filter_present, query_action, reset_action, binding_to_list]

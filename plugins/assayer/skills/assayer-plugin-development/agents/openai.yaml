@@ -1,0 +1,4 @@
+interface:
+  display_name: "Assayer Plugin Development"
+  short_description: "Verify local Assayer plugin source projects"
+  default_prompt: "Use $assayer-plugin-development to verify this local Assayer plugin source."

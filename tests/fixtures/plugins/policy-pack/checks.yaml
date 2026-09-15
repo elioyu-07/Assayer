@@ -1,0 +1,10 @@
+checks:
+  - id: POLICY-001
+    title: Document overview
+    description: The document lacks a required overview.
+    applicability: Markdown documents under review.
+    default_severity: P2
+    recommendation: Add a concise overview.
+    unknown_when: The complete document is unavailable.
+    detect:
+      absent_all: [overview]

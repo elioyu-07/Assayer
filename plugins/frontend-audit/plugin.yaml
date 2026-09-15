@@ -1,0 +1,8 @@
+id: assayer.frontend-audit
+name: Frontend audit
+description: Reviews frontend filter behavior from a frozen browser snapshot.
+version: 1.0.0
+input: browser_snapshot
+subject_kind: frontend_object
+checks: checks.yaml
+instructions: semantic-review.md

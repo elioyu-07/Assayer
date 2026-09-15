@@ -1,0 +1,4 @@
+input: orders.json
+expect:
+  candidate_rules: []
+  final: ready
