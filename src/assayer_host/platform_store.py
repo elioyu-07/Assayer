@@ -52,7 +52,7 @@ class SQLitePlatformLedgerStore:
         except sqlite3.ProgrammingError:
             # RuntimeRouter releases the BrowserHostRuntime immediately after
             # Host completion.  The product facade may still need to append
-            # the platform terminal checkpoint, so reopen a file-backed Host
+            # the platform terminal ledger write, so reopen a file-backed Host
             # store for this final write. In-memory test stores deliberately
             # keep the original failure visible.
             if not self._path or self._path == ":memory:":

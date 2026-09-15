@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from assayer_platform import PlatformContractError, PlatformRunner
 from assayer_platform.conformance import RELEASE_DESCRIPTOR
 from assayer_platform.plugin_catalog import CATALOG_FILENAME, upsert_catalog_version
 from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha256_hex
+from assayer_platform.plugin_verify import verify_simple_plugin
 
 from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
@@ -23,6 +25,7 @@ from .plugin_lifecycle_router import route_plugin_request
 from .plugin_lifecycle_ops import (
     DEFAULT_CATALOG_URL,
     add_from_catalog as _add_from_catalog,
+    apply_local_source_change as _apply_local_source_change,
     annotate_upgradable as _annotate_upgradable,
     execute_intent_step as _execute_intent_step,
     known_plugin_ids as _known_plugin_ids,
@@ -34,6 +37,7 @@ from .plugin_lifecycle_ops import (
     store_registry as _store_registry,
 )
 from .plugin_store_registry import default_store_root
+from .readiness import ReadinessReport, collect_readiness, target_kind
 from .runtime_router import RuntimeRouter
 from .transport import JsonLineTransport
 
@@ -47,33 +51,83 @@ def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _run_agent_audit(url: str, output_root: Path) -> int:
+def _audit_prompt(target: str, *, plugin_id: str | None = None) -> str:
+    kind = target_kind(target)
+    if kind == "web":
+        return (
+            "Use $assayer-audit to investigate this web URL through the assayer MCP tools: "
+            f"{target}\nComplete the audit; supply only business inputs exposed by the tools, "
+            "let Assayer maintain all protocol and runtime configuration, and do not run the smoke runner."
+        )
+
+    path = Path(target).expanduser().resolve()
+    selected_plugin = plugin_id or ("ass-spec" if kind in {"markdown", "directory"} else None)
+    plugin_instruction = (
+        f"Use the installed {selected_plugin} plugin. "
+        if selected_plugin is not None else
+        "Select an installed plugin whose declared scope matches the target. "
+    )
+    return (
+        f"Use $assayer-plugin to review this {kind} target through the assayer MCP tools: {path}\n"
+        f"{plugin_instruction}Complete exactly one plugin Run for the requested target. "
+        "If the required plugin is missing or ambiguous, report that clearly instead of guessing or starting a web audit. "
+        "Supply only business inputs exposed by the tools, let Assayer maintain protocol and runtime configuration, "
+        "and do not start Chromium."
+    )
+
+
+def _run_agent_audit(target: str, output_root: Path, *, plugin_id: str | None = None) -> int:
     codex = shutil.which("codex")
     if codex is None:
-        print(json.dumps(_error("AGENT_RUNTIME_UNAVAILABLE", "Codex CLI was not found; formal audit will not fall back to smoke"),
-                         ensure_ascii=False, indent=2, sort_keys=True))
+        _report_agent_start_error(
+            "AGENT_RUNTIME_UNAVAILABLE",
+            "Codex CLI was not found; formal audit will not fall back to smoke.",
+        )
         return 2
     output_root = output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    command = sys.executable
-    args = ["-m", "assayer_host.transport", "--mcp", "--output-root", str(output_root)]
-    prompt = (
-        "Use $assayer-audit to investigate this web URL through the assayer MCP tools: "
-        f"{url}\nComplete the audit; supply only business inputs exposed by the tools, "
-        "let Assayer maintain all protocol and runtime configuration, and do not run the smoke runner."
-    )
+    if target_kind(target) == "web":
+        command = sys.executable
+        args = ["-m", "assayer_host.transport", "--mcp", "--output-root", str(output_root)]
+    else:
+        # File and directory audits require the domain-plugin lifecycle MCP,
+        # not the browser Runtime Router exposed by ``transport --mcp``.
+        # Use the console entry point adjacent to this exact Assayer runtime so
+        # a dynamically configured Codex process cannot bind a stale/global
+        # installation with the same server name.
+        command = str(Path(sys.executable).with_name("assayer-mcp"))
+        args = [
+            "--output-root", str(output_root),
+            "--store", str(default_store_root()),
+        ]
+    prompt = _audit_prompt(target, plugin_id=plugin_id)
     config_command = f"mcp_servers.assayer.command={_toml_string(command)}"
     config_args = f"mcp_servers.assayer.args={json.dumps(args, ensure_ascii=False)}"
     try:
         completed = subprocess.run(
-            [codex, "exec", "-C", str(Path.cwd()), "-c", config_command, "-c", config_args, prompt],
+            [
+                codex, "exec", "--approve-for-me", "-C", str(Path.cwd()),
+                "-c", config_command, "-c", config_args, prompt,
+            ],
             check=False,
         )
     except OSError:
-        print(json.dumps(_error("AGENT_RUNTIME_UNAVAILABLE", "Codex Agent Runtime failed to start; smoke fallback was not executed"),
-                         ensure_ascii=False, indent=2, sort_keys=True))
+        _report_agent_start_error(
+            "AGENT_RUNTIME_UNAVAILABLE",
+            "Codex Agent Runtime failed to start; smoke fallback was not executed.",
+        )
         return 2
     return completed.returncode
+
+
+def _report_agent_start_error(code: str, message: str) -> None:
+    """Use human wording interactively while preserving JSON automation output."""
+    if hasattr(sys.stderr, "isatty") and sys.stderr.isatty():
+        print("Assayer cannot start the audit.", file=sys.stderr)
+        print(f"Reason: {message}", file=sys.stderr)
+        print("Next step: assayer doctor", file=sys.stderr)
+        return
+    _print_json(_error(code, message))
 
 
 def _build_plugin(source: str) -> dict:
@@ -222,6 +276,126 @@ def _print_json(value: dict) -> None:
 
 def _print_error(code: str, message: str) -> None:
     _print_json(_error(code, message))
+
+
+def _default_plugin_root() -> Path | None:
+    configured = os.environ.get("ASSAYER_PLUGIN_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser()
+    cache_root = codex_home / "plugins" / "cache"
+    candidates = [
+        path for path in cache_root.glob("*/assayer/*")
+        if (path / ".codex-plugin" / "plugin.json").is_file()
+    ]
+    if candidates:
+        personal = [path for path in candidates if path.parents[1].name == "personal"]
+        complete = [
+            path for path in candidates
+            if (path / "runtime" / "bundle-manifest.json").is_file()
+        ]
+        preferred = personal or complete or candidates
+        # Cache directories are immutable version snapshots. The most recently
+        # materialized one corresponds to the latest local installation even
+        # when the SemVer build suffix is not lexically sortable.
+        return max(preferred, key=lambda path: path.stat().st_mtime_ns).resolve()
+    marketplace_source = Path.home() / "plugins" / "assayer"
+    if (marketplace_source / ".codex-plugin" / "plugin.json").is_file():
+        return marketplace_source.resolve()
+    source_root = Path(__file__).resolve().parents[2] / "plugins" / "assayer"
+    return source_root if source_root.is_dir() else None
+
+
+def _print_readiness(report: ReadinessReport, *, as_json: bool) -> int:
+    if as_json:
+        _print_json(report.as_dict())
+    else:
+        print("Assayer readiness")
+        print("")
+        for check in report.checks:
+            suffix = "required" if check.required else "optional"
+            print(f"{check.check_id}: {check.status} ({suffix}) — {check.message}")
+        if not report.ready:
+            print("")
+            print(f"Repair: {report.repair_command or 'read the failing check above'}")
+    return 0 if report.ready else 2
+
+
+def _runtime_can_be_prepared(report: ReadinessReport) -> bool:
+    statuses = {check.check_id: check.status for check in report.checks}
+    return statuses.get("assayer_bundle") == "ok" and statuses.get("private_runtime") != "ok"
+
+
+def _prepare_private_runtime(plugin_root: Path, *, timeout_seconds: float = 600.0) -> tuple[bool, str | None]:
+    preparer = plugin_root / "scripts" / "prepare_assayer_runtime"
+    if not preparer.is_file():
+        return False, "The Assayer runtime preparer is missing; reinstall the Assayer Codex Plugin."
+    try:
+        completed = subprocess.run(
+            [str(preparer)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "Runtime preparation timed out; reinstall the Assayer Codex Plugin and retry."
+    except OSError:
+        return False, "The Assayer runtime preparer could not be started; reinstall the Assayer Codex Plugin."
+    if completed.returncode == 0:
+        return True, None
+    detail = (completed.stderr or completed.stdout or "").strip().splitlines()
+    if detail:
+        # The launcher emits stable one-line error codes. Bound the forwarded
+        # detail so doctor never turns a failed installer into a stack dump.
+        return False, detail[-1][:1000]
+    return False, "The Assayer private runtime could not be prepared."
+
+
+def _print_doctor_fix_failure(report: ReadinessReport, message: str, *, as_json: bool) -> int:
+    if as_json:
+        payload = report.as_dict()
+        payload["repair"] = {
+            "status": "failed",
+            "code": "RUNTIME_PREPARE_FAILED",
+            "message": message,
+        }
+        _print_json(payload)
+    else:
+        print("Assayer could not prepare its private runtime.")
+        print(f"Reason: {message}")
+        print("Next step: reinstall the Assayer Codex Plugin, then run: assayer doctor --fix")
+    return 2
+
+
+def _run_doctor(
+    *,
+    target: str | None,
+    plugin_id: str | None,
+    store: str,
+    plugin_root: str | None,
+    as_json: bool,
+    fix: bool,
+) -> int:
+    resolved_plugin_root = Path(plugin_root).expanduser().resolve() if plugin_root else _default_plugin_root()
+    report = collect_readiness(
+        target=target,
+        plugin_id=plugin_id,
+        store_root=store,
+        plugin_root=resolved_plugin_root,
+    )
+    if fix and _runtime_can_be_prepared(report):
+        assert resolved_plugin_root is not None
+        prepared, error = _prepare_private_runtime(resolved_plugin_root)
+        if not prepared:
+            return _print_doctor_fix_failure(report, error or "Runtime preparation failed.", as_json=as_json)
+        report = collect_readiness(
+            target=target,
+            plugin_id=plugin_id,
+            store_root=store,
+            plugin_root=resolved_plugin_root,
+        )
+    return _print_readiness(report, as_json=as_json)
 
 
 def _prompt_confirmation(plan: list[dict]) -> bool:
@@ -401,9 +575,13 @@ def _plugins_command(args, *, confirm) -> int:
         manager = _lifecycle_manager(args.store)
         try:
             if args.plugin_command == "install":
-                result = manager.install(args.package)
+                result = _apply_local_source_change(
+                    operation="install", source=args.package, store_root=args.store,
+                )
             elif args.plugin_command == "upgrade":
-                result = manager.upgrade(args.package)
+                result = _apply_local_source_change(
+                    operation="upgrade", source=args.package, store_root=args.store,
+                )
             elif args.plugin_command == "downgrade":
                 result = manager.downgrade(args.plugin_id, args.version)
             elif args.plugin_command == "rollback":
@@ -441,22 +619,52 @@ def _plugins_command(args, *, confirm) -> int:
 
 def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] not in {"audit", "smoke", "serve", "plugins"} and not argv[0].startswith("-"):
+    if argv and argv[0] not in {"audit", "doctor", "smoke", "serve", "plugin", "plugins"} and not argv[0].startswith("-"):
         text, store, yes, output_root, index = _split_intent_args(argv)
         return _run_intent(text, store, yes=yes, output_root=output_root, confirm=confirm, index=index)
-    parser = argparse.ArgumentParser(prog="assayer", description="Run Assayer Agent audits and Host smoke checks")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    audit = subparsers.add_parser("audit", help="Run a formal Agent audit through the Codex Skill and dynamic MCP")
-    audit.add_argument("url")
+    parser = argparse.ArgumentParser(
+        prog="assayer",
+        description="Run Assayer reviews and check installation readiness",
+    )
+    subparsers = parser.add_subparsers(
+        dest="command", required=True, metavar="{audit,doctor}",
+    )
+    doctor = subparsers.add_parser(
+        "doctor", help="Check Assayer readiness without starting an audit or browser",
+    )
+    doctor.add_argument("--target", default=None, help="Optional URL, file, or directory to check")
+    doctor.add_argument("--plugin", default=None, dest="plugin_id", help="Domain plugin required by the target")
+    doctor.add_argument("--store", default=str(default_store_root()), help=argparse.SUPPRESS)
+    doctor.add_argument("--plugin-root", default=None, help=argparse.SUPPRESS)
+    doctor.add_argument("--fix", action="store_true", help="Prepare the bundled private runtime, then check again")
+    doctor.add_argument("--json", action="store_true", dest="as_json", help="Emit machine-readable readiness JSON")
+    audit = subparsers.add_parser("audit", help="Review a URL, file, or directory through the matching Assayer Skill")
+    audit.add_argument("target")
+    audit.add_argument("--plugin", default=None, dest="plugin_id",
+                       help="Installed domain plugin to use for a file or directory")
     audit.add_argument("--output-root", default="./assayer-output")
-    smoke = subparsers.add_parser("smoke", help="Run a non-publishable real Chromium Host fact diagnostic")
+    # Advanced/debug entry points remain callable but are intentionally absent
+    # from the first-use help surface. Omitting ``help`` keeps argparse from
+    # adding them to the displayed subcommand table; the explicit metavar
+    # above keeps them out of usage as well.
+    smoke = subparsers.add_parser("smoke")
     smoke.add_argument("url")
     smoke.add_argument("--output-dir", default="./assayer-output")
-    serve = subparsers.add_parser("serve", help="Start the dynamic JSON Lines Runtime Router")
+    serve = subparsers.add_parser("serve")
     serve.add_argument("--output-root", default="./assayer-output")
     serve.add_argument("--max-runtimes", type=int, default=4)
     serve.add_argument("--lease-timeout", type=float, default=300.0)
-    plugins = subparsers.add_parser("plugins", help="Manage and inspect platform plugins")
+    plugins = subparsers.add_parser("plugins")
+    plugin = subparsers.add_parser("plugin")
+    plugin_subparsers = plugin.add_subparsers(dest="plugin_command", required=True)
+    plugin_verify = plugin_subparsers.add_parser(
+        "verify", help="Compile and verify an ordinary plugin as one exact wheel",
+    )
+    plugin_verify.add_argument("source", help="Ordinary plugin source directory")
+    plugin_verify.add_argument("--output-dir", default=".assayer/verified")
+    plugin_verify.add_argument("--build-timeout-seconds", type=int, default=120)
+    plugin_verify.add_argument("--install-timeout-seconds", type=int, default=120)
+    plugin_verify.add_argument("--fixture-timeout-seconds", type=int, default=300)
     plugin_common = argparse.ArgumentParser(add_help=False)
     plugin_common.add_argument("--store", default=str(default_store_root()),
                                help="Plugin installation store directory")
@@ -520,8 +728,13 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
                                                      help="Remove an installed plugin from the store")
     plugin_uninstall.add_argument("plugin_id")
     args = parser.parse_args(argv)
+    if args.command == "doctor":
+        return _run_doctor(
+            target=args.target, plugin_id=args.plugin_id, store=args.store,
+            plugin_root=args.plugin_root, as_json=args.as_json, fix=args.fix,
+        )
     if args.command == "audit":
-        return _run_agent_audit(args.url, Path(args.output_root))
+        return _run_agent_audit(args.target, Path(args.output_root), plugin_id=args.plugin_id)
     if args.command == "serve":
         router = RuntimeRouter(args.output_root, max_runtimes=args.max_runtimes,
                                lease_timeout_seconds=args.lease_timeout)
@@ -532,6 +745,15 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
             router.close()
     if args.command == "plugins":
         return _plugins_command(args, confirm=confirm)
+    if args.command == "plugin":
+        result = verify_simple_plugin(
+            args.source, output_dir=args.output_dir,
+            build_timeout_seconds=args.build_timeout_seconds,
+            install_timeout_seconds=args.install_timeout_seconds,
+            fixture_timeout_seconds=args.fixture_timeout_seconds,
+        )
+        _print_json(result)
+        return 0 if result["status"] == "passed" else 1
     runtime = BrowserHostRuntime(args.url, Path(args.output_dir))
     try:
         try:

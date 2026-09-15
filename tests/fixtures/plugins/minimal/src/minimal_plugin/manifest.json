@@ -31,7 +31,6 @@
     "decisionBatching": "allowed",
     "parallelism": "forbidden",
     "cacheReuse": "allowed",
-    "checkpoint": "required",
     "maxBatchSize": 32,
     "ordering": "independent",
     "failureSplitting": "allowed"

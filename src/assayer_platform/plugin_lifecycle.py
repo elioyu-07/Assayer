@@ -193,7 +193,18 @@ class PluginLifecycleManager:
         self._clock = clock
         self._latest_available = latest_available
 
-    def _stage(self, plugin_id: str, version: str, package_root: Path) -> dict:
+    def _stage(
+        self, plugin_id: str, version: str, package_root: Path,
+        *, wheel_sha256: str | None = None,
+    ) -> dict:
+        if (
+            wheel_sha256 is not None
+            and re.fullmatch(r"[a-f0-9]{64}", wheel_sha256.lower()) is None
+        ):
+            raise PlatformContractError(
+                "PLUGIN_CHECKSUM_INVALID",
+                "The verified wheel SHA-256 must contain 64 hexadecimal characters.",
+            )
         report = self._static_validator(package_root)
         conformance = report.as_dict()
         if not report.passed:
@@ -217,7 +228,7 @@ class PluginLifecycleManager:
             )
         installed_at = int(self._clock())
         relative = target.relative_to(self._store.root).as_posix()
-        return {
+        staged = {
             "pluginId": plugin_id,
             "version": version,
             "packageRoot": relative,
@@ -227,6 +238,9 @@ class PluginLifecycleManager:
             "passed": True,
             "reason": None,
         }
+        if wheel_sha256 is not None:
+            staged["wheelSha256"] = wheel_sha256.lower()
+        return staged
 
     def _quarantine(self, index: dict, plugin_id: str, reason: str) -> None:
         entry = index["plugins"].get(plugin_id)
@@ -254,10 +268,15 @@ class PluginLifecycleManager:
             conformance=staged["conformance"],
         )
         entry["versions"][staged["version"]]["checksum"] = staged["checksum"]
+        if staged.get("wheelSha256") is not None:
+            entry["versions"][staged["version"]]["wheelSha256"] = staged["wheelSha256"]
         entry["state"] = "installed"
         entry.pop("stateReason", None)
         self._store.save(index)
-        return self._result(operation, staged["pluginId"], self._store.active_version(entry))
+        result = self._result(operation, staged["pluginId"], self._store.active_version(entry))
+        if staged.get("wheelSha256") is not None:
+            result["wheelSha256"] = staged["wheelSha256"]
+        return result
 
     def _quarantined_result(self, operation: str, plugin_id: str, version: str, reason: str) -> dict:
         result = self._result(operation, plugin_id, version)
@@ -265,6 +284,15 @@ class PluginLifecycleManager:
         result["state"] = "dirty"
         result["reason"] = reason
         return result
+
+    def quarantine(
+        self, plugin_id: str, version: str, reason: str, *, operation: str = "install",
+    ) -> dict:
+        """Record a rejected artifact without materializing any source content."""
+        self._store.package_dir(plugin_id, version)  # Validate both identity axes.
+        index = self._store.load()
+        self._quarantine(index, plugin_id, reason)
+        return self._quarantined_result(operation, plugin_id, version, reason)
 
     def _source_root(self, package_root: str | Path) -> Path:
         root = Path(package_root).expanduser().resolve()
@@ -275,7 +303,9 @@ class PluginLifecycleManager:
             )
         return root
 
-    def install(self, package_root: str | Path) -> dict:
+    def install(
+        self, package_root: str | Path, *, wheel_sha256: str | None = None,
+    ) -> dict:
         root = self._source_root(package_root)
         descriptor = _descriptor(root)
         plugin_id, version = descriptor["pluginId"], descriptor["pluginVersion"]
@@ -294,7 +324,9 @@ class PluginLifecycleManager:
                     f"Repair target version {version} is older than the recorded active "
                     f"version {active}; publish or select version {active} or newer.",
                 )
-        staged = self._stage(plugin_id, version, root)
+        staged = self._stage(
+            plugin_id, version, root, wheel_sha256=wheel_sha256,
+        )
         if not staged["passed"]:
             self._quarantine(index, plugin_id, staged["reason"])
             return self._quarantined_result("install", plugin_id, version, staged["reason"])
@@ -303,7 +335,9 @@ class PluginLifecycleManager:
             result["recoveredFrom"] = "dirty"
         return result
 
-    def upgrade(self, package_root: str | Path) -> dict:
+    def upgrade(
+        self, package_root: str | Path, *, wheel_sha256: str | None = None,
+    ) -> dict:
         root = self._source_root(package_root)
         descriptor = _descriptor(root)
         plugin_id, version = descriptor["pluginId"], descriptor["pluginVersion"]
@@ -314,7 +348,18 @@ class PluginLifecycleManager:
                 "UNKNOWN_PLUGIN",
                 f"Plugin is not installed: {plugin_id}",
             )
-        if self._store.record(entry, version) is not None:
+        existing_record = self._store.record(entry, version)
+        if existing_record is not None:
+            existing_wheel_sha256 = existing_record.get("wheelSha256")
+            if (
+                wheel_sha256 is not None
+                and existing_wheel_sha256 is not None
+                and wheel_sha256.lower() != existing_wheel_sha256
+            ):
+                raise PlatformContractError(
+                    "PLUGIN_VERSION_ARTIFACT_CONFLICT",
+                    f"Plugin version {plugin_id}@{version} is already bound to a different wheel.",
+                )
             active = self._store.active_version(entry)
             if active is not None and _version_key(version) < _version_key(active):
                 raise PlatformContractError(
@@ -331,7 +376,9 @@ class PluginLifecycleManager:
                 f"{active}; use downgrade to move back.",
             )
         previous = active
-        staged = self._stage(plugin_id, version, root)
+        staged = self._stage(
+            plugin_id, version, root, wheel_sha256=wheel_sha256,
+        )
         if not staged["passed"]:
             self._quarantine(index, plugin_id, staged["reason"])
             return self._quarantined_result("upgrade", plugin_id, version, staged["reason"])

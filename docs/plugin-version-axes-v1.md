@@ -2,9 +2,9 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
-| Date | 2026-09-10 |
-| Status | Frozen |
+| Document version | 1.1.0 |
+| Date | 2026-09-13 |
+| Status | Frozen; Simple author view and generated compatibility added |
 | Owner | Assayer maintainers |
 | Authority | Platform Constitution v1 §5, Platform--Plugin Boundary Contract v1 §10 |
 
@@ -20,7 +20,7 @@ owner, and compatibility rule of each axis.
 | Axis | Symbol | Current value | Format | Owner | Meaning |
 |---|---|---|---|---|---|
 | Distribution | `DISTRIBUTION_VERSION` | `assayer 0.1.2` | semver | each package | The pip packaging release of one wheel (`assayer-platform`, `assayer-plugin-sdk`, `assayer-plugin-<domain>`, `assayer-provider-<source>`). Packaging only; it does not by itself define compatibility. |
-| Platform API | `PLATFORM_API_VERSION` | `1.0.0` | semver | platform | The semantic version of the public platform surface a plugin is written against. Declared by a plugin as `platformApiVersion`. |
+| Platform API | `PLATFORM_API_VERSION` | `1.0.0` | semver | platform | The semantic version of the generated internal platform surface. The compiler binds it for an ordinary plugin; an Advanced SPI package declares it explicitly. |
 | Plugin protocol | `HOST_PROTOCOL_VERSION` | `1.2.0` | semver | SDK + platform | The message/envelope version of the Host-to-plugin protocol (`docs/plugin-protocol-v1.md`). Negotiated before a Run starts. |
 | Plugin SDK | `HOST_SDK_VERSION` | `0.1.2` | semver | `assayer-plugin-sdk` | The version of the SDK code and its bundled schemas. Each SDK release declares the protocol range it implements. |
 
@@ -37,9 +37,11 @@ owner, and compatibility rule of each axis.
    plugin surface (entities, registration, conformance API) bumps
    `PLATFORM_API_VERSION`. Internal kernel, transport, persistence, and
    observability changes do not.
-4. **A plugin declares two ranges.** `platformApiVersion` fixes the surface it
-   was built against; `protocolMinVersion`..`protocolMaxVersion` and
-   `sdkMinVersion`..`sdkMaxVersion` fix the message and SDK window.
+4. **Ordinary authors declare no compatibility ranges.** They declare one
+   plugin business version. The compiler derives `platformApiVersion`, the
+   protocol/SDK window, Check and domain-contract versions, and package
+   compatibility from its own frozen identity. Advanced SPI publishers declare
+   the ranges required by their public low-level contract.
 5. **Compatibility is negotiated, not pinned.** A plugin MUST NOT depend on a
    platform distribution version range to express compatibility. Depending on
    `assayer>=x,<y` is packaging coupling, not a compatibility contract.
@@ -59,12 +61,12 @@ For every axis, the change class is:
 ## 5. Enforcement
 
 1. Before discovery, the Host runs `negotiate_plugin_compatibility` against the
-   plugin manifest's `compatibility` block.
+   generated or Advanced SPI manifest's `compatibility` block.
 2. Outside the declared ranges, the Host fails closed with
    `PLUGIN_PROTOCOL_INCOMPATIBLE` or `PLUGIN_SDK_INCOMPATIBLE` and starts no
    Run.
 3. A platform-only implementation or transport change MUST remain inside the
-   existing platform API and protocol envelope; it MUST NOT require a plugin
-   release (Constitution §3.13). The verification is the isolation regression:
-   an internal platform change leaves every plugin release fixture green with
-   zero plugin-source diff.
+   existing platform API and protocol envelope; it MUST NOT require an ordinary
+   plugin author-source change (Constitution §3.13-14). The verification is the
+   isolation regression: an internal platform change leaves every generated
+   plugin release fixture green with zero author-source diff.

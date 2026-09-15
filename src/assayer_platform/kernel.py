@@ -72,6 +72,24 @@ class ArtifactPublisher(Protocol):
     def publish(self, result: PlatformRunResult) -> Artifact: ...
 
 
+class _ProviderDiscoveryPlugin:
+    """Host adapter that replaces plugin discovery for provider-owned sources."""
+
+    def __init__(self, plugin: Any, provider: Any, check: CheckContract, capability: str) -> None:
+        self._plugin = plugin
+        self._provider = provider
+        self._check = check
+        self._capability = capability
+        self.manifest = plugin.manifest
+
+    def discover(self, scope: Any, context: PlatformContext) -> Sequence[WorkItem]:
+        del scope, context
+        return self._provider.discover_work_items(self._check, self._capability)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._plugin, name)
+
+
 def _digest(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -136,6 +154,20 @@ class PlatformKernel:
                 raise PlatformContractError(
                     "PLUGIN_IDENTITY_MISMATCH",
                     "Plugin factory returned an implementation with different registered metadata",
+                )
+            source_capabilities = frozenset(
+                getattr(registration, "provider_source_capabilities", ())
+            )
+            if source_capabilities:
+                if len(source_capabilities) != 1 or not callable(
+                    getattr(runtime, "discover_work_items", None)
+                ):
+                    raise PlatformContractError(
+                        "PROVIDER_SOURCE_DISCOVERY_UNAVAILABLE",
+                        "The Check declares provider-owned source discovery but the bound runtime cannot provide it",
+                    )
+                plugin = _ProviderDiscoveryPlugin(
+                    plugin, runtime, check, next(iter(source_capabilities)),
                 )
             provider = decision_provider or registration.create_decision_provider(runtime)
             selected_committer = committer if committer is not None else registration.create_committer(runtime)

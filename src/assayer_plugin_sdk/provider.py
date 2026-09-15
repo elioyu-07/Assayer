@@ -22,6 +22,8 @@ from .contract import (
     CapabilityProviderDescriptor,
     PlatformContractError,
     ProviderCapability,
+    ProviderSourceDiscovery,
+    ProviderSourceSnapshot,
 )
 from .resources import schema_root
 
@@ -41,7 +43,7 @@ def _plain(value: Any) -> Any:
 
 
 def _descriptor_payload(descriptor: CapabilityProviderDescriptor) -> dict[str, Any]:
-    return {
+    payload = {
         "providerId": descriptor.provider_id,
         "version": descriptor.version,
         "platformApiVersion": descriptor.platform_api_version,
@@ -57,6 +59,9 @@ def _descriptor_payload(descriptor: CapabilityProviderDescriptor) -> dict[str, A
         "failurePolicy": _plain(descriptor.failure_policy),
         "algorithmVersions": _plain(descriptor.algorithm_versions),
     }
+    if descriptor.result_schema is not None:
+        payload["resultSchema"] = _plain(descriptor.result_schema)
+    return payload
 
 
 def validate_provider_descriptor(value: Mapping[str, Any]) -> None:
@@ -89,6 +94,11 @@ def validate_provider_descriptor(value: Mapping[str, Any]) -> None:
             "PROVIDER_SCOPE_SCHEMA_INVALID",
             "Provider scope schema must describe a top-level object",
         )
+    if value.get("resultSchema") is not None:
+        try:
+            Draft202012Validator.check_schema(dict(value["resultSchema"]))
+        except SchemaError as error:
+            raise PlatformContractError("PROVIDER_RESULT_SCHEMA_INVALID", error.message) from error
 
 
 def load_provider_descriptor(
@@ -113,6 +123,7 @@ def load_provider_descriptor(
         limits=value["limits"],
         failure_policy=tuple(value["failurePolicy"]),
         algorithm_versions=value["algorithmVersions"],
+        result_schema=value.get("resultSchema"),
     )
 
 
@@ -150,5 +161,7 @@ __all__ = [
     "ProviderRegistration",
     "load_provider_descriptor",
     "validate_provider_descriptor",
+    "ProviderSourceDiscovery",
+    "ProviderSourceSnapshot",
     "_descriptor_payload",
 ]

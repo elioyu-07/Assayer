@@ -101,6 +101,20 @@ class ExtractArchiveTests(unittest.TestCase):
             with self.assertRaises(PlatformContractError):
                 extract_archive(buffer.getvalue(), Path(tmp))
 
+    def test_rejects_source_only_content(self):
+        for member in (
+            ".git/config",
+            ".venv/bin/python",
+            "tests/test_plugin.py",
+            "build/generated.py",
+            "dist/old.whl",
+            "plugin/__pycache__/runtime.pyc",
+        ):
+            with self.subTest(member=member), tempfile.TemporaryDirectory() as tmp:
+                with self.assertRaises(PlatformContractError) as caught:
+                    extract_archive(_wheel({member: b"x"}), Path(tmp))
+                self.assertEqual(caught.exception.code, "PLUGIN_ARCHIVE_UNSAFE")
+
 
 class MaterializeWheelTests(unittest.TestCase):
     def test_materializes_and_returns_root(self):

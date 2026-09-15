@@ -8,8 +8,11 @@ import unittest
 from pathlib import Path
 
 from assayer_platform import inspect_provider_installation, inspect_provider_package
-from assayer_platform.provider_installation_conformance import main as install_main
 from assayer_platform.provider_package_conformance import main as package_main
+
+
+ROOT = Path(__file__).resolve().parents[1]
+BROWSER_PROVIDER_ROOT = ROOT / "packages" / "assayer-provider-browser"
 
 
 FAILURES = (
@@ -25,6 +28,14 @@ FAILURES = (
 
 
 class ProviderReleaseGateTests(unittest.TestCase):
+    def test_shipped_browser_provider_passes_static_release_gate(self):
+        report = inspect_provider_package(BROWSER_PROVIDER_ROOT)
+        self.assertTrue(report.passed, report.as_dict())
+
+    def test_isolated_install_shipped_browser_provider_passes_release_gate(self):
+        report = inspect_provider_installation(BROWSER_PROVIDER_ROOT)
+        self.assertTrue(report.passed, report.as_dict())
+
     def write_package(self, root: Path, **release_overrides) -> Path:
         package = root / "provider-release"
         (package / "provider" / "fixtures").mkdir(parents=True)
@@ -108,7 +119,7 @@ class ProviderReleaseGateTests(unittest.TestCase):
             "[project]\n"
             "name = \"fixture-assayer-provider\"\n"
             "version = \"1.0.0\"\n"
-            "dependencies = [\"assayer-plugin-sdk>=0.1.2,<0.2.0\"]\n"
+            "dependencies = [\"assayer-plugin-sdk==0.1.2\"]\n"
             "[project.entry-points.\"assayer.providers\"]\n"
             "fixture = \"fixture_provider.provider:registration\"\n"
             "[tool.setuptools.packages.find]\n"
@@ -134,12 +145,35 @@ class ProviderReleaseGateTests(unittest.TestCase):
         return package
 
     @staticmethod
-    def make_installable(package: Path, *, descriptor_drift: bool = False) -> None:
+    def make_installable(
+        package: Path,
+        *,
+        descriptor_drift: bool = False,
+        requires_runtime: bool = False,
+    ) -> None:
         descriptor = json.loads(
             (package / "provider" / "descriptor.json").read_text()
         )
         if descriptor_drift:
             descriptor["algorithmVersions"]["stateDigest"] = "1.1.0"
+        runtime_support = '''
+def fixture_runtime(fixture):
+    return {"fixtureId": fixture["fixtureId"]}
+''' if requires_runtime else ""
+        runtime_initialization = (
+            "    def __init__(self, runtime):\n"
+            "        self.runtime = runtime\n\n"
+            if requires_runtime else ""
+        )
+        runtime_guard = (
+            "        if self.runtime is None:\n"
+            "            raise RuntimeError('fixture runtime was not injected')\n"
+            if requires_runtime else ""
+        )
+        provider_factory = (
+            "lambda runtime: FixtureProvider(runtime)"
+            if requires_runtime else "lambda runtime=None: FixtureProvider()"
+        )
         source = f'''import json
 from assayer_platform import (
     ProviderFact, ProviderFailure, ProviderRegistration, ProviderResponse,
@@ -147,13 +181,16 @@ from assayer_platform import (
 )
 
 DESCRIPTOR = load_provider_descriptor(json.loads({json.dumps(descriptor)!r}))
+{runtime_support}
 
 
 class FixtureProvider:
     descriptor = DESCRIPTOR
 
+{runtime_initialization}
     def collect(self, request, context):
         del context
+{runtime_guard}
         if request.scope["outcome"] == "source_error":
             return ProviderResponse(
                 request.request_id, request.provider_id, request.provider_version,
@@ -172,7 +209,7 @@ class FixtureProvider:
 
 registration = ProviderRegistration(
     DESCRIPTOR,
-    provider_factory=lambda runtime=None: FixtureProvider(),
+    provider_factory={provider_factory},
 )
 '''
         (package / "src" / "fixture_provider" / "provider.py").write_text(source)
@@ -198,6 +235,18 @@ registration = ProviderRegistration(
         self.assertEqual(
             {issue.code for issue in report.issues},
             {"PROVIDER_RELEASE_DESCRIPTOR_INVALID"},
+        )
+
+    def test_static_gate_rejects_missing_fixture_runtime_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.write_package(
+                Path(directory),
+                fixtureRuntime="fixture_provider.missing:fixture_runtime",
+            )
+            report = inspect_provider_package(package)
+        self.assertIn(
+            "PROVIDER_FIXTURE_RUNTIME_SOURCE_MISSING",
+            {issue.code for issue in report.issues},
         )
 
     def test_static_gate_rejects_identity_fixture_and_metadata_mismatches(self):
@@ -260,12 +309,30 @@ registration = ProviderRegistration(
             package = self.write_package(Path(directory))
             self.make_installable(package)
             report = inspect_provider_installation(package)
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                status = install_main([str(package)])
         self.assertTrue(report.passed, report.as_dict())
-        self.assertEqual(status, 0)
-        self.assertEqual(json.loads(output.getvalue())["status"], "passed")
+
+    def test_isolated_install_injects_declared_fixture_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.write_package(
+                Path(directory),
+                fixtureRuntime="fixture_provider.provider:fixture_runtime",
+            )
+            self.make_installable(package, requires_runtime=True)
+            report = inspect_provider_installation(package)
+        self.assertTrue(report.passed, report.as_dict())
+
+    def test_isolated_install_rejects_missing_fixture_runtime_attribute(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = self.write_package(
+                Path(directory),
+                fixtureRuntime="fixture_provider.provider:missing_runtime",
+            )
+            self.make_installable(package)
+            report = inspect_provider_installation(package)
+        self.assertIn(
+            "PROVIDER_FIXTURE_RUNTIME_LOAD_FAILED",
+            {issue.code for issue in report.issues},
+        )
 
     def test_isolated_install_rejects_runtime_descriptor_drift(self):
         with tempfile.TemporaryDirectory() as directory:

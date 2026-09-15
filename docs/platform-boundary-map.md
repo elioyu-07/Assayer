@@ -2,10 +2,20 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0 |
-| Date | 2026-09-02 |
-| Status | Reference map aligned with M2 frozen contracts |
+| Document version | 1.0.1 |
+| Date | 2026-09-13 |
+| Status | Historical implementation map; ordinary author target superseded by Platform Constitution v1.1 |
 | Owner | Assayer Maintainers |
+
+This file records the extraction state that produced the current Advanced SPI.
+Its author-facing SDK and execution-profile statements are not requirements for
+new ordinary plugins. The current target is
+[Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).
+
+Current hard-cut status: the Frontend compatibility package described by the
+historical extraction record below has been removed. Frontend is now authored
+only as `plugins/frontend-audit/` and compiled into a common-review plugin; the
+browser source boundary is owned by `assayer-provider-browser`.
 
 ## Implementation Status
 
@@ -56,7 +66,7 @@ This map records which current Assayer modules are reusable platform-kernel mate
 | Target layer | Responsibility |
 |---|---|
 | Platform kernel | Run lifecycle, work scheduling, identity, Evidence, decisions, recovery contract, budgets, persistence, observability, and publication gates |
-| Plugin SDK/contract | Manifest, checks, dimensions, capability requirements, execution constraints, invalidation, and conformance hooks |
+| Simple SDK/compiler | Domain declarations and typed scanning in; generated manifests, contracts, and conformance artifacts out |
 | Runtime adapter | Browser, API, file, repository, database, log, or other approved data access |
 | Agent/Skill adapter | Domain instructions, semantic selection, semantic decisions, and user-facing workflow |
 | Report adapter | Domain presentation derived from the immutable ledger |
@@ -92,17 +102,17 @@ This map records which current Assayer modules are reusable platform-kernel mate
 2. No current FUA-10 result may change solely because a module moved layers.
 3. The kernel may expose compatibility aliases, but new code must use generic concepts internally.
 4. Browser-specific schemas remain valid for the browser adapter and are not copied into generic schemas.
-5. A plugin may opt out of batching, caching, parallelism, or compression; the kernel must honor the declaration.
+5. The Host owns proof-preserving batching, caching, parallelism, and compression defaults. Only an admitted Advanced SPI package may declare stricter low-level constraints.
 6. Every extraction step adds a conformance test before deleting or renaming a browser-specific path.
 
 ## 4. First Non-browser Validation
 
-The recommended second plugin is a read-only specification or configuration quality checker. It should use file/repository input and structured Evidence, while exercising the same Run, WorkItem, Check, Finding, Decision, checkpoint, diagnostics, and performance contracts. Its implementation must not require changes to browser runtime modules.
+The recommended second plugin was a read-only specification or configuration
+quality checker. The completed implementation exercised the low-level Run,
+WorkItem, packet, Evidence, Decision, diagnostics, and performance contracts;
+those are now Advanced SPI migration evidence, not the Simple author surface.
 
-This milestone is complete: the frontend compatibility plugin and the
-non-browser configuration and `ass-spec` plugins pass the same kernel
-conformance suite. The production-facing transport checkpoints frontend
-lifecycle in the generic ledger, exposes `run_plugin` for registered batch
-Checks, and now also exposes the domain-neutral interactive lifecycle without
-changing existing frontend tool names. The frontend runtime itself is not yet
-migrated onto that generic controller.
+The extraction milestone was superseded by the Frontend hard cut. The
+compiler-generated Frontend plugin and non-browser plugins now use the shared
+interactive/common-review lifecycle. No source-checkout Frontend adapter is
+registered or retained.

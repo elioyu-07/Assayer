@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import tempfile
@@ -185,11 +186,12 @@ class TransportTest(unittest.TestCase):
             self.assertEqual(result["structuredContent"]["result"]["decisions"][0]["result"], "scanned_no_issue")
 
     def test_generic_platform_mcp_rejects_interactive_plugin(self):
-        transport = PlatformMcpToolTransport(tempfile.mkdtemp())
-        with self.assertRaises(HostError) as error:
-            transport.call_tool("run_plugin", {
-                "pluginId": "assayer.frontend-audit", "checkId": "FUA-10", "scope": {},
-            })
+        with tempfile.TemporaryDirectory() as directory:
+            transport = PlatformMcpToolTransport(directory)
+            with self.assertRaises(HostError) as error:
+                transport.call_tool("run_plugin", {
+                    "pluginId": "assayer.frontend-audit", "checkId": "FUA-10", "scope": {},
+                })
         self.assertEqual(error.exception.code, "PLUGIN_EXECUTION_MODE_UNSUPPORTED")
 
     def test_mcp_attaches_observe_page_visual_to_structured_response(self):
@@ -250,15 +252,16 @@ class TransportTest(unittest.TestCase):
         except ImportError:
             self.skipTest("MCP optional dependency is not installed")
         server = create_mcp_server(RecordingCore())
-        names = {tool.name for tool in server._tool_manager.list_tools()}
+        tools = asyncio.run(server.list_tools())
+        names = {tool.name for tool in tools}
         self.assertIn("start_audit", names)
         self.assertIn("get_operation", names)
         self.assertEqual(len(names), 17)
-        complete = server._tool_manager.get_tool("complete_audit")
+        complete = next(tool for tool in tools if tool.name == "complete_audit")
         self.assertIsNotNone(complete)
-        self.assertEqual(complete.parameters["properties"]["request"]["properties"]["tool"],
+        self.assertEqual(complete.inputSchema["properties"]["request"]["properties"]["tool"],
                          {"const": "complete_audit"})
-        self.assertIn("resultCounts", complete.parameters["properties"]["request"]["properties"]["input"]["properties"]["ruleSummaries"]["items"]["required"])
+        self.assertIn("resultCounts", complete.inputSchema["properties"]["request"]["properties"]["input"]["properties"]["ruleSummaries"]["items"]["required"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,15 +70,53 @@ or:
 Audit this project's spec.md
 ```
 
+The equivalent explicit CLI entry accepts the same target kinds:
+
+```bash
+assayer audit https://example.test
+assayer audit ./spec.md
+assayer audit ./policy.yaml --plugin policy-review
+```
+
+URLs route to the web-audit Skill. Files and directories route to the generic
+installed-plugin workflow; Markdown defaults to `ass-spec` and never starts
+Chromium.
+
+If the first run cannot start, use the read-only readiness check before
+changing any configuration:
+
+```bash
+assayer doctor
+assayer doctor --json
+assayer doctor --fix
+```
+
+`doctor` is read-only by default. `doctor --fix` only prepares the bundled
+private runtime; it does not start an audit or Chromium and does not install
+domain plugins.
+
+The check distinguishes required dependencies from target-specific ones (for
+example, Chromium is required for a web audit but not for a Markdown review).
+For a web target it checks for Playwright and a local Chrome/Edge executable,
+but defers the actual browser launch until the audit starts. It never starts a
+browser or an audit Run itself.
+
 That is the intended product boundary. Assayer owns run IDs, protocol versions,
-revisions, output locations, browser profiles, checkpoint receipts, and recovery
+revisions, output locations, browser profiles, commit receipts, and recovery
 state. The user supplies the audit intent and the target.
 
-The current Alpha bundle is validated on macOS arm64 with CPython 3.13. Python
-and Chromium are external prerequisites. The release is currently built from
-source and installed through a personal Codex marketplace. Plugin installation,
-upgrade, and removal are expressed as natural language in Codex and resolved by
-the agent into a deterministic, fail-closed plan.
+The current Alpha CI policy exercises CPython 3.11, 3.12, and 3.13: 3.11 and
+3.13 run the full gate, while 3.12 runs the fast compatibility gate. The clean
+Codex operator reference is macOS arm64 with CPython 3.13. Python and
+Chromium are external prerequisites. Windows is not an officially supported
+platform in this release policy. See the [CI Support Matrix](docs/ci-support-matrix-v1.md).
+Clean Codex operator acceptance for J04/J05/J08 is governed separately by the
+[Operator Release Gate](docs/operator-release-gate-v1.md); automated tests do
+not substitute for that evidence.
+The release is currently built from source and installed through a personal
+Codex marketplace. Plugin installation, upgrade, and removal are expressed as
+natural language in Codex and resolved by the agent into a deterministic,
+fail-closed plan.
 
 For the current delivery evidence, see [installation](docs/j01-install-delivery.md)
 and [activation and discovery](docs/j02-activation-and-discovery.md). For a
@@ -106,10 +144,10 @@ The boundaries are deliberate:
 
 | Component | Owns |
 |---|---|
-| Platform | Lifecycle, permissions, evidence integrity, decision gates, persistence, recovery, observability, performance accounting, and canonical result semantics |
-| Audit plugin | Versioned rules, applicability, WorkItem discovery, evidence organization, semantic-review requirements, and domain summary data |
-| Capability provider | Authorized, bounded access to an environment or data source; never the compliance decision |
-| Agent and Skill | User-intent resolution, orchestration, and semantic decisions requested by the plugin |
+| Platform | Lifecycle, permissions, source binding, execution planning, identity, Evidence lineage, incremental review and coverage, decision mapping, persistence, recovery, observability, result projection, packaging, and publication |
+| Audit policy/plugin | One business version, input kind, rules, applicability, deterministic domain observations, semantic-review meaning, invariants, and business examples |
+| Capability provider | Authorized source acquisition, immutable snapshots, anchors, and bounded source queries; never the compliance decision |
+| Agent and Skill | User-intent resolution and semantic verdicts for the current Host-planned review batch |
 
 Plugins and providers cannot bypass platform safety, evidence, persistence, or
 publication gates.
@@ -148,7 +186,8 @@ views are presentation artifacts—not competing sources of truth.
 Long audits should be inspectable and resumable, not opaque.
 
 - There is no fixed total audit timeout. Large scopes advance through bounded,
-  durable checkpoints instead of being invalidated after an arbitrary duration.
+  durable lifecycle boundaries instead of being invalidated after an arbitrary
+  duration.
 - Interactive runs expose whether the Host is working, the Agent owes a semantic
   decision, recovery is required, or the run is terminal.
 - Idempotent operations, revision fencing, and append-only corrections prevent a
@@ -182,13 +221,13 @@ journeys.
 | Contract enforcement | Registration, package, isolated-installation, result, recovery, provider, and performance conformance implemented |
 | Recovery | Durable interruption recovery implemented and accepted in a real Codex CLI trial |
 | Result model | Unified `canonical-result.json` implemented for every current plugin |
-| End-to-end acceptance | J04/J05 implementation complete; fresh clean-CLI evidence and the real J08 lifecycle gate remain open |
-| Plugin ecosystem | Built-in plugins today; independent persistent installation, upgrade, rollback, and uninstall remain in progress |
+| End-to-end acceptance | J04/J05 implementation complete; deterministic CLI/lifecycle evidence is recorded, while real operator J04/J05 and J08 gates remain open |
+| Plugin ecosystem | Independent SDK/platform/plugin/provider packaging is implemented; clean lifecycle evidence and the current hard-cut rollout remain in progress |
 
 The ordered roadmap is:
 
-1. close the remaining clean-CLI and release-lifecycle evidence for the current
-   user journey;
+1. finish the exact-contract hard-cut: reject old plugin/protocol paths and
+   record clean-CLI and release-lifecycle evidence for the current journey;
 2. complete measured platform-performance evidence;
 3. externalize the ass-spec plugin without changing platform source (done: it now
    lives in its own repository and installs as an external distribution);
@@ -212,12 +251,16 @@ the browser are user-supplied prerequisites, not bundled dependencies:
 
 ```bash
 python3 -m venv .venv
-# The root `assayer` distribution is platform-only; the SDK, plugin, and
-# provider ship as separate local distributions built from the same src/ tree.
+# The root `assayer` distribution is platform-only. Frontend is compiled from
+# its Policy Pack; there is no editable compatibility runtime package.
 uv pip install --python .venv/bin/python -e packages/assayer-plugin-sdk
+uv pip install --python .venv/bin/python -e packages/assayer-agent
+python scripts/build_distributions.py --output /tmp/assayer-wheels
 uv pip install --python .venv/bin/python \
-  -e packages/assayer-plugin-frontend-audit \
+  /tmp/assayer-wheels/assayer_plugin_frontend_audit-*.whl
+uv pip install --python .venv/bin/python \
   -e packages/assayer-provider-markdown \
+  -e packages/assayer-provider-browser \
   -e '.[test]'
 .venv/bin/python -m pip install playwright
 ```
@@ -247,35 +290,28 @@ and launcher startup in a clean temporary environment.
 
 ## Build an audit plugin
 
-An independently packaged audit plugin declares an `assayer.plugins` Python
-entry point and ships its manifest, scope schema, runtime, semantic-review
-instructions, and deterministic fixtures as one versioned identity.
+The target ordinary plugin is a Policy Pack or a Simple SDK package. It
+maintains domain metadata, Checks, semantic instructions, business cases, and
+optional deterministic `scan(document)` logic. The SDK compiler generates the
+manifest, Schemas, registration, compatibility, entry points, release
+descriptor, and platform lifecycle cases.
 
-Validate the registration during development:
+The complete author workflow is one command:
 
-```bash
-assayer-plugin-check my_package.plugin:registration
+```text
+assayer plugin verify
 ```
 
-Then validate the release without importing it, followed by an isolated local
-installation and fixture run:
+It compiles the domain source, builds an isolated wheel, validates and installs
+that exact wheel, and runs generated Evidence, incremental-review, coverage,
+resume, replay, pagination, canonical-result, and artifact checks. Local source
+installation never copies a repository into the plugin store.
 
-```bash
-assayer-plugin-package-check ./my-plugin-release
-assayer-plugin-install-check ./my-plugin-release
-```
-
-The publication gate must receive the exact wheel selected for release:
-
-```bash
-python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist ./my-plugin-release
-assayer-plugin-release-check --source ./my-plugin-release dist/*.whl
-```
-
-Strict interactive plugins additionally export one
-`assayer.release_acceptance` entry point. The installed journey must cover all
-declared checkpoint collections, finalization, resume, replay, terminal result
-publication, and durable ledgers without Agent retries.
+The Simple SDK compiler, Policy Pack path, CLI verification command, and Codex
+`verify_plugin_source` MCP entry are implemented. Existing
+`PluginRegistration` and `DomainResultContract` remain the Advanced SPI
+migration path and should not be used as the starting point for a new ordinary
+plugin. See the [Plugin development guide](docs/plugin-development.md).
 
 Capability providers have an independent contract and equivalent gates:
 
@@ -312,9 +348,10 @@ commands are development interfaces, not substitutes for a real user journey.
 plugins/                Codex Plugin source, Skills, launcher, and bundled resources
 src/assayer_platform/   Domain-neutral contracts, kernel, registry, and test references
 src/assayer_host/       Product Host, browser runtime, transport, persistence, and recovery
-src/assayer_agent/      Model-independent Agent orchestration
+src/assayer_agent/      Model-independent Agent orchestration (standalone wheel)
+src/assayer_plugin_sdk/ Public plugin/provider contracts and canonical SDK schemas
 rules/                  Versioned frontend audit rules
-schemas/                Protocol, ledger, result, provider, and diagnostic schemas
+schemas/                Platform-owned protocol, ledger, result, and diagnostic schemas
 docs/                   Product, architecture, journey, and governance documents
 tests/                  Deterministic, browser, MCP, plugin, provider, and conformance tests
 scripts/                Test, release, resilience, and language-governance tooling
@@ -330,20 +367,23 @@ scripts/                Test, release, resilience, and language-governance tooli
   — the release acceptance boundary
 - [Platform Constitution v1](docs/platform-constitution-v1.md) — frozen platform
   laws and ownership
-- [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — plugin behavior and
-  lifecycle contract
+- [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — Policy Pack, Simple
+  SDK, common review, and Advanced SPI boundary
 - [Plugin Development Standard v1](docs/plugin-development-standard-v1.md) —
-  executable Agent contracts, fail-fast validation, retry boundaries, and
-  release gates
+  author sources, compiler output, incremental review, and release gates
+- [Simple Plugin Authoring Architecture](docs/simple-plugin-authoring-design.md)
+  — target architecture, migration, and acceptance
 - [Capability Provider Contract v1](docs/capability-provider-contract-v1.md) —
   controlled runtime capability contract
 - [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md) —
   portable terminal result semantics
-- [Plugin development](docs/plugin-development.md) — Python packaging,
-  registration, and conformance workflow
+- [Plugin development](docs/plugin-development.md) — ordinary Policy Pack and
+  Simple SDK authoring guide
 - [Architecture](docs/architecture.md) — system structure and boundaries
 - [Observability governance](docs/observability-governance.md) — logs, traces,
   diagnostics, and performance evidence
+- [Exact-contract, release, and performance evidence](docs/exact-contract-release-performance-evidence.md)
+  — current hard-cut, lifecycle, and measured platform baseline
 
 When documents conflict, follow the authority order in
 [Design governance](docs/design-governance.md). Examples, tests, and generated

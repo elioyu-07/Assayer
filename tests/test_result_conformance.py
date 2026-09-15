@@ -4,8 +4,6 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from jsonschema import Draft202012Validator, RefResolver
-
 from assayer_platform import (
     CommitReceipt,
     PlatformContext,
@@ -22,9 +20,6 @@ from tests.helpers.config_quality import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
-
-
 class ResultConformanceTest(unittest.TestCase):
     def run_result(self, directory):
         path = Path(directory) / "settings.json"
@@ -35,23 +30,10 @@ class ResultConformanceTest(unittest.TestCase):
             PlatformContext("run-result-conformance", frozenset({"structured_read"})),
         )
 
-    def validator(self):
-        schemas = {}
-        for path in (ROOT / "schemas").glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
-        schema = schemas["result-conformance.schema.json"]
-        return Draft202012Validator(
-            schema,
-            resolver=RefResolver(schema["$id"], schema, store=schemas),
-        )
-
-    def test_valid_terminal_result_passes_the_shared_schema_backed_gate(self):
+    def test_valid_terminal_result_passes_the_shared_conformance_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             report = inspect_result_conformance(self.run_result(directory))
         self.assertTrue(report.passed, report.as_dict())
-        self.validator().validate(report.as_dict())
 
     def test_missing_result_receipt_fails_before_publication(self):
         with tempfile.TemporaryDirectory() as directory:

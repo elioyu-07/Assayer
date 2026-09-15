@@ -1,15 +1,15 @@
 {
   "name": "assayer",
-  "version": "0.1.2+codex.20260909231840",
-  "description": "Evidence-backed audits for web interfaces and installed plugins in Codex",
+  "version": "0.1.2+codex.20260915014354",
+  "description": "Evidence-backed audits and deterministic plugin development in Codex",
   "author": {
     "name": "Assayer maintainers"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Assayer",
-    "shortDescription": "Audit web interfaces and drive installed plugins with evidence-backed checks.",
-    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits. It can inspect a real web interface or drive any installed plugin through the domain-neutral plugin lifecycle, then produce traceable findings and reports from a natural-language request.",
+    "shortDescription": "Audit interfaces, run plugins, and verify plugin source projects.",
+    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits, installed-plugin lifecycles, and deterministic local plugin verification. It compiles supported authoring formats, validates one exact wheel, and returns traceable findings or release artifacts from natural-language requests.",
     "developerName": "Assayer maintainers",
     "category": "Productivity",
     "capabilities": [
@@ -19,6 +19,7 @@
       "Audit this web URL for frontend issues: <URL>",
       "Run the installed plugin for this input and produce an evidence-backed report.",
       "Install the ass-spec plugin.",
+      "Verify this local Assayer plugin source and build its exact release wheel.",
       "Continue the Assayer audit and explain the current progress.",
       "Explain the Assayer result and what I should do next."
     ]

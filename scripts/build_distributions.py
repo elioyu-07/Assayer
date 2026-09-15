@@ -1,6 +1,6 @@
 """Build the split Assayer distributions and keep the tree clean.
 
-The A-plan distribution split ships four independent wheels. Building with
+The A-plan distribution split ships six independent wheels. Building with
 setuptools stages metadata into ``src/*.egg-info`` and ``packages/*/build``;
 left behind, the egg-info directories pollute
 ``importlib.metadata.entry_points()`` and produce duplicate ``assayer.*``
@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -27,20 +28,29 @@ _ROOT_WHEEL = re.compile(r"^assayer-\d")
 # Order is informational only: ``--no-deps`` makes each build independent.
 DISTRIBUTIONS = (
     "assayer-plugin-sdk",
+    "assayer-agent",
     "assayer-plugin-frontend-audit",
     "assayer-provider-markdown",
+    "assayer-provider-browser",
     "assayer-platform",
 )
 
+FRONTEND_DISTRIBUTION = "assayer-plugin-frontend-audit"
+FRONTEND_POLICY_SOURCE = ROOT / "plugins" / "frontend-audit"
 
-def _clean_staging() -> None:
-    for egg_info in (ROOT / "src").glob("*.egg-info"):
+
+def clean_staging(root: Path = ROOT) -> None:
+    """Remove only known setuptools staging paths below an explicit root."""
+    root = root.resolve()
+    for egg_info in (root / "src").glob("*.egg-info"):
         shutil.rmtree(egg_info, ignore_errors=True)
-    for build in (ROOT / "packages").glob("*/build"):
+    for egg_info in (root / "packages").glob("*/src/*.egg-info"):
+        shutil.rmtree(egg_info, ignore_errors=True)
+    for build in (root / "packages").glob("*/build"):
         shutil.rmtree(build, ignore_errors=True)
     # The root ``build/lib`` is reused across builds; left behind it can leak
     # stale modules into the platform-only root wheel.
-    shutil.rmtree(ROOT / "build", ignore_errors=True)
+    shutil.rmtree(root / "build", ignore_errors=True)
 
 
 def build(
@@ -58,11 +68,51 @@ def build(
     built: list[Path] = []
     try:
         for distribution in distributions:
+            if distribution == FRONTEND_DISTRIBUTION:
+                _build_frontend_distribution(
+                    command,
+                )
+                continue
             subprocess.run(command + [str(ROOT / "packages" / distribution)], cwd=ROOT, check=True)
         built = sorted(output.glob("*.whl"))
     finally:
-        _clean_staging()
+        clean_staging()
     return built
+
+
+def _build_frontend_distribution(
+    command: list[str],
+) -> None:
+    """Build the shipped frontend wheel from its Policy Pack source.
+
+    The repository contains no hand-written frontend runtime package. Compile
+    the ordinary author tree into an isolated temporary source tree, then
+    invoke the normal wheel backend on that generated tree. The temporary tree
+    is discarded after the wheel is produced.
+    """
+    source_root = FRONTEND_POLICY_SOURCE.resolve()
+    if not source_root.is_dir():
+        raise SystemExit(f"frontend Policy Pack is missing: {source_root}")
+    source_path = str(ROOT / "src")
+    if source_path not in sys.path:
+        sys.path.insert(0, source_path)
+    from assayer_platform.conformance import inspect_plugin_package
+    from assayer_platform.simple_plugin_compiler import compile_simple_plugin
+
+    with tempfile.TemporaryDirectory(prefix="assayer-frontend-build-") as directory:
+        generated = Path(directory) / "generated"
+        compile_simple_plugin(
+            source_root,
+            generated,
+            distribution_name=FRONTEND_DISTRIBUTION,
+        )
+        report = inspect_plugin_package(generated)
+        if not report.passed:
+            details = "; ".join(
+                f"{issue.code}: {issue.message}" for issue in report.issues
+            )
+            raise SystemExit(f"generated frontend package failed conformance: {details}")
+        subprocess.run(command + [str(generated)], cwd=ROOT, check=True)
 
 
 def root_wheel(output: Path) -> Path:
@@ -92,11 +142,11 @@ def build_root(
         command.append("--no-build-isolation")
     if find_links is not None:
         command += ["--find-links", str(find_links)]
-    _clean_staging()
+    clean_staging()
     try:
         subprocess.run(command, cwd=ROOT, check=True)
     finally:
-        _clean_staging()
+        clean_staging()
     return root_wheel(output)
 
 

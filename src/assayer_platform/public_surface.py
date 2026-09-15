@@ -21,9 +21,6 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
         "EvidenceHandleRegistry",
         "PluginRegistration",
         "PlatformContext",
-        "PluginCompatibility",
-        "CompatibilityResult",
-        "negotiate_plugin_compatibility",
     }),
     "assayer_platform.contract": frozenset({
         "CheckContract",
@@ -36,7 +33,6 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
         "PlatformContext",
         "PlatformContractError",
         "PluginManifest",
-        "ReviewCheckpoint",
         "WorkItem",
     }),
     "assayer_platform.evaluation": frozenset({
@@ -45,7 +41,6 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     }),
     "assayer_platform.registry": frozenset({"load_plugin_manifest"}),
     "assayer_platform.actionable_result": frozenset({"build_actionable_result"}),
-    "assayer_platform.review_protocol": frozenset({"validate_review_submission"}),
     "assayer_platform.evidence_graph": frozenset({
         "build_candidate_evidence_graph",
         "build_candidate_envelope",
@@ -65,15 +60,6 @@ PUBLIC_SURFACE: dict[str, frozenset[str]] = {
         "PluginContractError",
         "to_json_value",
         "validate_entity_id",
-    }),
-    "assayer_platform.plugin_compatibility": frozenset({
-        "HOST_PROTOCOL_CAPABILITIES",
-        "HOST_SUPPORTED_PROTOCOL_VERSIONS",
-        "HOST_PROTOCOL_VERSION",
-        "HOST_SDK_VERSION",
-        "CompatibilityResult",
-        "PluginCompatibility",
-        "negotiate_plugin_compatibility",
     }),
     "assayer_platform.evidence_handles": frozenset({
         "EvidenceHandle",

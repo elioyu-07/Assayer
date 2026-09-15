@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -12,7 +11,7 @@ from jsonschema import Draft202012Validator, RefResolver
 
 from .contract import CapabilityProfile, PlatformContext, PlatformContractError
 from .provider_registry import ProviderRegistration, _plain
-from .registry import _schema_root
+from .registry import schema_store
 
 
 _LIMITS = ("timeoutMs", "maxBytes", "maxItems", "maxConcurrency")
@@ -61,9 +60,9 @@ class CapabilityNegotiator:
     """Compute the effective profile without allowing any party to widen it."""
 
     def __init__(self) -> None:
-        root = _schema_root()
-        schema = json.loads((root / "capability-negotiation.schema.json").read_text(encoding="utf-8"))
-        common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
+        schemas = schema_store()
+        schema = schemas["capability-negotiation.schema.json"]
+        common = schemas["common.schema.json"]
         self._validator = Draft202012Validator(
             schema,
             resolver=RefResolver(

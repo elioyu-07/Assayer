@@ -35,7 +35,8 @@ from .contract import (
     ProviderFailure,
     ProviderRequest,
     ProviderResponse,
-    ReviewCheckpoint,
+    ProviderSourceDiscovery,
+    ProviderSourceSnapshot,
     PluginManifest,
     WorkFailure,
     WorkItem,
@@ -51,15 +52,6 @@ from .plugin_sdk import (
     validate_entity_id,
 )
 from .evidence_handles import EvidenceHandle, EvidenceHandleRegistry
-from .plugin_compatibility import (
-    HOST_PROTOCOL_CAPABILITIES,
-    HOST_SUPPORTED_PROTOCOL_VERSIONS,
-    HOST_PROTOCOL_VERSION,
-    HOST_SDK_VERSION,
-    CompatibilityResult,
-    PluginCompatibility,
-    negotiate_plugin_compatibility,
-)
 from .evidence_reference import (
     host_evidence_references,
     resolve_evidence_references,
@@ -68,6 +60,7 @@ from .evidence_reference import (
 from .kernel import ArtifactPublisher, DecisionCommitter, DomainPlugin, PlatformKernel, SemanticDecisionProvider
 from .ledger import JsonPlatformLedgerStore, PlatformLedgerStore
 from .reporting import JsonSummaryPublisher
+from .audit_report import render_audit_report
 from .decision import validate_decision_shape
 from .session import InteractivePlatformRun, InteractivePlatformSession
 from .interactive import (
@@ -101,7 +94,7 @@ from .provider_conformance import (
     require_provider_registration_conformance,
 )
 from .capability_negotiation import CapabilityNegotiation, CapabilityNegotiator
-from .provider_execution import BoundCapabilityProvider
+from .provider_execution import BoundCapabilityProvider, ProviderRuntimeLease
 from .provider_package_conformance import inspect_provider_package
 from .provider_installation_conformance import inspect_provider_installation
 from .parallel_execution import ParallelExecutionPlan, ParallelExecutionPlanner
@@ -145,7 +138,6 @@ from .layers import (
     ReviewProtocol,
 )
 from .evidence_collection import EvidenceCollectionPager
-from .review_protocol import REVIEW_DISPOSITIONS, build_review_task, validate_review_submission
 from .delivery_observer import PlatformDeliveryObserver
 from .evidence_graph import (
     CANDIDATE_DISPOSITIONS, EvidenceCandidate, EvidenceGraph, FindingRecord,
@@ -185,13 +177,6 @@ __all__ = [
     "InteractivePluginController",
     "EvidenceHandle",
     "EvidenceHandleRegistry",
-    "HOST_PROTOCOL_CAPABILITIES",
-    "HOST_SUPPORTED_PROTOCOL_VERSIONS",
-    "HOST_PROTOCOL_VERSION",
-    "HOST_SDK_VERSION",
-    "CompatibilityResult",
-    "PluginCompatibility",
-    "negotiate_plugin_compatibility",
     "INTERACTIVE_OPERATIONS",
     "INTERACTIVE_PROTOCOL_VERSION",
     "Operation",
@@ -210,10 +195,12 @@ __all__ = [
     "ProviderFailure",
     "ProviderRequest",
     "ProviderResponse",
-    "ReviewCheckpoint",
+    "ProviderSourceDiscovery",
+    "ProviderSourceSnapshot",
     "PluginManifest",
     "JsonPlatformLedgerStore",
     "JsonSummaryPublisher",
+    "render_audit_report",
     "validate_decision_shape",
     "SemanticDecisionProvider",
     "WorkFailure",
@@ -253,6 +240,7 @@ __all__ = [
     "CapabilityNegotiation",
     "CapabilityNegotiator",
     "BoundCapabilityProvider",
+    "ProviderRuntimeLease",
     "inspect_provider_package",
     "inspect_provider_installation",
     "ParallelExecutionPlan",
@@ -295,9 +283,6 @@ __all__ = [
     "ReviewProtocol",
     "DeliveryObserver",
     "EvidenceCollectionPager",
-    "REVIEW_DISPOSITIONS",
-    "build_review_task",
-    "validate_review_submission",
     "PlatformDeliveryObserver",
     "CANDIDATE_DISPOSITIONS",
     "EvidenceCandidate",

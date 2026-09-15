@@ -22,27 +22,26 @@ PLUGIN_SOURCE = ROOT / "plugins" / "assayer"
 
 
 def _validate_plugin_releases() -> None:
+    """Compile and validate the Frontend Policy Pack source of truth."""
     source_root = str(ROOT / "src")
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from assayer_platform import installed_plugin_registry
-    from assayer_platform.conformance import inspect_plugin_registrations
+    from assayer_platform.conformance import inspect_plugin_package
+    from assayer_platform.simple_plugin_compiler import compile_simple_plugin
 
-    registrations = installed_plugin_registry().list()
-    if not registrations:
-        raise SystemExit(
-            "no ``assayer.plugins`` entry points are installed; install the split "
-            "plugin distributions (packages/assayer-plugin-frontend-audit) before building"
+    with tempfile.TemporaryDirectory(prefix="assayer-frontend-gate-") as directory:
+        generated = Path(directory) / "generated"
+        compile_simple_plugin(
+            ROOT / "plugins" / "frontend-audit",
+            generated,
+            distribution_name="assayer-plugin-frontend-audit",
         )
-    reports = inspect_plugin_registrations(
-        registrations, construct_implementations=True,
-    )
-    failed = [report.as_dict() for report in reports if not report.passed]
-    if failed:
-        raise SystemExit(
-            "installed plugin conformance failed: "
-            + json.dumps(failed, sort_keys=True)
-        )
+        report = inspect_plugin_package(generated)
+        if not report.passed:
+            raise SystemExit(
+                "compiled frontend plugin conformance failed: "
+                + json.dumps(report.as_dict(), sort_keys=True)
+            )
 
 
 def _versions(path: Path) -> tuple[str, str]:
@@ -69,8 +68,9 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
 
     The root ``assayer`` wheel is platform-only and depends on the separately
     built SDK; the plugins and providers ship as their own wheels.  Build the
-    three split wheels first, then resolve the root wheel (plus Playwright and
-    the MCP SDK) against them so no unpublished distribution is fetched.
+    five split wheels first, then resolve the platform-only root wheel (plus
+    Playwright and the MCP SDK) against them so no unpublished distribution is
+    fetched. The resulting runtime wheelhouse contains six Assayer wheels.
     """
     scripts = str(Path(__file__).resolve().parent)
     if scripts not in sys.path:
@@ -81,8 +81,10 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
         wheel_dir, python=python, isolated=False,
         distributions=(
             "assayer-plugin-sdk",
+            "assayer-agent",
             "assayer-plugin-frontend-audit",
             "assayer-provider-markdown",
+            "assayer-provider-browser",
         ),
     )
     build_root(
@@ -141,6 +143,7 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             f"assayer[browser,mcp]=={package_version}",
             "assayer-plugin-frontend-audit",
             "assayer-provider-markdown",
+            "assayer-provider-browser",
         ])
         _run([
             str(venv_python),
@@ -149,19 +152,39 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "plugins=[e.name for e in metadata.entry_points().select(group='assayer.plugins')]; "
             "providers=[e.name for e in metadata.entry_points().select(group='assayer.providers')]; "
             "assert plugins==['assayer.frontend-audit'], plugins; "
-            "assert providers==['markdown'], providers; "
+            "assert sorted(providers)==['browser', 'markdown'], providers; "
             "from assayer_platform import installed_plugin_registry, installed_provider_registry; "
             "installed_plugin_registry().select(plugin_id='assayer.frontend-audit'); "
             "installed_provider_registry().select(capability='document_navigation'); "
             "from assayer_host.core import HostCore; from assayer_host.transport import McpToolTransport; "
             "h=HostCore(); assert len(McpToolTransport(h).list_tools()) == 17",
         ])
-        # Exercise the exact product launcher from a clean private cache. MCP
-        # receives EOF immediately, so this validates bundle metadata,
-        # integrity, offline runtime creation, and stdio startup without
-        # opening a browser or running an audit.
+        # Exercise explicit runtime preparation followed by the lightweight
+        # product launcher from a clean private cache. MCP receives EOF
+        # immediately, so this validates both phases without opening a browser
+        # or running an audit.
         launcher_env = os.environ.copy()
         launcher_env["XDG_CACHE_HOME"] = str(Path(tmp) / "launcher-cache")
+        subprocess.run(
+            [str(release_root / "scripts" / "prepare_assayer_runtime")],
+            cwd=release_root,
+            env=launcher_env,
+            timeout=60,
+            check=True,
+        )
+        prepared_runtime = (
+            Path(launcher_env["XDG_CACHE_HOME"])
+            / "assayer"
+            / f"runtime-{plugin_version}"
+            / "venv"
+        )
+        _run([
+            str(prepared_runtime / "bin" / "python"),
+            "-c",
+            "from importlib import metadata; "
+            "providers={e.name for e in metadata.entry_points().select(group='assayer.providers')}; "
+            "assert providers == {'browser', 'markdown'}, providers",
+        ])
         subprocess.run(
             [str(release_root / "scripts" / "launch_assayer_mcp")],
             cwd=release_root,

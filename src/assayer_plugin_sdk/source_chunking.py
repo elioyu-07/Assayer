@@ -54,7 +54,7 @@ def build_source_chunks(
                 first_line, last_line = pending[0][0], pending[-1][0]
                 if document_id is None:
                     # Preserve the historical single-document identity so
-                    # existing resumable Runs keep their checkpoint refs.
+                    # existing resumable Runs keep stable source references.
                     chunk_id = f"source:{source_digest[:12]}:{block_index}:{len(chunks) + 1}"
                 else:
                     document_token = re.sub(r"[^A-Za-z0-9_-]+", "-", str(document_id))[:24]

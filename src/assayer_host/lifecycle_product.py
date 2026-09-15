@@ -12,9 +12,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Callable
 
-from jsonschema import Draft202012Validator, RefResolver
+from jsonschema import Draft202012Validator
 
-from .errors import HostError
 from .lifecycle_transaction import PluginLifecycleClient, PluginLifecycleTransaction
 from .release_lifecycle import PluginInstallation, PluginLifecyclePlanner
 from .resources import default_schema_root
@@ -332,112 +331,7 @@ class LifecycleProductController:
         }
 
 
-class LifecycleProductToolTransport:
-    """MCP-shaped two-stage surface; authorization remains controller-owned."""
-
-    _SCHEMAS = {
-        "plan_plugin_change": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["operation"],
-            "properties": {
-                "operation": {"enum": ["upgrade", "rollback", "uninstall"]},
-            },
-        },
-        "execute_plugin_change": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["planToken", "confirmed"],
-            "properties": {
-                "planToken": {"type": "string", "pattern": "^lifecycle-token-[0-9a-f]{64}$"},
-                "confirmed": {"const": True},
-            },
-        },
-    }
-
-    def __init__(self, controller: LifecycleProductController) -> None:
-        self._controller = controller
-        self._result_validator = _product_result_validator()
-
-    def list_tools(self) -> list[dict]:
-        return [
-            {
-                "name": "plan_plugin_change",
-                "description": (
-                    "Create a fail-closed Assayer upgrade, rollback, or uninstall plan. "
-                    "This stage does not change the Codex plugin installation."
-                ),
-                "inputSchema": self._SCHEMAS["plan_plugin_change"],
-                "annotations": {
-                    "readOnlyHint": False,
-                    "destructiveHint": False,
-                    "idempotentHint": False,
-                    "openWorldHint": False,
-                },
-            },
-            {
-                "name": "execute_plugin_change",
-                "description": (
-                    "Execute one previously displayed Assayer lifecycle plan. Call only after explicit "
-                    "user confirmation; the controller also requires trusted external authorization."
-                ),
-                "inputSchema": self._SCHEMAS["execute_plugin_change"],
-                "annotations": {
-                    "readOnlyHint": False,
-                    "destructiveHint": True,
-                    "idempotentHint": True,
-                    "openWorldHint": False,
-                },
-            },
-        ]
-
-    def call_tool(self, name: str, arguments: object) -> dict:
-        schema = self._SCHEMAS.get(name)
-        if schema is None:
-            raise HostError("UNKNOWN_TOOL", "The lifecycle product tool does not exist")
-        if not isinstance(arguments, dict) or next(Draft202012Validator(schema).iter_errors(arguments), None):
-            raise HostError("INVALID_REQUEST", "Lifecycle product arguments do not satisfy the tool schema")
-        if name == "plan_plugin_change":
-            result = self._controller.plan(arguments["operation"])
-        else:
-            result = self._controller.execute(arguments["planToken"], confirmed=arguments["confirmed"])
-        validation_error = next(self._result_validator.iter_errors(result), None)
-        if validation_error is not None:
-            raise HostError(
-                "INTERNAL_FAILURE",
-                "Lifecycle product output does not satisfy the published result contract",
-            )
-        public = {"status": "ok", "result": result}
-        return {
-            "structuredContent": public,
-            "content": [{"type": "text", "text": json.dumps(public, separators=(",", ":"))}],
-            "isError": False,
-        }
-
-
 def _plan_schema() -> dict:
     return json.loads(
         (default_schema_root() / "plugin-lifecycle-plan.schema.json").read_text(encoding="utf-8")
-    )
-
-
-def _product_result_validator() -> Draft202012Validator:
-    root = default_schema_root()
-    filenames = (
-        "plugin-lifecycle-product.schema.json",
-        "plugin-lifecycle-plan.schema.json",
-        "plugin-lifecycle-transaction.schema.json",
-    )
-    schemas = {
-        filename: json.loads((root / filename).read_text(encoding="utf-8"))
-        for filename in filenames
-    }
-    store = {
-        key: schema
-        for filename, schema in schemas.items()
-        for key in (filename, schema["$id"])
-    }
-    schema = schemas[filenames[0]]
-    return Draft202012Validator(
-        schema, resolver=RefResolver(schema["$id"], schema, store=store),
     )

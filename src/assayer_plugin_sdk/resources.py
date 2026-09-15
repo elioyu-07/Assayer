@@ -7,8 +7,8 @@ importing :mod:`assayer_platform`, so an installed plugin needs only the SDK.
 Resolution order:
 
 1. ``ASSAYER_SDK_SCHEMA_ROOT`` when set (must be an existing directory);
-2. the schema directory bundled next to this module (``assayer_plugin_sdk/schemas``);
-3. the repository ``schemas/`` directory (development checkout only).
+2. the canonical schema directory bundled next to this module
+   (``assayer_plugin_sdk/schemas``).
 """
 
 from __future__ import annotations
@@ -35,12 +35,9 @@ def schema_root() -> Path:
     bundled = _PACKAGE_ROOT / "schemas"
     if bundled.is_dir():
         return bundled
-    repo = _PACKAGE_ROOT.parents[1] / "schemas"
-    if repo.is_dir():
-        return repo
     raise PluginContractError(
-        "Plugin SDK schemas are unavailable; install the assayer-plugin-sdk package "
-        "or set ASSAYER_SDK_SCHEMA_ROOT",
+        "Plugin SDK schemas are unavailable; reinstall assayer-plugin-sdk or set "
+        "ASSAYER_SDK_SCHEMA_ROOT",
         code="SDK_SCHEMA_ROOT_UNAVAILABLE",
     )
 

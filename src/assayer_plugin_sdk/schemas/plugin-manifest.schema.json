@@ -4,7 +4,7 @@
   "title": "AssayerPluginManifest",
   "type": "object",
   "additionalProperties": false,
-  "required": ["pluginId", "version", "platformApiVersion", "domains", "subjectKinds", "checks", "executionProfile"],
+  "required": ["pluginId", "version", "platformApiVersion", "compatibility", "domains", "subjectKinds", "checks", "executionProfile"],
   "properties": {
     "pluginId": { "$ref": "common.schema.json#/$defs/entityId" },
     "version": { "$ref": "common.schema.json#/$defs/semanticVersion" },
@@ -12,6 +12,7 @@
     "compatibility": {
       "type": "object",
       "additionalProperties": false,
+      "required": ["protocolMinVersion", "protocolMaxVersion", "sdkMinVersion", "sdkMaxVersion"],
       "properties": {
         "protocolMinVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
         "protocolMaxVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
@@ -46,14 +47,13 @@
     "executionProfile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["discoverBatching", "inspectBatching", "decisionBatching", "parallelism", "cacheReuse", "checkpoint"],
+      "required": ["discoverBatching", "inspectBatching", "decisionBatching", "parallelism", "cacheReuse"],
       "properties": {
         "discoverBatching": { "enum": ["allowed", "forbidden"] },
         "inspectBatching": { "enum": ["allowed", "forbidden"] },
         "decisionBatching": { "enum": ["allowed", "forbidden"] },
         "parallelism": { "enum": ["allowed", "forbidden"] },
         "cacheReuse": { "enum": ["allowed", "forbidden"] },
-        "checkpoint": { "enum": ["required", "optional"] },
         "maxBatchSize": { "type": "integer", "minimum": 1 },
         "ordering": { "enum": ["independent", "declared", "strict"] },
         "failureSplitting": { "enum": ["allowed", "forbidden"] }

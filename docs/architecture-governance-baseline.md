@@ -4,9 +4,17 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-05 |
-| Status | Current-state baseline; implementation not started |
+| Status | Historical baseline; superseded by the compiler-owned hard cut |
 | Scope | Repository architecture and dependency ownership |
 | Evidence | Source tree and import relationships in `src/` |
+
+This is a factual snapshot of the low-level SDK/Advanced SPI implementation.
+Its intended plugin-authoring statements are superseded by Platform
+Constitution v1.1 and
+[Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).
+The Frontend compatibility package described below has since been deleted;
+`plugins/frontend-audit/` and `assayer-provider-browser` are the current plugin
+and source-provider boundaries.
 
 ## 1. Purpose
 
@@ -40,8 +48,9 @@ The code already contains most of the following logical layers:
    interactive sessions, and run contracts.
 2. **Capability and provider layer**: provider descriptors, negotiation,
    bounded provider execution, and the Markdown navigation provider.
-3. **Plugin contract layer**: plugin manifests, checks, execution profiles,
-   registration, package conformance, and entry-point discovery.
+3. **Plugin contract layer**: currently contains manifests, execution profiles,
+   registration, package conformance, and entry-point discovery; the target SDK
+   compiler generates these from Simple domain declarations.
 4. **Decision and result layer**: decision validation, evidence claims,
    canonical results, staged delivery, and result conformance.
 5. **Host runtime layer**: browser sessions, actions, evidence capture,

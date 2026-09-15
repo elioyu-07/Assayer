@@ -31,8 +31,8 @@ except ImportError:  # pragma: no cover - optional dependency
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-PACKAGE = ROOT / "tests" / "fixtures" / "plugins" / "minimal"
-PLUGIN_ID = "test-minimal"
+POLICY_PACKAGE = ROOT / "tests" / "fixtures" / "plugins" / "policy-pack"
+PLUGIN_ID = "test.policy-pack"
 
 _SERVER_BOOTSTRAP = (
     "import sys; from assayer_host.transport import mcp_main; sys.exit(mcp_main())"
@@ -53,6 +53,47 @@ def _envelope(result) -> dict:
     return json.loads(result.content[0].text)
 
 
+def _review_submission(task: dict) -> dict:
+    decisions = []
+    for item in task["items"]:
+        support = {"refs": item["support"]}
+        if item["kind"] == "dimension":
+            value = {
+                "dimension": item["dimension"],
+                "verdict": "violated",
+                "reason": "The required overview is absent from the frozen document.",
+                "applicability": {"state": "applicable"},
+                "confidence": {"level": "high"},
+                "support": support,
+            }
+        elif item["kind"] == "candidate":
+            value = {
+                "disposition": "confirmed",
+                "reason": "The candidate is confirmed by the complete document snapshot.",
+                "support": support,
+                "finding": {
+                    "title": item["subject"],
+                    "message": item["message"],
+                    "severity": item["severity"],
+                    "recommendation": item["recommendation"],
+                    "support": support,
+                },
+            }
+        else:
+            value = {
+                "relationship": item["relationship"],
+                "verdict": "rejected",
+                "reason": "The declared relationship is not satisfied.",
+                "applicability": {"state": "applicable"},
+                "confidence": {"level": "high"},
+                "support": support,
+            }
+        decisions.append({
+            "itemRef": item["itemRef"], "kind": item["kind"], "value": value,
+        })
+    return {"decisions": decisions}
+
+
 class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
     """Drive ``assayer-mcp`` over a real stdio MCP connection."""
 
@@ -61,11 +102,18 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = str(Path(directory) / "store")
             output_root = str(Path(directory) / "out")
-            sample = Path(directory) / "sample.json"
-            sample.write_text(json.dumps({"name": "sample"}), encoding="utf-8")
-            asyncio.run(self._journey(store, output_root, sample))
+            sample = Path(directory) / "sample.md"
+            sample.write_text(
+                "# Delivery notes\n\nImplementation details without an introductory summary.\n",
+                encoding="utf-8",
+            )
+            policy = Path(directory) / "policy"
+            shutil.copytree(POLICY_PACKAGE, policy)
+            asyncio.run(self._journey(store, output_root, sample, policy))
 
-    async def _journey(self, store: str, output_root: str, sample: Path) -> None:
+    async def _journey(
+        self, store: str, output_root: str, sample: Path, policy: Path,
+    ) -> None:
         params = StdioServerParameters(
             command=sys.executable,
             args=["-c", _SERVER_BOOTSTRAP, "--store", store, "--output-root", output_root],
@@ -74,13 +122,35 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                await self._drive(session, sample)
+                await self._drive(session, sample, policy)
 
-    async def _drive(self, session: ClientSession, sample: Path) -> None:
-        tools = {tool.name for tool in (await session.list_tools()).tools}
+    async def _drive(
+        self, session: ClientSession, sample: Path, policy: Path,
+    ) -> None:
+        listed_tools = (await session.list_tools()).tools
+        tools = {tool.name for tool in listed_tools}
         self.assertTrue(
-            {"list_plugins", "get_plugin_info", "plan_plugin_change", "execute_plugin_change"} <= tools,
+            {
+                "verify_plugin_source", "list_plugins", "get_plugin_info",
+                "plan_plugin_change", "execute_plugin_change",
+            } <= tools,
         )
+        annotations = {tool.name: tool.annotations for tool in listed_tools}
+        self.assertTrue(annotations["plan_plugin_change"].readOnlyHint)
+        self.assertFalse(annotations["plan_plugin_change"].destructiveHint)
+        self.assertFalse(annotations["execute_plugin_change"].readOnlyHint)
+        self.assertTrue(annotations["execute_plugin_change"].destructiveHint)
+        self.assertFalse(annotations["apply_plugin_change"].readOnlyHint)
+        self.assertFalse(annotations["verify_plugin_source"].readOnlyHint)
+        self.assertFalse(annotations["verify_plugin_source"].destructiveHint)
+
+        verified = _envelope(await session.call_tool(
+            "verify_plugin_source", {"source": str(policy)},
+        ))
+        verification = verified["structuredContent"]["result"]
+        self.assertEqual(verification["status"], "passed", verification)
+        self.assertEqual(verification["pluginId"], "test.policy-pack")
+        self.assertTrue(Path(verification["wheel"]).is_file())
 
         async def plugin_ids():
             listing = _envelope(await session.call_tool("list_plugins", {}))
@@ -91,9 +161,9 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
 
         self.assertNotIn(PLUGIN_ID, await plugin_ids())
 
-        # plan -> confirm -> execute: install a local package.
+        # plan -> confirm -> execute: compile and install the verified Policy Pack.
         planned = _envelope(await session.call_tool(
-            "plan_plugin_change", {"operation": "install", "plugin": str(PACKAGE)},
+            "plan_plugin_change", {"operation": "install", "plugin": str(policy)},
         ))
         self.assertEqual(planned["structuredContent"]["result"]["plan"]["status"], "ready")
         token = planned["structuredContent"]["result"]["token"]
@@ -105,11 +175,16 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
 
         # Same connection now sees the freshly installed plugin.
         self.assertIn(PLUGIN_ID, await plugin_ids())
+        templates = (await session.list_resource_templates()).resourceTemplates
+        self.assertIn(
+            "assayer://plugins/{plugin_id}/checks/{check_id}/{check_version}/semantic-instructions",
+            {str(item.uriTemplate) for item in templates},
+        )
 
         # The freshly installed plugin is runnable in this same connection.
         started = await session.call_tool("start_plugin_run", {
-            "pluginId": PLUGIN_ID, "checkId": "TST-001",
-            "scope": {"files": [{"path": str(sample), "requiredKeys": ["name"]}]},
+            "pluginId": PLUGIN_ID, "checkId": "POLICY-001",
+            "scope": {"files": [{"path": str(sample)}]},
         })
         self.assertFalse(started.isError)
         started_result = _envelope(started)["structuredContent"]["result"]
@@ -119,18 +194,27 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
         advanced_result = advanced["structuredContent"]["result"]
         self.assertEqual(advanced_result["status"], "awaiting_agent_decision")
         task = advanced_result["result"]["semanticTask"]
-        self.assertEqual(task["kind"], "domain_review")
+        self.assertEqual(task["kind"], "common_review")
         self.assertNotIn("workItemId", task)
+        self.assertEqual(
+            advanced_result["result"]["workflow"]["requiredNextStep"],
+            "submit_common_review",
+        )
+        semantic_uri = task["semanticInstructions"]["uri"]
+        self.assertEqual(
+            semantic_uri,
+            f"assayer://plugins/{PLUGIN_ID}/checks/POLICY-001/1.0.0/semantic-instructions",
+        )
+        semantic_resource = await session.read_resource(semantic_uri)
+        self.assertEqual(len(semantic_resource.contents), 1)
+        self.assertEqual(
+            semantic_resource.contents[0].text,
+            (policy / "semantic-review.md").read_text(
+                encoding="utf-8",
+            ),
+        )
         terminal = _envelope(await session.call_tool("advance_plugin_run", {
-            "domainResult": {
-                "result": "scanned_no_issue",
-                "findings": [{
-                    "dimension": "required_keys",
-                    "status": "satisfied",
-                    "reason": "The requested key is present.",
-                }],
-                "reason": "The reviewed configuration satisfies the check.",
-            },
+            "reviewSubmission": _review_submission(task),
         }))
         terminal_result = terminal["structuredContent"]["result"]
         self.assertEqual(terminal_result["status"], "completed")
@@ -145,8 +229,8 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
 
         # Upgrade and roll back without restarting the MCP server. The package
         # is local here so the test remains deterministic and offline.
-        package_v2 = sample.parent / "test-minimal-1.1.0"
-        _copy_fixture_version(package_v2, "1.1.0")
+        package_v2 = sample.parent / "policy-pack-1.1.0"
+        _copy_policy_version(policy, package_v2, "1.1.0")
         upgraded_plan = _envelope(await session.call_tool("plan_plugin_change", {
             "operation": "upgrade", "plugin": str(package_v2),
         }))
@@ -193,21 +277,16 @@ class PluginLifecycleStdioIntegrationTest(unittest.TestCase):
         self.assertIn("not registered", rejected.content[0].text)
 
 
-def _copy_fixture_version(destination: Path, version: str) -> None:
-    """Create a descriptor/manifest-consistent local release for lifecycle tests."""
-    shutil.copytree(PACKAGE, destination)
-    descriptor_path = destination / "assayer-plugin-release.json"
-    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    descriptor["pluginVersion"] = version
-    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
-    manifest_path = destination / "src" / "minimal_plugin" / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["version"] = version
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    metadata = destination / "pyproject.toml"
-    metadata.write_text(metadata.read_text(encoding="utf-8").replace(
-        'version = "1.0.0"', f'version = "{version}"',
-    ), encoding="utf-8")
+def _copy_policy_version(source: Path, destination: Path, version: str) -> None:
+    """Create a business-version variant of an ordinary Policy Pack."""
+    shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".assayer"))
+    declaration = destination / "plugin.yaml"
+    declaration.write_text(
+        declaration.read_text(encoding="utf-8").replace(
+            "version: 1.0.0", f"version: {version}",
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

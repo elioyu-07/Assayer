@@ -18,18 +18,28 @@
           "checkId",
           "checkVersion",
           "completedRuns",
-          "domainResultSubmissions",
           "agentCorrections",
           "ledgerPaths",
           "resumeVerified",
           "replayVerified",
           "terminalPublicationVerified"
         ],
+        "oneOf": [
+          {
+            "required": ["domainResultSubmissions"],
+            "not": { "required": ["reviewBatchSubmissions"] }
+          },
+          {
+            "required": ["reviewBatchSubmissions"],
+            "not": { "required": ["domainResultSubmissions"] }
+          }
+        ],
         "properties": {
           "checkId": { "$ref": "common.schema.json#/$defs/ruleId" },
           "checkVersion": { "$ref": "common.schema.json#/$defs/semanticVersion" },
           "completedRuns": { "type": "integer", "minimum": 1 },
           "domainResultSubmissions": { "type": "integer", "minimum": 1 },
+          "reviewBatchSubmissions": { "type": "integer", "minimum": 1 },
           "agentCorrections": { "const": 0 },
           "ledgerPaths": {
             "type": "array",

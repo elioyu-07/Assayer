@@ -2,8 +2,8 @@
 
 This module is the transport-independent controller for Agent-driven plugin
 runs.  It deliberately knows only about WorkItems, InvestigationPackets and
-DecisionProposals; browser concepts remain in the frontend compatibility
-adapter.  MCP/CLI transports can wrap this controller without duplicating
+DecisionProposals; browser concepts remain behind the browser capability
+provider. MCP/CLI transports can wrap this controller without duplicating
 lifecycle or validation rules.
 """
 
@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -21,18 +22,19 @@ from typing import Any, Callable
 
 from jsonschema import Draft202012Validator
 
-from .agent_contract import AgentContractBundle, DomainResultContract
+from .agent_contract import DomainResultContract
 from .capability_negotiation import CapabilityNegotiator
 from .contract import (
     CapabilityProfile,
     CommitReceipt,
     DecisionProposal,
+    DimensionObservation,
     Finding,
     InvestigationPacket,
+    PlatformLedger,
     PlatformContext,
     PlatformContractError,
     PlatformRunResult,
-    ReviewCheckpoint,
     WorkFailure,
     WorkItem,
 )
@@ -41,6 +43,7 @@ from .provider_execution import BoundCapabilityProvider
 from .provider_registry import ProviderRegistry
 from .plugin_sdk import to_json_value, validate_entity_id
 from .result_delivery import StagedResultDocument
+from .audit_report import render_audit_report
 from .canonical_result import validate_canonical_result
 from .actionable_result import extract_result_delivery
 from .evidence_graph import validate_candidate_evidence_graph_projection
@@ -51,11 +54,25 @@ from .error_policy import (
     boundary_error_policy,
 )
 from .ledger import JsonPlatformLedgerStore, workflow_progress
+from .incremental_review import (
+    JsonCoverageLedgerStore,
+    ReviewAtom,
+    append_legacy_domain_result,
+    ensure_legacy_domain_results,
+)
+from .incremental_review_runtime import IncrementalReviewCoordinator
+from .common_review_decision import assemble_common_review_decisions
+from .common_review import COMMON_REVIEW_CONTRACT
+from .compiled_review_plan import compile_review_items
+from .document_source import DocumentSnapshotStore, HostDocumentSource
 from .ownership import RunOwnership
 from .session import InteractivePlatformRun, InteractivePlatformSession
 from .task_context import TaskContext
 from .evidence_handles import EvidenceHandleRegistry
-from .plugin_compatibility import HOST_PROTOCOL_VERSION, negotiate_plugin_compatibility
+from assayer_plugin_sdk.plugin_compatibility import HOST_PROTOCOL_VERSION, negotiate_plugin_compatibility
+from assayer_plugin_sdk.browser import BrowserSnapshot
+from assayer_plugin_sdk.simple import Document
+from assayer_plugin_sdk.simple_compiler import InvariantProgram, compile_invariants
 
 
 INTERACTIVE_PROTOCOL_VERSION = ".".join(HOST_PROTOCOL_VERSION.split(".")[:2])
@@ -68,81 +85,433 @@ INTERACTIVE_OPERATIONS = (
     "inspect",
     "recover",
     "progress",
-    # Checkpoint, Decision, and finish methods remain private Host primitives;
-    # they are intentionally absent from the Agent-facing operation catalog.
 )
 
 _LOG = logging.getLogger(__name__)
 
 DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE = 20
 MAX_EVIDENCE_COLLECTION_PAGE_SIZE = 100
+INITIAL_SEMANTIC_EVIDENCE_PREVIEW_SIZE = 4
+# Agent-facing semantic tasks are deliberately much smaller than the durable
+# InvestigationPacket.  The full packet remains in the Host ledger; this
+# limit protects the transport/client boundary from accidentally rendering a
+# complete source corpus in one turn.
+AGENT_TASK_PAYLOAD_LIMIT = 24 * 1024
+AGENT_VALUE_STRING_LIMIT = 512
+AGENT_VALUE_ARRAY_LIMIT = 80
 
-INTERACTIVE_CHECKPOINT_INPUT_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "required": ["workItemId", "collectionId", "itemIds", "payload"],
-    "properties": {
-        "workItemId": {"type": "string", "minLength": 1},
-        "collectionId": {"type": "string", "minLength": 1},
-        "itemIds": {
-            "type": "array", "minItems": 1,
-            "maxItems": MAX_EVIDENCE_COLLECTION_PAGE_SIZE, "uniqueItems": True,
-            "items": {"type": "string", "minLength": 1},
-        },
-        "payload": {"type": "object"},
-        "supersedesCheckpointId": {"type": "string", "minLength": 1},
-        "contractDigest": {
-            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
-        },
-        "taskDigest": {
-            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
-        },
-    },
-}
 
-INTERACTIVE_DECISION_INPUT_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "required": ["workItemId", "result", "findings", "reason"],
-    "properties": {
-        "workItemId": {"type": "string", "minLength": 1},
-        "result": {
-            "enum": [
-                "issue_found", "scanned_no_issue", "not_applicable",
-                "needs_review", "noise",
-            ],
-        },
-        "reason": {"type": "string", "minLength": 1},
-        "findings": {
-            "type": "array", "minItems": 1,
-            "items": {
-                "type": "object", "additionalProperties": False,
-                "required": ["dimension", "status", "reason"],
-                "properties": {
-                    "dimension": {"type": "string", "minLength": 1},
-                    "status": {
-                        "enum": [
-                            "satisfied", "violated", "unresolved", "blocked",
-                            "conflicted",
-                        ],
-                    },
-                    "reason": {"type": "string", "minLength": 1},
+def _simple_document_from_packet(
+    packet: InvestigationPacket, snapshot_store: DocumentSnapshotStore,
+) -> Document:
+    """Create the author-facing Document only from one Host-frozen source snapshot."""
+    snapshots: list[tuple[str, Mapping[str, Any]]] = []
+    for evidence in packet.evidence:
+        if not isinstance(evidence.payload, Mapping):
+            continue
+        value = evidence.payload.get("documentSnapshot")
+        if value is not None:
+            if not isinstance(value, Mapping):
+                raise PlatformContractError(
+                    "INVALID_DOCUMENT_SNAPSHOT",
+                    "The frozen documentSnapshot must be an object",
+                    work_item_id=packet.work_item.work_item_id,
+                )
+            snapshots.append((evidence.evidence_id, value))
+    if not snapshots:
+        raise PlatformContractError(
+            "SIMPLE_DOCUMENT_SNAPSHOT_REQUIRED",
+            "A Simple plugin requires one Host-owned frozen documentSnapshot",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    if len(snapshots) != 1:
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT",
+            "A Simple plugin WorkItem must have exactly one frozen documentSnapshot",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    evidence_id, snapshot = snapshots[0]
+    if set(snapshot) != {"snapshotId", "closed", "lineCount", "chunkCount"}:
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT",
+            "documentSnapshot index does not match its Host contract",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    snapshot_id = snapshot["snapshotId"]
+    if not isinstance(snapshot_id, str):
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT", "documentSnapshot identity is malformed",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    frozen, chunks = snapshot_store.load(snapshot_id)
+    if (
+        frozen.closed is not snapshot["closed"]
+        or len(frozen.text.splitlines()) != snapshot["lineCount"]
+        or len(chunks) != snapshot["chunkCount"]
+        or hashlib.sha256(frozen.text.encode("utf-8")).hexdigest()
+        != packet.work_item.state_digest
+    ):
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT",
+            "documentSnapshot index differs from its frozen content",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    indexed_chunks = packet.evidence[
+        next(index for index, item in enumerate(packet.evidence) if item.evidence_id == evidence_id)
+    ].payload.get("sourceChunks")
+    expected_index = snapshot_store.packet_index(
+        chunks, work_item_id=packet.work_item.work_item_id,
+    )
+    if _plain(indexed_chunks) != expected_index:
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT",
+            "documentSnapshot chunk index differs from its frozen content",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    coverage_refs = tuple(
+        item.evidence_id
+        for item in packet.evidence
+        if isinstance(item.payload, Mapping)
+        and item.payload.get("documentCoverage") == {
+            "snapshotId": snapshot_id, "closed": frozen.closed,
+        }
+    )
+    if len(coverage_refs) != 1:
+        raise PlatformContractError(
+            "INVALID_DOCUMENT_SNAPSHOT",
+            "documentSnapshot requires one matching closed-scope coverage record",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    return Document._from_snapshot(
+        frozen.text,
+        evidence_refs=(evidence_id,),
+        closed=frozen.closed,
+        chunks=tuple({
+            "anchor": indexed["source_chunk_id"],
+            "startLine": item.start_line,
+            "endLine": item.end_line,
+            "text": item.text,
+            "headingPath": item.heading_path,
+        } for indexed, item in zip(expected_index, chunks)),
+        coverage_refs=coverage_refs,
+    )
+
+
+def _simple_browser_document_from_packet(packet: InvestigationPacket) -> Document:
+    """Create a Simple ``Document`` view from one Host-issued browser Evidence."""
+    records = tuple(
+        evidence for evidence in packet.evidence
+        if evidence.kind == "browser_snapshot"
+    )
+    if len(records) != 1:
+        raise PlatformContractError(
+            "SIMPLE_BROWSER_SNAPSHOT_REQUIRED",
+            "A Simple browser plugin requires exactly one Host browser snapshot",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    evidence = records[0]
+    payload = evidence.payload
+    if not isinstance(payload, Mapping) or payload.get("format") != "browser_snapshot":
+        raise PlatformContractError(
+            "INVALID_BROWSER_SNAPSHOT",
+            "The browser Evidence payload does not match its published format",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    field_map = {
+        "visible_text": "visibleText",
+        "entrypoints": "entrypoints",
+        "candidates": "candidates",
+        "network_summary": "networkSummary",
+        "route": "route",
+        "state_kind": "stateKind",
+        "structure_summary": "structureSummary",
+        "active_tab": "activeTab",
+        "dom_digest": "domDigest",
+        "visual_digest": "visualDigest",
+        "state_digest": "stateDigest",
+        "url": "url",
+        "origin": "origin",
+        "title": "title",
+    }
+    try:
+        snapshot = BrowserSnapshot(**{
+            field: payload[key] for field, key in field_map.items()
+        })
+    except (KeyError, TypeError, PlatformContractError) as error:
+        raise PlatformContractError(
+            "INVALID_BROWSER_SNAPSHOT",
+            "The browser Evidence payload cannot be reconstructed as a frozen snapshot",
+            work_item_id=packet.work_item.work_item_id,
+        ) from error
+    if snapshot.url != packet.work_item.identity or snapshot.state_digest != packet.work_item.state_digest:
+        raise PlatformContractError(
+            "INVALID_BROWSER_SNAPSHOT",
+            "The browser Evidence snapshot does not match its WorkItem state",
+            work_item_id=packet.work_item.work_item_id,
+        )
+    return Document._from_browser_snapshot(
+        snapshot,
+        evidence_refs=(evidence.evidence_id,),
+    )
+
+
+def _simple_browser_packets(
+    work_items: Sequence[WorkItem], check: Any, provider: BoundCapabilityProvider,
+) -> tuple[InvestigationPacket, ...]:
+    """Collect Host-owned browser Evidence and build generic Simple packets."""
+    capabilities = tuple(check.required_capabilities)
+    if len(capabilities) != 1 or capabilities[0] != "browser_snapshot":
+        raise PlatformContractError(
+            "SIMPLE_BROWSER_CAPABILITY_INVALID",
+            "A browser Simple Check must require exactly browser_snapshot",
+        )
+    packets: list[InvestigationPacket] = []
+    for item in work_items:
+        try:
+            collected = provider.collect(item, check, "browser_snapshot")
+        except PlatformContractError:
+            raise
+        except Exception as error:
+            raise PlatformContractError(
+                "PROVIDER_FACTS_UNAVAILABLE",
+                "The browser provider failed while collecting the frozen snapshot",
+                work_item_id=item.work_item_id,
+            ) from error
+        if collected.failure is not None:
+            raise PlatformContractError(
+                f"PROVIDER_{collected.failure.code.upper()}",
+                collected.failure.message,
+                work_item_id=item.work_item_id,
+            )
+        if not collected.evidence:
+            raise PlatformContractError(
+                "PROVIDER_EVIDENCE_MISSING",
+                "The browser provider returned no Evidence for the WorkItem",
+                work_item_id=item.work_item_id,
+            )
+        refs = tuple(record.evidence_id for record in collected.evidence)
+        dimensions = tuple(
+            DimensionObservation(
+                dimension,
+                ("A frozen browser snapshot is available for semantic review.",),
+                refs,
+                "unresolved",
+            )
+            for dimension in check.dimensions
+        )
+        packets.append(InvestigationPacket(
+            item,
+            check.check_id,
+            check.version,
+            dimensions,
+            tuple(collected.evidence),
+            "not_required",
+        ))
+    return tuple(packets)
+
+
+def _simple_declaration(plugin: Any) -> Mapping[str, Any] | None:
+    value = getattr(plugin, "_assayer_simple_declaration", None)
+    adapter = getattr(plugin, "_assayer_compile_scan", None)
+    if value is None and not callable(adapter):
+        return None
+    if not isinstance(value, Mapping) or not callable(adapter):
+        raise PlatformContractError(
+            "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+            "Simple plugin declaration and generated scan bridge must be present together",
+        )
+    input_kind = value.get("input")
+    if not isinstance(input_kind, str) or not input_kind.strip():
+        raise PlatformContractError(
+            "INVALID_SIMPLE_PLUGIN", "Simple plugin input kind is required",
+        )
+    return value
+
+
+def _simple_invariants(plugin: Any) -> InvariantProgram:
+    """Compile the plugin's bound invariant methods into one Host program."""
+    methods = tuple(
+        getattr(plugin, name) for name in dir(plugin)
+        if callable(getattr(plugin, name, None))
+        and hasattr(getattr(plugin, name), "_assayer_invariant_declaration")
+    )
+    return compile_invariants(methods)
+
+
+def _common_review_evidence_content(
+    run: InteractivePlatformRun,
+    bindings: Sequence[tuple[str, str]],
+    snapshot_store: DocumentSnapshotStore,
+) -> dict[str, Any]:
+    """Build an allowlisted expansion view only for the current batch refs."""
+    requested = {internal_ref for _public_ref, internal_ref in bindings}
+    content: dict[str, Any] = {}
+    for packet in run.investigations.values():
+        for evidence in packet.evidence:
+            payload = evidence.payload if isinstance(evidence.payload, Mapping) else {}
+            snapshot_index = payload.get("documentSnapshot")
+            coverage = payload.get("documentCoverage")
+            if evidence.evidence_id in requested:
+                if isinstance(snapshot_index, Mapping):
+                    content[evidence.evidence_id] = {
+                        "kind": "document",
+                        "closed": snapshot_index.get("closed"),
+                        "lineCount": snapshot_index.get("lineCount"),
+                        "chunkCount": snapshot_index.get("chunkCount"),
+                    }
+                elif isinstance(coverage, Mapping):
+                    content[evidence.evidence_id] = {
+                        "kind": "document_coverage",
+                        "closed": coverage.get("closed"),
+                    }
+            raw_chunks = payload.get("sourceChunks", ())
+            if not isinstance(raw_chunks, (tuple, list)):
+                continue
+            requested_chunks = {
+                str(item.get("source_chunk_id"))
+                for item in raw_chunks
+                if isinstance(item, Mapping)
+                and str(item.get("source_chunk_id") or "") in requested
+            }
+            if not requested_chunks:
+                continue
+            frozen_chunks: dict[str, Any] = {}
+            if isinstance(snapshot_index, Mapping) and isinstance(
+                snapshot_index.get("snapshotId"), str,
+            ):
+                _snapshot, stored = snapshot_store.load(snapshot_index["snapshotId"])
+                frozen_chunks = {
+                    indexed["source_chunk_id"]: item
+                    for indexed, item in zip(
+                        snapshot_store.packet_index(
+                            stored, work_item_id=packet.work_item.work_item_id,
+                        ),
+                        stored,
+                    )
+                }
+            for raw_chunk in raw_chunks:
+                if not isinstance(raw_chunk, Mapping):
+                    continue
+                chunk_id = str(raw_chunk.get("source_chunk_id") or "")
+                if chunk_id not in requested_chunks:
+                    continue
+                stored = frozen_chunks.get(chunk_id)
+                if stored is not None:
+                    content[chunk_id] = {
+                        "text": stored.text,
+                        "lineRange": {
+                            "start": stored.start_line, "end": stored.end_line,
+                        },
+                        "headingPath": list(stored.heading_path),
+                    }
+                    continue
+                excerpt = raw_chunk.get("excerpt") or raw_chunk.get("content")
+                if isinstance(excerpt, str):
+                    start = raw_chunk.get("start_line", raw_chunk.get("startLine"))
+                    end = raw_chunk.get("end_line", raw_chunk.get("endLine"))
+                    heading_path = raw_chunk.get(
+                        "heading_path", raw_chunk.get("headingPath", ()),
+                    )
+                    content[chunk_id] = {
+                        "text": excerpt,
+                        **({
+                            "lineRange": {"start": start, "end": end},
+                        } if isinstance(start, int) and isinstance(end, int) else {}),
+                        **({
+                            "headingPath": [str(item) for item in heading_path],
+                        } if isinstance(heading_path, (tuple, list)) else {}),
+                    }
+    return content
+
+
+def _common_review_atoms(
+    run: InteractivePlatformRun, plugin: Any, context: PlatformContext,
+    snapshot_store: DocumentSnapshotStore,
+) -> tuple[ReviewAtom, ...]:
+    """Compile frozen Investigation dimensions into Host review atoms."""
+    atoms: list[ReviewAtom] = []
+    for work_item_id in run.work_items:
+        packet = run.investigations.get(work_item_id)
+        if packet is None:
+            continue
+        simple_adapter = getattr(plugin, "_assayer_compile_scan", None)
+        legacy_adapter = getattr(plugin, "_assayer_compiled_review_items", None)
+        if callable(simple_adapter) and callable(legacy_adapter):
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "A plugin cannot combine Simple scan and legacy compiled review adapters",
+                work_item_id=work_item_id,
+            )
+        compiled_atoms: tuple[ReviewAtom, ...] = ()
+        review_context: Mapping[str, Any] | None = None
+        dimension_supports: Mapping[str, tuple[str, ...]] = {}
+        try:
+            if callable(simple_adapter):
+                declaration = _simple_declaration(plugin)
+                if declaration is not None and declaration.get("input") == "browser_snapshot":
+                    document = _simple_browser_document_from_packet(packet)
+                else:
+                    document = _simple_document_from_packet(packet, snapshot_store)
+                compiled_plan = compile_review_items(
+                    simple_adapter(document),
+                    run_id=run.context.run_id,
+                    packet=packet,
+                )
+                compiled_atoms = compiled_plan.atoms
+                review_context = compiled_plan.context
+                dimension_supports = compiled_plan.dimension_supports
+            elif callable(legacy_adapter):
+                compiled_plan = compile_review_items(
+                    legacy_adapter(packet, run.check, context),
+                    run_id=run.context.run_id,
+                    packet=packet,
+                )
+                compiled_atoms = compiled_plan.atoms
+                review_context = compiled_plan.context
+                dimension_supports = compiled_plan.dimension_supports
+        except PlatformContractError:
+            raise
+        except Exception as error:
+            raise PlatformContractError(
+                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
+                "Generated Simple SDK review adapter failed",
+                work_item_id=work_item_id,
+            ) from error
+        declared_dimensions = {dimension.name for dimension in packet.dimensions}
+        if set(dimension_supports) - declared_dimensions:
+            raise PlatformContractError(
+                "INVALID_COMPILED_REVIEW_PLAN",
+                "Compiled dimension support references an undeclared dimension",
+                work_item_id=work_item_id,
+            )
+        for index, dimension in enumerate(packet.dimensions, 1):
+            atoms.append(ReviewAtom.create(
+                run_id=run.context.run_id,
+                work_item_id=work_item_id,
+                kind="dimension",
+                source_anchor=f"dimension:{index}:{dimension.name}",
+                rule_id=f"{run.check.check_id}:{dimension.name}",
+                payload={
+                    "dimension": dimension.name,
+                    "instruction": (
+                        "Review the frozen observations and decide whether this "
+                        "declared dimension is satisfied."
+                    ),
+                    "subject": packet.work_item.kind,
+                    "observations": list(dimension.observations),
+                    "supportIds": list(
+                        dimension_supports.get(dimension.name, dimension.evidence_refs)
+                    ),
+                    **({"context": review_context} if review_context is not None else {}),
                 },
-            },
-        },
-        "details": {"type": "object"},
-        "reviewCheckpointIds": {
-            "type": "array", "minItems": 1, "uniqueItems": True,
-            "items": {"type": "string", "minLength": 1},
-        },
-        "finalization": {"type": "object"},
-        "contractDigest": {
-            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
-        },
-        "taskDigest": {
-            "type": "string", "pattern": "^sha256:[a-f0-9]{64}$",
-        },
-    },
-}
-
+            ))
+        atoms.extend(compiled_atoms)
+    if not atoms:
+        raise PlatformContractError(
+            "COMMON_REVIEW_PLAN_EMPTY",
+            "A common-review Run requires at least one typed review dimension",
+        )
+    return tuple(atoms)
 
 def _finding(value: Mapping[str, Any]) -> Finding:
     return Finding(
@@ -171,29 +540,19 @@ def _plugin_identity(registration: PluginRegistration) -> dict[str, Any]:
     }
 
 
-def _agent_contract_identity(contract: AgentContractBundle) -> dict[str, str]:
-    return {
-        "contractId": contract.contract_id,
-        "contractVersion": contract.contract_version,
-        "contractDigest": contract.contract_digest,
-    }
+def _semantic_instructions_uri(
+    plugin_id: str, check_id: str, check_version: str,
+) -> str:
+    """Return the Host-owned MCP resource URI for one frozen domain contract."""
+    return (
+        f"assayer://plugins/{plugin_id}/checks/{check_id}/"
+        f"{check_version}/semantic-instructions"
+    )
 
 
-def _agent_contract_task(
-    contract: AgentContractBundle, *, input_kind: str, schema: Mapping[str, Any],
-    semantic_rules: Sequence[Mapping[str, Any]] = (),
+def _domain_result_contract_task(
+    contract: DomainResultContract, *, plugin_id: str,
 ) -> dict[str, Any]:
-    task = {
-        **_agent_contract_identity(contract),
-        "inputKind": input_kind,
-        "schema": _plain(schema),
-    }
-    if semantic_rules:
-        task["semanticRules"] = _plain(semantic_rules)
-    return task
-
-
-def _domain_result_contract_task(contract: DomainResultContract) -> dict[str, Any]:
     """Publish only the domain contract; Host identity stays server-side."""
     value = contract.as_dict()
     return {
@@ -208,25 +567,14 @@ def _domain_result_contract_task(contract: DomainResultContract) -> dict[str, An
         # contract.  The resource contents are intentionally not loaded into
         # the task; semanticRules and resultShape below are derived from the
         # same immutable contract and are the actionable Agent guidance.
-        "semanticInstructions": _plain(value["semanticInstructions"]),
+        "semanticInstructions": {
+            **_plain(value["semanticInstructions"]),
+            "uri": _semantic_instructions_uri(
+                plugin_id, contract.check_id, contract.check_version,
+            ),
+        },
         "resultShape": _plain(contract.result_shape),
         **({"semanticRules": _plain(value["semanticRules"])} if "semanticRules" in value else {}),
-    }
-
-
-def _direct_decision_schema() -> dict[str, Any]:
-    """Return the strict schema for a Decision that has no checkpoint assembly."""
-    properties = dict(INTERACTIVE_DECISION_INPUT_SCHEMA["properties"])
-    properties.pop("reviewCheckpointIds", None)
-    properties.pop("finalization", None)
-    return {
-        **INTERACTIVE_DECISION_INPUT_SCHEMA,
-        "required": [
-            *INTERACTIVE_DECISION_INPUT_SCHEMA["required"],
-            "contractDigest",
-            "taskDigest",
-        ],
-        "properties": properties,
     }
 
 
@@ -238,10 +586,10 @@ def _json_pointer(path: Sequence[Any]) -> str:
     )
 
 
-def _validate_agent_schema(
+def _validate_domain_result_schema(
     schema: Mapping[str, Any], value: Any, *, work_item_id: str | None = None,
-    error_code: str = "AGENT_CONTRACT_INPUT_INVALID",
-    error_message: str = "Agent input does not satisfy the Run-frozen executable contract; correct the reported fields",
+    error_code: str = "DOMAIN_RESULT_INVALID",
+    error_message: str = "DomainResult does not satisfy the Run-frozen domain contract; correct the reported fields",
 ) -> None:
     errors = sorted(
         Draft202012Validator(dict(schema)).iter_errors(value),
@@ -338,15 +686,11 @@ def _result_evidence_graphs(investigations: Sequence[InvestigationPacket]) -> li
 
 
 def _evidence_graph_progress(run: InteractivePlatformRun) -> dict[str, Any]:
-    """Summarize candidate coverage from immutable packets and checkpoints."""
+    """Summarize candidate coverage from immutable packets and DomainResults."""
     total = covered = 0
     pending_ids: list[str] = []
     by_item: list[dict[str, Any]] = []
-    checkpointed = {
-        item_id
-        for checkpoint in run.effective_review_checkpoints
-        for item_id in checkpoint.item_ids
-    }
+    decided_work_items = set(run.decisions)
     for packet in run.investigations.values():
         payload = packet.evidence[0].payload if packet.evidence else None
         graph = payload.get("candidateGraph") if isinstance(payload, Mapping) else None
@@ -356,11 +700,14 @@ def _evidence_graph_progress(run: InteractivePlatformRun) -> dict[str, Any]:
         validate_candidate_evidence_graph_projection(graph)
         ids = [str(item.get("candidate_id")) for item in candidates if isinstance(item, Mapping) and item.get("candidate_id")]
         # A deterministic plugin may already emit a fully disposed graph. For
-        # Agent-review graphs, checkpoint membership is the durable coverage
-        # boundary; never treat the scanner's candidate existence as review.
-        pending = [] if graph.get("coverageComplete") is True else [
-            item_id for item_id in ids if item_id not in checkpointed
-        ]
+        # an interactive Run, however, the committed DomainResult is the
+        # durable coverage boundary.  Once the WorkItem has a Decision, all
+        # scanner candidates have passed through the semantic review boundary;
+        # retaining the immutable scanner graph's pending flag here produced
+        # a contradictory terminal report (confirmed/suppressed candidates
+        # alongside a graph claiming that every candidate was still pending).
+        work_item_id = packet.work_item.work_item_id
+        pending = [] if graph.get("coverageComplete") is True or work_item_id in decided_work_items else list(ids)
         item_covered = len(ids) - len(pending)
         total += len(ids)
         covered += item_covered
@@ -641,9 +988,8 @@ def _domain_agent_view(
     Domain plugins may expose a compact, domain-owned projection through
     ``build_domain_agent_data``.  The immutable InvestigationPacket remains
     the source of truth; this projection only controls what crosses the
-    Agent-facing transport boundary.  The fallback deliberately preserves the
-    historical full payload for plugins that have not opted into a compact
-    view yet.
+    Agent-facing transport boundary.  The fallback remains domain-owned data
+    and never exposes the historical platform investigation projection.
     """
     dimensions = []
     for item in packet.dimensions:
@@ -664,19 +1010,24 @@ def _domain_agent_view(
         ]
     else:
         evidence_payloads = _agent_safe_value(domain_data, registry)
-    return {
+    evidence_page = registry.page(page_size=INITIAL_SEMANTIC_EVIDENCE_PREVIEW_SIZE)
+    view = {
         "subject": {"kind": packet.work_item.kind},
         "dimensions": dimensions,
-        "evidence": [
-            registry.resolve(handle).as_public()
-            for handle in registry.handles
-        ],
+        "evidence": evidence_page["items"],
+        "evidencePaging": {
+            "pageSize": INITIAL_SEMANTIC_EVIDENCE_PREVIEW_SIZE,
+            "total": evidence_page["page"]["total"],
+            "nextCursor": evidence_page["nextCursor"],
+            "expandTool": "expand_semantic_evidence",
+        },
         "domainData": evidence_payloads,
     }
+    return _bound_agent_view(view)
 
 
 _AGENT_PRIVATE_KEYS = frozenset({
-    "runid", "workitemid", "checkpointid", "taskdigest", "contractdigest",
+    "runid", "workitemid", "taskdigest", "contractdigest",
     "evidenceid", "sourcechunkid", "sourcedigest", "documentpath", "path",
     "startline", "endline", "line", "sourceidentity", "revision",
     "runrevision", "checkid", "checkversion",
@@ -707,6 +1058,161 @@ def _agent_safe_value(value: Any, registry: EvidenceHandleRegistry) -> Any:
         handle = registry.handle_for_reference(value)
         return handle if handle is not None else value
     return value
+
+
+def _compact_agent_value(
+    value: Any, *, string_limit: int = AGENT_VALUE_STRING_LIMIT,
+    array_limit: int = AGENT_VALUE_ARRAY_LIMIT, depth: int = 0,
+) -> Any:
+    """Bound generic domain material without domain-specific plugin code.
+
+    The Host owns this projection.  It keeps the durable packet untouched and
+    makes truncation explicit so a plugin never has to implement its own
+    source/document pagination merely to stay inside an Agent context.
+    """
+    if depth > 12:
+        return {"truncated": True, "reason": "maximum projection depth"}
+    if isinstance(value, str):
+        if len(value) <= string_limit:
+            return value
+        return value[:string_limit] + "… [truncated]"
+    if isinstance(value, Mapping):
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            result[str(key)] = _compact_agent_value(
+                item, string_limit=string_limit, array_limit=array_limit,
+                depth=depth + 1,
+            )
+        return result
+    if isinstance(value, (tuple, list)):
+        values = [
+            _compact_agent_value(
+                item, string_limit=string_limit, array_limit=array_limit,
+                depth=depth + 1,
+            )
+            for item in value[:array_limit]
+        ]
+        if len(value) > array_limit:
+            values.append({
+                "truncated": True,
+                "omittedCount": len(value) - array_limit,
+            })
+        return values
+    return value
+
+
+def _bound_agent_view(
+    view: Mapping[str, Any], *, payload_limit: int = AGENT_TASK_PAYLOAD_LIMIT,
+) -> dict[str, Any]:
+    """Return a deterministic, size-bounded Agent view.
+
+    We progressively tighten only the presentation projection.  If a plugin
+    supplies unusually large domain data, the Host still returns a valid task
+    rather than failing the Run or requiring plugin-owned pagination.
+    """
+    string_limit = AGENT_VALUE_STRING_LIMIT
+    array_limit = AGENT_VALUE_ARRAY_LIMIT
+    # Four tightening passes are enough to move from the normal projection to
+    # the safety fallback; keep this explicitly bounded for resilience scans
+    # and to avoid a malformed value creating an accidental infinite loop.
+    for _ in range(8):
+        candidate = _compact_agent_value(
+            view, string_limit=string_limit, array_limit=array_limit,
+        )
+        encoded = json.dumps(
+            candidate, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) <= payload_limit:
+            return candidate
+        if string_limit > 128 or array_limit > 20:
+            string_limit = max(128, string_limit // 2)
+            array_limit = max(20, array_limit // 2)
+            continue
+        # Preserve the semantic dimensions and opaque evidence handles even
+        # when a hostile/accidental domain payload remains oversized.
+        return {
+            "subject": candidate.get("subject", {}),
+            "dimensions": candidate.get("dimensions", []),
+            "evidence": candidate.get("evidence", []),
+            "evidencePaging": candidate.get("evidencePaging", {
+                "total": 0,
+                "nextCursor": None,
+                "expandTool": "expand_semantic_evidence",
+            }),
+            "domainData": {
+                "truncated": True,
+                "reason": "Agent task payload limit exceeded; expand immutable evidence on demand",
+            },
+        }
+    # The loop above always returns, but keep a deterministic defensive
+    # fallback if its bounds are changed in a future revision.
+    return {
+        "subject": {"kind": "unknown"},
+        "dimensions": [],
+        "evidence": [],
+        "evidencePaging": {
+            "total": 0,
+            "nextCursor": None,
+            "expandTool": "expand_semantic_evidence",
+        },
+        "domainData": {
+            "truncated": True,
+            "reason": "Agent task payload limit exceeded",
+        },
+    }
+
+
+def _bound_semantic_task(task: Mapping[str, Any]) -> dict[str, Any]:
+    """Enforce the budget on the complete semantic task, not just evidence."""
+    candidate = _plain(task)
+    encoded = json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) <= AGENT_TASK_PAYLOAD_LIMIT:
+        return candidate
+    # Keep the executable contract intact and spend the remaining budget on
+    # the Agent view.  Contract metadata is normally small; if a plugin ships
+    # an unusually large contract, the final fallback remains explicit rather
+    # than silently emitting an unbounded task.
+    without_view = dict(candidate)
+    view = without_view.pop("agentView", {})
+    base_size = len(json.dumps(
+        without_view, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8"))
+    remaining = max(1024, AGENT_TASK_PAYLOAD_LIMIT - base_size - 128)
+    if isinstance(view, Mapping):
+        without_view["agentView"] = _bound_agent_view(view, payload_limit=remaining)
+    else:
+        without_view["agentView"] = {
+            "subject": {"kind": "unknown"},
+            "dimensions": [], "evidence": [],
+            "domainData": {"truncated": True, "reason": "Agent task payload limit exceeded"},
+        }
+    candidate = without_view
+    encoded = json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    if len(encoded) <= AGENT_TASK_PAYLOAD_LIMIT:
+        return candidate
+    # The domain contract is executable and cannot be truncated.  Preserve it
+    # and expose a compact, explicit Agent view; future contract releases must
+    # keep their own schema/instructions bounded by the same platform budget.
+    candidate["agentView"] = {
+        "subject": {"kind": "unknown"},
+        "dimensions": [], "evidence": [],
+        "evidencePaging": {"total": 0, "nextCursor": None, "expandTool": "expand_semantic_evidence"},
+        "domainData": {"truncated": True, "reason": "Agent task payload limit exceeded"},
+    }
+    final_size = len(json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8"))
+    if final_size > AGENT_TASK_PAYLOAD_LIMIT:
+        raise PlatformContractError(
+            "PLUGIN_SEMANTIC_TASK_TOO_LARGE",
+            "The plugin domain contract exceeds the Host semantic task payload limit",
+        )
+    return candidate
 
 
 def _collection_group_key(collection_id: str, values: Mapping[str, Any]) -> str:
@@ -870,7 +1376,7 @@ class InteractivePluginController:
     The controller is intentionally small: it owns selection, scope
     validation, lifecycle routing and response shaping, while
     :class:`InteractivePlatformRun` remains the source of truth for gates and
-    durable checkpoints.  A runtime resolver is injected by a product adapter
+    durable decisions. A runtime resolver is injected by a product adapter
     (for example, a browser or API runtime); no runtime is assumed here.
     """
 
@@ -880,6 +1386,8 @@ class InteractivePluginController:
         output_root: str | Path = "./assayer-output",
         *,
         runtime_resolver: Callable[[PluginRegistration, Any], Any] | None = None,
+        provider_runtime: Any = None,
+        provider_runtime_resolver: Callable[[PluginRegistration, Any, Any], Any] | None = None,
         capabilities_resolver: Callable[[PluginRegistration, Any], Sequence[str]] | None = None,
         provider_registry: ProviderRegistry | None = None,
         platform_profile: CapabilityProfile | Callable[[PluginRegistration, Any], CapabilityProfile] | None = None,
@@ -889,6 +1397,15 @@ class InteractivePluginController:
         self.output_root = Path(output_root).expanduser().resolve()
         self.output_root.mkdir(parents=True, exist_ok=True)
         self.runtime_resolver = runtime_resolver
+        # Provider runtimes are Host-owned adapters (for example a
+        # BrowserSnapshotSource).  They are injected as opaque objects; the
+        # controller never starts a browser or reaches into the runtime.
+        self.provider_runtime = provider_runtime
+        # Product adapters may need one provider source per Run (for example a
+        # browser session bound to the requested URL).  Resolve this lazily
+        # after the Host has selected the Check and validated the business
+        # scope; the returned object remains opaque to the controller.
+        self.provider_runtime_resolver = provider_runtime_resolver
         self.capabilities_resolver = capabilities_resolver
         self.provider_registry = provider_registry
         self.platform_profile = platform_profile
@@ -955,8 +1472,22 @@ class InteractivePluginController:
             user_profile=self._resolve_profile(self.user_profile, registration, check),
             scope=provider_scope,
         )
+        resolved_provider_runtime = self.provider_runtime
+        if self.provider_runtime_resolver is not None:
+            try:
+                resolved_provider_runtime = self.provider_runtime_resolver(
+                    registration, check, scope,
+                )
+            except PlatformContractError:
+                raise
+            except Exception as error:
+                raise PlatformContractError(
+                    "PROVIDER_RUNTIME_UNAVAILABLE",
+                    "The Host could not create the provider runtime for this Run",
+                ) from error
         bound = BoundCapabilityProvider(
             provider_registration, negotiation, run_id=run_id, scope=provider_scope,
+            runtime=resolved_provider_runtime,
         )
         return bound, host_caps | frozenset(negotiation.granted)
 
@@ -1032,8 +1563,18 @@ class InteractivePluginController:
             check = matches[0]
         else:
             check = self.registry.check(registration, (check_id, check_version))
-        agent_contract = registration.agent_contract_for(check.ref)
         domain_result_contract = registration.domain_result_contract_for(check.ref)
+        common_review_mode = "common_review" in registration.result_features
+        if common_review_mode and domain_result_contract is not None:
+            raise PlatformContractError(
+                "PLUGIN_SEMANTIC_CONTRACT_CONFLICT",
+                "A common-review Check cannot also publish a complete DomainResultContract",
+            )
+        if domain_result_contract is None and not common_review_mode:
+            raise PlatformContractError(
+                "PLUGIN_DOMAIN_RESULT_CONTRACT_REQUIRED",
+                "Interactive Checks must use common review or publish a DomainResultContract",
+            )
         # Negotiate before creating a plugin, claiming ownership, or writing
         # a ledger.  Incompatible combinations therefore leave no partial Run.
         compatibility = negotiate_plugin_compatibility(registration.compatibility)
@@ -1075,7 +1616,7 @@ class InteractivePluginController:
         if getattr(plugin, "manifest", None) != registration.manifest:
             self._close_bound_provider({"capability_provider": bound_provider})
             raise PlatformContractError("PLUGIN_IDENTITY_MISMATCH", "Plugin factory returned different registered metadata")
-        if domain_result_contract is not None:
+        if domain_result_contract is not None and not common_review_mode:
             missing = [
                 name for name in ("map_domain_result",)
                 if not callable(getattr(plugin, name, None))
@@ -1091,7 +1632,9 @@ class InteractivePluginController:
                     "The domain-result plugin is missing required operation(s): "
                     + ", ".join(missing),
                 )
-        store = JsonPlatformLedgerStore(self.output_root / run_id)
+        run_root = self.output_root / run_id
+        store = JsonPlatformLedgerStore(run_root)
+        coverage_store = JsonCoverageLedgerStore(run_root)
         self._claim_ownership(run_id)
         try:
             run = InteractivePlatformSession(registration.manifest).begin(
@@ -1099,8 +1642,9 @@ class InteractivePluginController:
             )
             self._runs[run_id] = {
                 "registration": registration,
-                "agent_contract": agent_contract,
                 "domain_result_contract": domain_result_contract,
+                "review_mode": "common_review" if common_review_mode else "domain_result",
+                "review_coordinator": None,
                 "scope": scope,
                 "context": context,
                 "plugin": plugin,
@@ -1114,8 +1658,9 @@ class InteractivePluginController:
                 "task_context": None,
                 "evidence_handle_registry": None,
                 "compatibility": compatibility,
-                "validated_checkpoint_draft": None,
                 "capability_provider": bound_provider,
+                "coverage_store": coverage_store,
+                "coverage_ledger": None,
             }
             self._write_resume_descriptor(run_id, registration, scope, caps)
         except Exception:
@@ -1127,8 +1672,6 @@ class InteractivePluginController:
             "plugin": _plugin_identity(registration),
             "check": {"checkId": check.check_id, "version": check.version},
         }
-        if agent_contract is not None:
-            result["agentContract"] = _agent_contract_identity(agent_contract)
         result["compatibility"] = compatibility.as_dict()
         return self._response(run_id, "started", result)
 
@@ -1171,6 +1714,23 @@ class InteractivePluginController:
             raise PlatformContractError(
                 "RESULT_PUBLICATION_FAILED", "Terminal Run result identity does not match its ledger",
             )
+        audit_report = full_result.get("auditReport")
+        audit_report_path = self.output_root / run_id / f"{run_id}.audit-report.md"
+        if not isinstance(audit_report, str):
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED", "Terminal Run formal audit report is unavailable",
+            )
+        try:
+            published_report = audit_report_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED", "Terminal Run formal audit report is unavailable",
+            ) from error
+        if published_report != audit_report:
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED",
+                "Terminal Run formal audit report differs from its result payload",
+            )
         canonical_path = self.output_root / run_id / f"{run_id}.canonical-result.json"
         ledger_path = self.output_root / run_id / f"{run_id}.platform-ledger.json"
         try:
@@ -1202,7 +1762,10 @@ class InteractivePluginController:
                 ) from error
         document = StagedResultDocument({
             key: item for key, item in full_result.items()
-            if key in {"resultOverview", "summary", "decisions", "reviewItems", "evidenceGraph", "failures"}
+            if key in {
+                "resultOverview", "summary", "decisions", "reviewItems",
+                "evidenceGraph", "failures", "auditReport",
+            }
         }, source_digest=expected_digest)
         workflow = ledger.get("workflow")
         if not isinstance(workflow, Mapping) or workflow.get("state") != status:
@@ -1231,7 +1794,6 @@ class InteractivePluginController:
             discovered=int(result_payload["metrics"].get("discovered", 0) or 0),
             inspected=int(result_payload["metrics"].get("inspected", 0) or 0),
             decisions=int(result_payload["metrics"].get("decisionsCommitted", 0) or 0),
-            checkpoints=int(result_payload["metrics"].get("reviewCheckpoints", 0) or 0),
             entered_at=(
                 str(boundary_event.get("occurred_at"))
                 if boundary_event is not None and boundary_event.get("occurred_at") is not None
@@ -1284,10 +1846,8 @@ class InteractivePluginController:
             "checkId": self._runs[run_id]["run"].check.check_id,
             "checkVersion": self._runs[run_id]["run"].check.version,
             "scope": _plain(scope), "capabilities": sorted(set(capabilities)),
+            "semanticMode": self._runs[run_id].get("review_mode", "domain_result"),
         }
-        agent_contract = self._runs[run_id].get("agent_contract")
-        if agent_contract is not None:
-            descriptor["agentContract"] = _agent_contract_identity(agent_contract)
         domain_result_contract = self._runs[run_id].get("domain_result_contract")
         if domain_result_contract is not None:
             descriptor["domainResultContract"] = domain_result_contract.as_dict(include_digest=True)
@@ -1396,7 +1956,10 @@ class InteractivePluginController:
             descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
             if descriptor.get("runId") != run_id:
                 raise PlatformContractError("RUN_MISMATCH", "Run path and resume descriptor differ")
-            store = JsonPlatformLedgerStore(self.output_root / run_id)
+            run_root = self.output_root / run_id
+            store = JsonPlatformLedgerStore(run_root)
+            coverage_store = JsonCoverageLedgerStore(run_root)
+            coverage_ledger = coverage_store.load(run_id)
             ledger = store.load(run_id)
             if ledger is None:
                 raise PlatformContractError("RUN_RESUME_FAILED", "The requested Run ledger is missing")
@@ -1421,21 +1984,20 @@ class InteractivePluginController:
                     "RUN_RESTART_REQUIRED",
                     "The active Run was created under a different or unrecorded interaction protocol; start a new Run",
                 )
-            agent_contract = registration.agent_contract_for(
-                (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
-            )
             domain_result_contract = registration.domain_result_contract_for(
                 (str(descriptor["checkId"]), str(descriptor["checkVersion"])),
             )
-            frozen_agent_contract = descriptor.get("agentContract")
-            current_agent_contract = (
-                _agent_contract_identity(agent_contract)
-                if agent_contract is not None else None
-            )
-            if frozen_agent_contract != current_agent_contract:
+            common_review_mode = "common_review" in registration.result_features
+            expected_semantic_mode = "common_review" if common_review_mode else "domain_result"
+            if descriptor.get("semanticMode", "domain_result") != expected_semantic_mode:
                 raise PlatformContractError(
-                    "AGENT_CONTRACT_STALE",
-                    "The active Run requires a different executable Agent contract",
+                    "RUN_RESTART_REQUIRED",
+                    "The active Run was created under a different semantic review mode",
+                )
+            if common_review_mode and domain_result_contract is not None:
+                raise PlatformContractError(
+                    "PLUGIN_SEMANTIC_CONTRACT_CONFLICT",
+                    "A common-review Check cannot also publish a complete DomainResultContract",
                 )
             frozen_domain_result_contract = descriptor.get("domainResultContract")
             current_domain_result_contract = (
@@ -1490,8 +2052,13 @@ class InteractivePluginController:
             }
             self._runs[run_id] = {
                 "registration": registration, "scope": scope, "context": context,
-                "plugin": plugin, "run": run, "agent_contract": agent_contract,
+                "plugin": plugin, "run": run,
                 "domain_result_contract": domain_result_contract,
+                "review_mode": expected_semantic_mode,
+                "review_coordinator": (
+                    IncrementalReviewCoordinator(coverage_ledger, coverage_store)
+                    if common_review_mode and coverage_ledger is not None else None
+                ),
                 "committer": registration.create_committer(resolved_runtime),
                 "evidence_collections": collections,
                 "inspect_batch_size": registration.manifest.execution_profile.inspect_batch_size,
@@ -1501,8 +2068,9 @@ class InteractivePluginController:
                 "task_context": None,
                 "evidence_handle_registry": None,
                 "compatibility": compatibility,
-                "validated_checkpoint_draft": None,
                 "capability_provider": bound_provider,
+                "coverage_store": coverage_store,
+                "coverage_ledger": coverage_ledger,
             }
             self._write_resume_descriptor(run_id, registration, scope, capabilities)
             response = self.advance(run_id)
@@ -1555,7 +2123,34 @@ class InteractivePluginController:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         try:
-            items = tuple(state["plugin"].discover(state["scope"], state["context"]))
+            declaration = _simple_declaration(state["plugin"])
+            source_capabilities = frozenset(
+                getattr(state["registration"], "provider_source_capabilities", ())
+            )
+            bound_provider = state.get("capability_provider")
+            if source_capabilities:
+                if not isinstance(bound_provider, BoundCapabilityProvider):
+                    raise PlatformContractError(
+                        "PROVIDER_SOURCE_DISCOVERY_UNAVAILABLE",
+                        "The Check declares provider-owned source discovery but "
+                        "no provider is bound",
+                    )
+                if len(source_capabilities) != 1:
+                    raise PlatformContractError(
+                        "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                        "A Check must declare exactly one provider source capability",
+                    )
+                items = bound_provider.discover_work_items(
+                    state["run"].check, next(iter(source_capabilities)),
+                )
+            elif declaration is not None:
+                items = HostDocumentSource(DocumentSnapshotStore(
+                    state["coverage_store"].root,
+                )).discover(
+                    state["scope"], input_kind=declaration["input"], check=state["run"].check,
+                )
+            else:
+                items = tuple(state["plugin"].discover(state["scope"], state["context"]))
         except PlatformContractError:
             raise
         except Exception as error:
@@ -1611,7 +2206,27 @@ class InteractivePluginController:
                 return
             attempts += 1
             try:
-                batch_packets = tuple(state["plugin"].inspect(batch, run.check, state["context"]))
+                declaration = _simple_declaration(state["plugin"])
+                if declaration is not None:
+                    if declaration.get("input") == "browser_snapshot":
+                        if not isinstance(bound_provider, BoundCapabilityProvider):
+                            raise PlatformContractError(
+                                "PROVIDER_SOURCE_DISCOVERY_UNAVAILABLE",
+                                "A browser Simple plugin requires a bound browser provider",
+                            )
+                        batch_packets = _simple_browser_packets(
+                            batch, run.check, bound_provider,
+                        )
+                    else:
+                        batch_packets = HostDocumentSource(DocumentSnapshotStore(
+                            state["coverage_store"].root,
+                        )).inspect(
+                            batch, run.check, run_id=run.context.run_id,
+                        )
+                else:
+                    batch_packets = tuple(
+                        state["plugin"].inspect(batch, run.check, state["context"])
+                    )
                 from .kernel import PlatformKernel
                 issued_provider_evidence = (
                     bound_provider.issued_evidence() if bound_provider is not None else None
@@ -1758,19 +2373,59 @@ class InteractivePluginController:
             "nextCursor": page["nextCursor"],
         })
 
-    @staticmethod
-    def _require_agent_contract_digest(
-        state: Mapping[str, Any], contract_digest: Any,
-    ) -> AgentContractBundle | None:
-        contract = state.get("agent_contract")
-        if contract is None:
-            return None
-        if contract_digest != contract.contract_digest:
+    def expand_semantic_evidence(
+        self, run_id: str, *, cursor: str | None = None,
+        page_size: int | None = None,
+    ) -> dict[str, Any]:
+        """Expand the active semantic task's opaque evidence handles.
+
+        This Host-owned path gives the Agent on-demand evidence without
+        exposing WorkItem/Evidence identities or requiring a plugin to declare
+        a bespoke collection and pagination implementation.
+        """
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        active = state.get("active_semantic_task")
+        registry = state.get("evidence_handle_registry")
+        if not isinstance(active, Mapping) or not isinstance(registry, EvidenceHandleRegistry):
             raise PlatformContractError(
-                "AGENT_CONTRACT_STALE",
-                "Agent input does not match the Run-frozen executable contract; refresh the semantic boundary",
+                "SEMANTIC_TASK_UNAVAILABLE",
+                "There is no active semantic task with expandable evidence",
             )
-        return contract
+        size = page_size or DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE
+        common_review = active.get("kind") == "common_review"
+        if common_review:
+            # Source chunks are at most 2.4 KiB. Eight items keep the complete
+            # expansion envelope under the same 24 KiB Agent-task budget.
+            size = min(size, 8)
+        page = registry.page(cursor=cursor, page_size=size)
+        bounded_items = [
+            _compact_agent_value(
+                _agent_safe_value(item, registry),
+                string_limit=2400 if common_review else AGENT_VALUE_STRING_LIMIT,
+            )
+            for item in page["items"]
+        ]
+        return self._response(run_id, "semantic_evidence_expanded", {
+            "evidence": bounded_items,
+            "evidenceRefs": page["itemIds"],
+            "page": page["page"],
+            "nextCursor": page["nextCursor"],
+        })
+
+    @staticmethod
+    def _record_transport_timing(
+        state: Mapping[str, Any], started_ns: int | None, *, persist: bool = True,
+    ) -> None:
+        """Persist successful direct-transport timing at a safe boundary."""
+        if not isinstance(started_ns, int):
+            return
+        run = state.get("run")
+        if isinstance(run, InteractivePlatformRun) and run.status == "running":
+            run.record_transport_timing(
+                duration_ms=max(0, int((time.monotonic_ns() - started_ns) / 1_000_000)),
+                persist=persist,
+            )
 
     @staticmethod
     def _require_active_semantic_task(
@@ -1801,366 +2456,8 @@ class InteractivePluginController:
                 work_item_id=work_item_id or None,
             )
 
-    def _validate_checkpoint_contract(
-        self, state: Mapping[str, Any], work_item_id: str, collection_id: str,
-        item_ids: Sequence[str], payload: Mapping[str, Any], contract_digest: Any,
-        task_digest: Any, supersedes_checkpoint_id: str | None,
-    ) -> None:
-        contract = self._require_agent_contract_digest(state, contract_digest)
-        if contract is None:
-            return
-        if supersedes_checkpoint_id is None:
-            self._require_active_semantic_task(
-                state,
-                task_digest=task_digest,
-                kind="review_evidence_items",
-                work_item_id=work_item_id,
-                collection_id=collection_id,
-                item_ids=item_ids,
-            )
-        schema = contract.checkpoint_payload_schemas.get(collection_id)
-        if schema is None:
-            collection = state["evidence_collections"].get(work_item_id, {}).get(
-                collection_id,
-            )
-            if collection is not None and collection["reviewRequired"]:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin emitted a review-required collection without a registered checkpoint schema",
-                    work_item_id=work_item_id,
-                )
-            return
-        _validate_agent_schema(schema, payload, work_item_id=work_item_id)
 
-    def _validate_decision_contract(
-        self, state: Mapping[str, Any], value: Mapping[str, Any],
-    ) -> None:
-        contract = self._require_agent_contract_digest(
-            state, value.get("contractDigest"),
-        )
-        if contract is None:
-            return
 
-        work_item_id = value.get("workItemId")
-        active_task = state.get("active_semantic_task")
-        expected_kind = (
-            str(active_task.get("kind"))
-            if isinstance(active_task, Mapping) else ""
-        )
-        if expected_kind not in {"finalize_decision", "decide_work_item"}:
-            expected_kind = "finalize_decision"
-        self._require_active_semantic_task(
-            state,
-            task_digest=value.get("taskDigest"),
-            kind=expected_kind,
-            work_item_id=str(work_item_id) if work_item_id is not None else "",
-        )
-        collections = state["evidence_collections"].get(work_item_id, {})
-        requires_checkpoint_assembly = any(
-            collection["reviewRequired"] and collection["itemIds"]
-            for collection in collections.values()
-        )
-        if not requires_checkpoint_assembly:
-            _validate_agent_schema(
-                _direct_decision_schema(), value,
-                work_item_id=str(work_item_id) if work_item_id is not None else None,
-            )
-            return
-
-        if contract.finalization_schema is None:
-            raise PlatformContractError(
-                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                "The plugin requires finalization without a registered finalization schema",
-                work_item_id=str(work_item_id) if work_item_id is not None else None,
-            )
-        if "finalization" not in value:
-            _validate_agent_schema(
-                {"type": "object", "required": ["finalization"]}, value,
-                work_item_id=str(work_item_id) if work_item_id is not None else None,
-            )
-        _validate_agent_schema(
-            contract.finalization_schema, value["finalization"],
-            work_item_id=str(work_item_id) if work_item_id is not None else None,
-        )
-
-    def _validate_plugin_checkpoint(
-        self, state: Mapping[str, Any], checkpoint: ReviewCheckpoint,
-        selected: Sequence[Mapping[str, Any]],
-        prior: Sequence[ReviewCheckpoint],
-    ) -> None:
-        """Run the plugin's semantic validator without persisting a checkpoint."""
-        run: InteractivePlatformRun = state["run"]
-        validator = getattr(state["plugin"], "validate_review_checkpoint", None)
-        if not callable(validator):
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin does not implement its declared checkpoint validator",
-                    work_item_id=checkpoint.work_item_id,
-                )
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
-                "A plugin that persists semantic review checkpoints must validate them before persistence",
-            )
-        try:
-            validator(
-                checkpoint, selected, prior, run.investigations[checkpoint.work_item_id],
-                run.check, state["context"],
-            )
-        except PlatformContractError as error:
-            if (
-                state.get("agent_contract") is not None
-                and error.code != "PLUGIN_SEMANTIC_INPUT_INVALID"
-            ):
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin rejected schema-valid checkpoint input outside its declared semantic error contract",
-                    work_item_id=checkpoint.work_item_id,
-                ) from error
-            raise
-        except (AssertionError, KeyError, TypeError) as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin failed while validating schema-valid checkpoint input",
-                    work_item_id=checkpoint.work_item_id,
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
-                "Plugin checkpoint validation failed before persistence",
-            ) from error
-        except Exception as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_RUNTIME_FAILURE",
-                    "The plugin failed unexpectedly while validating checkpoint input",
-                    work_item_id=checkpoint.work_item_id,
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
-                "Plugin checkpoint validation failed before persistence",
-            ) from error
-
-    def validate_checkpoint_draft(
-        self, run_id: str, work_item_id: str, collection_id: str,
-        item_ids: Sequence[str], payload: Mapping[str, Any],
-        contract_digest: str | None = None,
-        task_digest: str | None = None,
-        supersedes_checkpoint_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Validate a checkpoint draft without persistence or correction-budget use.
-
-        This is intentionally a read-only preflight boundary.  It validates the
-        frozen task, generic collection coverage, the executable JSON Schema,
-        and the plugin's semantic validator, but never records a rejection or
-        checkpoint.  Agents can therefore repair a draft without consuming the
-        Run's correction budget.
-        """
-        self._assert_active_owner(run_id)
-        state = self._state(run_id)
-        try:
-            self._validate_checkpoint_contract(
-                state, work_item_id, collection_id, item_ids, payload,
-                contract_digest, task_digest, supersedes_checkpoint_id,
-            )
-            run: InteractivePlatformRun = state["run"]
-            collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
-            if collection is None:
-                raise PlatformContractError(
-                    "UNKNOWN_EVIDENCE_COLLECTION",
-                    "Review checkpoint references an undeclared Evidence collection",
-                )
-            if not collection["reviewRequired"]:
-                raise PlatformContractError(
-                    "EVIDENCE_COLLECTION_NOT_REVIEWABLE",
-                    "Reference Evidence collections can be expanded but cannot receive review checkpoints",
-                )
-            requested = tuple(sorted(item_ids))
-            if len(requested) > MAX_EVIDENCE_COLLECTION_PAGE_SIZE:
-                raise PlatformContractError(
-                    "INVALID_REVIEW_CHECKPOINT",
-                    "Review checkpoint exceeds the maximum Evidence collection page size",
-                )
-            unknown = set(requested) - set(collection["itemIds"])
-            if unknown:
-                raise PlatformContractError(
-                    "UNKNOWN_EVIDENCE_COLLECTION_ITEM",
-                    "Review checkpoint references an unknown collection item",
-                )
-            identity = {
-                "runId": run_id,
-                "workItemId": work_item_id,
-                "collectionId": collection_id,
-                "itemIds": sorted(requested),
-                "payload": _plain(payload),
-            }
-            if supersedes_checkpoint_id is not None:
-                identity["supersedesCheckpointId"] = supersedes_checkpoint_id
-            canonical = json.dumps(
-                identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-            )
-            checkpoint_id = f"review:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:24]}"
-            checkpoint = ReviewCheckpoint(
-                checkpoint_id, work_item_id, run.check.check_id, run.check.version,
-                collection_id, requested, payload, supersedes_checkpoint_id,
-            )
-            run.validate_review_checkpoint_record(checkpoint)
-            requested_set = set(requested)
-            selected = tuple(
-                item for item_id, item in zip(collection["itemIds"], collection["items"])
-                if item_id in requested_set
-            )
-            prior = tuple(
-                item for item in run.effective_review_checkpoints
-                if item.work_item_id == work_item_id
-                and item.collection_id == collection_id
-                and item.checkpoint_id not in {checkpoint_id, supersedes_checkpoint_id}
-            )
-            self._validate_plugin_checkpoint(state, checkpoint, selected, prior)
-            state["validated_checkpoint_draft"] = checkpoint_id
-            return self._response(run_id, "checkpoint_draft_validated", {
-                "valid": True,
-                "workItemId": work_item_id,
-                "collectionId": collection_id,
-                "itemIds": list(requested),
-                "checkpointId": checkpoint_id,
-            })
-        except PlatformContractError as error:
-            # Preflight may report draft-owned errors without entering the
-            # correction-budget path, but a plugin or platform defect is not
-            # an Agent correction. Re-raise those failures so the normal
-            # boundary policy can terminalize the Run immediately.
-            if error.code in {
-                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                "PLUGIN_CONTRACT_VIOLATION",
-                "PLUGIN_RUNTIME_FAILURE",
-                "REVIEW_CHECKPOINT_VALIDATION_FAILED",
-                "REVIEW_CHECKPOINT_VALIDATION_UNSUPPORTED",
-            }:
-                raise
-            return self._response(run_id, "checkpoint_draft_invalid", {
-                "valid": False,
-                "workItemId": work_item_id,
-                "collectionId": collection_id,
-                "itemIds": list(item_ids),
-                "error": {
-                    "code": error.code,
-                    "message": error.message,
-                    "errors": [dict(item) for item in error.errors],
-                    "workItemId": error.work_item_id,
-                },
-            })
-
-    def checkpoint_review(
-        self, run_id: str, work_item_id: str, collection_id: str,
-        item_ids: Sequence[str], payload: Mapping[str, Any],
-        supersedes_checkpoint_id: str | None = None,
-        contract_digest: str | None = None,
-        task_digest: str | None = None,
-    ) -> dict[str, Any]:
-        """Durably checkpoint opaque semantic review for declared collection items."""
-        self._assert_active_owner(run_id)
-        state = self._state(run_id)
-        self._validate_checkpoint_contract(
-            state, work_item_id, collection_id, item_ids, payload,
-            contract_digest, task_digest, supersedes_checkpoint_id,
-        )
-        if state.get("agent_contract") is not None and state.get("validated_checkpoint_draft") is None:
-            raise PlatformContractError(
-                "AGENT_CHECKPOINT_PREFLIGHT_REQUIRED",
-                "A checkpoint must pass validate_checkpoint_draft before checkpoint_review",
-                work_item_id=work_item_id,
-            )
-        run: InteractivePlatformRun = state["run"]
-        collection = state["evidence_collections"].get(work_item_id, {}).get(collection_id)
-        if collection is None:
-            raise PlatformContractError(
-                "UNKNOWN_EVIDENCE_COLLECTION", "Review checkpoint references an undeclared Evidence collection",
-            )
-        if not collection["reviewRequired"]:
-            raise PlatformContractError(
-                "EVIDENCE_COLLECTION_NOT_REVIEWABLE",
-                "Reference Evidence collections can be expanded but cannot receive review checkpoints",
-            )
-        requested = tuple(sorted(item_ids))
-        if len(requested) > MAX_EVIDENCE_COLLECTION_PAGE_SIZE:
-            raise PlatformContractError(
-                "INVALID_REVIEW_CHECKPOINT", "Review checkpoint exceeds the maximum Evidence collection page size",
-            )
-        unknown = set(requested) - set(collection["itemIds"])
-        if unknown:
-            raise PlatformContractError(
-                "UNKNOWN_EVIDENCE_COLLECTION_ITEM", "Review checkpoint references an unknown collection item",
-            )
-        identity = {
-            "runId": run_id,
-            "workItemId": work_item_id,
-            "collectionId": collection_id,
-            "itemIds": sorted(requested),
-            "payload": _plain(payload),
-        }
-        if supersedes_checkpoint_id is not None:
-            identity["supersedesCheckpointId"] = supersedes_checkpoint_id
-        canonical = json.dumps(
-            identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-        )
-        checkpoint_id = f"review:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:24]}"
-        if (
-            state.get("agent_contract") is not None
-            and state.get("validated_checkpoint_draft") != checkpoint_id
-        ):
-            raise PlatformContractError(
-                "AGENT_CHECKPOINT_PREFLIGHT_STALE",
-                "The checkpoint payload differs from the last preflight; validate this exact draft again",
-                errors=({
-                    "pointer": "/",
-                    "keyword": "checkpointPreflight",
-                    "message": "Run validate_checkpoint_draft for the exact task envelope and payload",
-                },),
-                work_item_id=work_item_id,
-            )
-        checkpoint = ReviewCheckpoint(
-            checkpoint_id, work_item_id, run.check.check_id, run.check.version,
-            collection_id, requested, payload, supersedes_checkpoint_id,
-        )
-        run.validate_review_checkpoint_record(checkpoint)
-        requested_set = set(requested)
-        selected = tuple(
-            item for item_id, item in zip(collection["itemIds"], collection["items"])
-            if item_id in requested_set
-        )
-        prior = tuple(
-            item for item in run.effective_review_checkpoints
-            if item.work_item_id == work_item_id and item.collection_id == collection_id
-            and item.checkpoint_id not in {checkpoint_id, supersedes_checkpoint_id}
-        )
-        self._validate_plugin_checkpoint(state, checkpoint, selected, prior)
-        replayed = checkpoint_id in run.review_checkpoints
-        run.record_review_checkpoints((checkpoint,))
-        state["validated_checkpoint_draft"] = None
-        state["active_semantic_task"] = None
-        state["task_context"] = None
-        state["active_semantic_task_payload"] = None
-        relevant = tuple(
-            item for item in run.effective_review_checkpoints
-            if item.work_item_id == work_item_id and item.collection_id == collection_id
-        )
-        covered = {item_id for item in relevant for item_id in item.item_ids}
-        total = len(collection["itemIds"])
-        return self._response(run_id, "review_checkpointed", {
-            "workItemId": work_item_id,
-            "collectionId": collection_id,
-            "checkpointId": checkpoint_id,
-            "supersedesCheckpointId": supersedes_checkpoint_id,
-            "replayed": replayed,
-            "acceptedItemIds": list(requested),
-            "coverage": {
-                "reviewedItems": len(covered),
-                "remainingItems": total - len(covered),
-                "totalItems": total,
-                "complete": len(covered) == total,
-            },
-        }, operation_id=checkpoint_id, replayed=replayed)
 
     @staticmethod
     def _evidence_handle_offset(
@@ -2181,35 +2478,24 @@ class InteractivePluginController:
                 offset += len(EvidenceHandleRegistry.from_packet(candidate_id, packet).handles)
         return offset
 
-    @staticmethod
     def _publish_semantic_task(
-        state: Mapping[str, Any], task: dict[str, Any],
+        self, state: Mapping[str, Any], task: dict[str, Any],
     ) -> dict[str, Any]:
-        contract = state.get("agent_contract")
+        started_ns = time.monotonic_ns()
         domain_contract = state.get("domain_result_contract")
-        if contract is None and domain_contract is None:
+        if domain_contract is None:
             state["active_semantic_task"] = None
             state["task_context"] = None
             return task
         run: InteractivePlatformRun = state["run"]
         work_item_id = str(task.get("workItemId") or "")
-        accepted_checkpoint_ids = sorted(
-            checkpoint.checkpoint_id
-            for checkpoint in run.effective_review_checkpoints
-            if checkpoint.work_item_id == work_item_id
-        )
         binding = {
             "runId": run.context.run_id,
             "workItemId": work_item_id,
             "kind": task.get("kind"),
             "collectionId": task.get("collectionId"),
             "itemIds": list(task.get("itemIds", ())),
-            "reviewCheckpointIds": list(task.get("reviewCheckpointIds", ())),
-            "acceptedCheckpointIds": accepted_checkpoint_ids,
-            "contractDigest": (
-                contract.contract_digest if contract is not None
-                else domain_contract.contract_digest
-            ),
+            "contractDigest": domain_contract.contract_digest,
         }
         task_digest = "sha256:" + hashlib.sha256(json.dumps(
             binding, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -2221,68 +2507,149 @@ class InteractivePluginController:
             "collectionId": task.get("collectionId"),
             "itemIds": list(task.get("itemIds", ())),
         }
-        if domain_contract is not None and contract is None:
-            public_task = dict(task)
-            packet = run.investigations.get(work_item_id)
-            registry = None
-            if packet is not None:
-                registry = EvidenceHandleRegistry.from_packet(
-                    work_item_id, packet,
-                    start_ordinal=InteractivePluginController._evidence_handle_offset(
-                        run, work_item_id,
-                    ),
-                )
-                state["evidence_handle_registry"] = registry
-                public_task["evidenceHandles"] = [
-                    registry.resolve(handle).as_public()
-                    for handle in registry.handles
-                ]
-                public_task["agentView"] = _domain_agent_view(
-                    packet,
-                    registry,
-                    domain_data=InteractivePluginController._domain_agent_data(state, packet),
-                )
-            # Explicitly negotiated registrations use the minimal boundary;
-            # legacy registrations retain the old projection during migration.
-            compatibility = state.get("compatibility")
-            if (
-                state.get("registration").compatibility is not None
-                and compatibility is not None
-                and compatibility.protocol_version == HOST_PROTOCOL_VERSION
-            ):
-                public_task.pop("investigation", None)
-                public_task.pop("evidenceHandles", None)
-                if "reviewContext" in public_task and registry is not None:
-                    # Document context is already part of the compact domain
-                    # projection.  Do not repeat the large source-fact index
-                    # on every semantic boundary.
-                    raw_review_context = public_task["reviewContext"]
-                    if isinstance(raw_review_context, Mapping):
-                        context_only = {
-                            "documentContext": raw_review_context.get("documentContext", {}),
-                        }
-                        public_task["reviewContext"] = _agent_safe_value(
-                            context_only, registry,
-                        )
-                    else:
-                        public_task.pop("reviewContext", None)
-            for field_name in (
-                "workItemId", "collectionId", "itemIds", "reviewCheckpointIds",
-                "coverage",
-            ):
-                public_task.pop(field_name, None)
-            public_task["domainContract"] = _domain_result_contract_task(domain_contract)
-            state["task_context"] = TaskContext.from_task(
-                run.context.run_id, task,
-                contract_digest=domain_contract.contract_digest,
-                task_digest=task_digest,
+        public_task = dict(task)
+        packet = run.investigations.get(work_item_id)
+        registry = None
+        if packet is not None:
+            registry = EvidenceHandleRegistry.from_packet(
+                work_item_id, packet,
+                start_ordinal=InteractivePluginController._evidence_handle_offset(
+                    run, work_item_id,
+                ),
             )
-            state["active_semantic_task_payload"] = _plain(public_task)
-            return public_task
-        task["taskDigest"] = task_digest
-        state["task_context"] = None
-        state["active_semantic_task_payload"] = _plain(task)
-        return task
+            state["evidence_handle_registry"] = registry
+            public_task["agentView"] = _domain_agent_view(
+                packet,
+                registry,
+                domain_data=InteractivePluginController._domain_agent_data(state, packet),
+            )
+        public_task.pop("investigation", None)
+        public_task.pop("evidenceHandles", None)
+        if "reviewContext" in public_task and registry is not None:
+            # Document context is already part of the compact domain
+            # projection.  Do not repeat the large source-fact index
+            # on every semantic boundary.
+            raw_review_context = public_task["reviewContext"]
+            if isinstance(raw_review_context, Mapping):
+                context_only = {
+                    "documentContext": raw_review_context.get("documentContext", {}),
+                }
+                public_task["reviewContext"] = _agent_safe_value(
+                    context_only, registry,
+                )
+            else:
+                public_task.pop("reviewContext", None)
+        for field_name in (
+            "workItemId", "collectionId", "itemIds",
+            "coverage",
+        ):
+            public_task.pop(field_name, None)
+        public_task["domainContract"] = _domain_result_contract_task(
+            domain_contract,
+            plugin_id=state["registration"].manifest.plugin_id,
+        )
+        try:
+            public_task = _bound_semantic_task(public_task)
+        except PlatformContractError:
+            # Do not leave a half-published semantic boundary when a plugin
+            # contract itself is larger than the platform's hard budget.
+            state["active_semantic_task"] = None
+            state["task_context"] = None
+            state["active_semantic_task_payload"] = None
+            state["evidence_handle_registry"] = None
+            raise
+        state["task_context"] = TaskContext.from_task(
+            run.context.run_id, task,
+            contract_digest=domain_contract.contract_digest,
+            task_digest=task_digest,
+        )
+        state["active_semantic_task_payload"] = _plain(public_task)
+        payload_bytes = len(json.dumps(
+            public_task, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8"))
+        run.record_semantic_task_metrics(
+            duration_ms=max(0, int((time.monotonic_ns() - started_ns) / 1_000_000)),
+            payload_bytes=payload_bytes,
+        )
+        state["semantic_task_published_at_ns"] = time.monotonic_ns()
+        return public_task
+
+    def _publish_common_review_task(
+        self, state: Mapping[str, Any], task: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Publish an already bounded common-review task without plugin Schema."""
+        started_ns = time.monotonic_ns()
+        public_task = _plain(task)
+        invariant_program = _simple_invariants(state["plugin"])
+        if invariant_program.agent_rules:
+            public_task["invariantRules"] = list(invariant_program.agent_rules)
+        registration: PluginRegistration = state["registration"]
+        semantic_digest = registration.semantic_instructions_sha256
+        if semantic_digest is not None:
+            check = state["run"].check
+            public_task["semanticInstructions"] = {
+                "sha256": semantic_digest,
+                "uri": _semantic_instructions_uri(
+                    registration.manifest.plugin_id,
+                    check.check_id,
+                    check.version,
+                ),
+            }
+        coordinator = state.get("review_coordinator")
+        if not isinstance(coordinator, IncrementalReviewCoordinator):
+            raise PlatformContractError(
+                "COMMON_REVIEW_UNAVAILABLE", "The common-review coordinator is unavailable",
+            )
+        evidence_bindings = coordinator.active_evidence_bindings
+        public_task["evidencePaging"] = {
+            "total": len(evidence_bindings),
+            "pageSize": min(DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE, 8),
+            "nextCursor": None,
+            "expandTool": "expand_semantic_evidence",
+        }
+        encoded = json.dumps(
+            public_task, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > AGENT_TASK_PAYLOAD_LIMIT:
+            raise PlatformContractError(
+                "REVIEW_BATCH_LIMIT_EXCEEDED",
+                "Projected common-review task exceeds the Host Agent payload limit",
+            )
+        run: InteractivePlatformRun = state["run"]
+        task_digest = "sha256:" + hashlib.sha256(encoded).hexdigest()
+        state["evidence_handle_registry"] = EvidenceHandleRegistry.from_bindings(
+            task_digest,
+            evidence_bindings,
+            tuple(run.investigations.values()),
+            content_by_reference=_common_review_evidence_content(
+                run,
+                evidence_bindings,
+                DocumentSnapshotStore(state["coverage_store"].root),
+            ),
+        )
+        state["active_semantic_task"] = {
+            "taskDigest": task_digest,
+            "kind": "common_review",
+            "workItemId": "",
+            "collectionId": None,
+            "itemIds": [item["itemRef"] for item in public_task["items"]],
+        }
+        state["task_context"] = TaskContext.from_task(
+            run.context.run_id,
+            {
+                "kind": "common_review",
+                "itemIds": state["active_semantic_task"]["itemIds"],
+            },
+            contract_digest=COMMON_REVIEW_CONTRACT,
+            task_digest=task_digest,
+        )
+        state["active_semantic_task_payload"] = public_task
+        run.record_semantic_task_metrics(
+            duration_ms=max(0, int((time.monotonic_ns() - started_ns) / 1_000_000)),
+            payload_bytes=len(encoded),
+        )
+        state["semantic_task_published_at_ns"] = time.monotonic_ns()
+        return public_task
 
     def _semantic_task(self, state: Mapping[str, Any], page_size: int) -> dict[str, Any] | None:
         """Return the next bounded semantic input without changing Evidence or decisions."""
@@ -2290,6 +2657,30 @@ class InteractivePluginController:
         if isinstance(active_payload, Mapping):
             return _plain(active_payload)
         run: InteractivePlatformRun = state["run"]
+        if state.get("review_mode") == "common_review":
+            coordinator = state.get("review_coordinator")
+            if coordinator is None:
+                limit = state["context"].limits.get("maxReviewBatchItems", 64)
+                if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+                    limit = 64
+                coordinator = IncrementalReviewCoordinator.start(
+                    state["coverage_store"],
+                    run_id=run.context.run_id,
+                    atoms=_common_review_atoms(
+                        run,
+                        state["plugin"],
+                        state["context"],
+                        DocumentSnapshotStore(state["coverage_store"].root),
+                    ),
+                    max_batch_items=limit,
+                    max_batch_bytes=AGENT_TASK_PAYLOAD_LIMIT,
+                )
+                state["review_coordinator"] = coordinator
+            task = coordinator.next_task()
+            state["coverage_ledger"] = coordinator.ledger
+            if task is None:
+                return None
+            return self._publish_common_review_task(state, task)
         for work_item_id in run.work_items:
             packet = run.investigations.get(work_item_id)
             if packet is None or work_item_id in run.decisions:
@@ -2330,11 +2721,33 @@ class InteractivePluginController:
                 if not collection["reviewRequired"]
             })
             domain_contract = state.get("domain_result_contract")
-            if domain_contract is not None and state.get("agent_contract") is None:
+            if domain_contract is not None:
+                coverage_ledger = ensure_legacy_domain_results(
+                    state.get("coverage_ledger"),
+                    run_id=run.context.run_id,
+                    work_item_ids=tuple(run.investigations),
+                    check_id=run.check.check_id,
+                )
+                atom = next(
+                    item for item in coverage_ledger.atoms
+                    if item.work_item_id == work_item_id
+                )
+                batch = next(
+                    item for item in coverage_ledger.batches
+                    if atom.atom_id in item.atom_ids
+                )
+                if batch.status == "planned":
+                    coverage_ledger = coverage_ledger.offer(batch.batch_id)
+                elif batch.status not in {"offered", "accepted"}:
+                    raise PlatformContractError(
+                        "INVALID_REVIEW_TRANSITION",
+                        "Current legacy WorkItem is not available for semantic review",
+                        work_item_id=work_item_id,
+                    )
+                self._persist_coverage(state, coverage_ledger, work_item_id=work_item_id)
                 # DomainResult is currently a complete WorkItem submission.
-                # Paging/checkpoint mechanics remain internal and will be
-                # introduced as a domain-stage extension, never as Agent
-                # authored platform fields.
+                # Paging and Evidence expansion remain Host-owned and never
+                # become Agent-authored platform fields.
                 task = {
                     "kind": "domain_review",
                     "workItemId": work_item_id,
@@ -2343,129 +2756,38 @@ class InteractivePluginController:
                 if review_context is not None:
                     task["reviewContext"] = review_context
                 return self._publish_semantic_task(state, task)
-            for collection in collections.values():
-                if not collection["reviewRequired"]:
-                    continue
-                checkpoints = tuple(
-                    item for item in run.effective_review_checkpoints
-                    if item.work_item_id == work_item_id
-                    and item.collection_id == collection["collectionId"]
-                )
-                reviewed = {item_id for checkpoint in checkpoints for item_id in checkpoint.item_ids}
-                all_remaining_pairs = tuple(
-                    (item_id, item) for item_id, item in zip(collection["itemIds"], collection["items"])
-                    if item_id not in reviewed
-                )
-                selected_group = None
-                remaining_pairs = all_remaining_pairs
-                for group in collection["groups"].values():
-                    group_ids = set(group["itemIds"])
-                    group_remaining = tuple(
-                        pair for pair in all_remaining_pairs if pair[0] in group_ids
-                    )
-                    if group_remaining:
-                        selected_group = group
-                        remaining_pairs = group_remaining
-                        break
-                if remaining_pairs:
-                    selected = remaining_pairs[:page_size]
-                    task = {
-                        "kind": "review_evidence_items",
-                        "workItemId": work_item_id,
-                        "collectionId": collection["collectionId"],
-                        "itemIds": [item_id for item_id, _ in selected],
-                        "items": [_plain(item) for _, item in selected],
-                        "group": ({
-                            "groupKey": selected_group["groupKey"],
-                            "values": _plain(selected_group["values"]),
-                            "remainingItems": len(remaining_pairs),
-                        } if selected_group is not None else None),
-                        "referenceCollectionIndex": reference_collection_index,
-                        "coverage": {
-                            "reviewedItems": len(reviewed),
-                            "remainingItems": len(all_remaining_pairs),
-                            "totalItems": len(collection["itemIds"]),
-                        },
-                    }
-                    if review_context is not None:
-                        task["reviewContext"] = review_context
-                    contract = state.get("agent_contract")
-                    if contract is not None:
-                        schema = contract.checkpoint_payload_schemas.get(
-                            collection["collectionId"],
-                        )
-                        if schema is None:
-                            raise PlatformContractError(
-                                "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                                "The plugin emitted a review-required collection without a registered checkpoint schema",
-                                work_item_id=work_item_id,
-                            )
-                        task["agentContract"] = _agent_contract_task(
-                            contract,
-                            input_kind="reviewCheckpoint",
-                            schema=schema,
-                            semantic_rules=contract.checkpoint_semantic_rules.get(
-                                collection["collectionId"], (),
-                            ),
-                        )
-                    return self._publish_semantic_task(state, task)
-            review_collections = tuple(
-                collection for collection in collections.values()
-                if collection["reviewRequired"]
+            raise PlatformContractError(
+                "DOMAIN_RESULT_REQUIRED",
+                "Interactive Runs require a DomainResultContract",
             )
-            if review_collections:
-                checkpoints = tuple(
-                    item for item in run.effective_review_checkpoints
-                    if item.work_item_id == work_item_id
-                )
-                task = {
-                    "kind": "finalize_decision",
-                    "workItemId": work_item_id,
-                    "reviewCheckpointIds": [item.checkpoint_id for item in checkpoints],
-                    "referenceCollectionIndex": reference_collection_index,
-                    "investigation": _packet(packet, include_evidence=False),
-                }
-                if review_context is not None:
-                    task["reviewContext"] = review_context
-                contract = state.get("agent_contract")
-                if contract is not None:
-                    finalization_schema = contract.finalization_schema
-                    if finalization_schema is None:
-                        raise PlatformContractError(
-                            "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                            "The plugin requires finalization without a registered finalization schema",
-                            work_item_id=work_item_id,
-                        )
-                    task["agentContract"] = _agent_contract_task(
-                        contract,
-                        input_kind="finalization",
-                        schema=finalization_schema,
-                    )
-                return self._publish_semantic_task(state, task)
-            task = {
-                "kind": "decide_work_item",
-                "workItemId": work_item_id,
-                "referenceCollectionIndex": reference_collection_index,
-                # A normal product client does not expose the diagnostic
-                # expansion operations.  When no declared collection gives
-                # the Host a bounded paging contract, return the complete
-                # immutable packet at the semantic boundary so the Agent can
-                # make an evidence-backed decision without falling back to a
-                # low-level tool.
-                "investigation": _packet(packet, include_evidence=not bool(collections)),
-            }
-            contract = state.get("agent_contract")
-            if contract is not None:
-                task["agentContract"] = _agent_contract_task(
-                    contract,
-                    input_kind="decision",
-                    schema=_direct_decision_schema(),
-                )
-            return self._publish_semantic_task(state, task)
         state["active_semantic_task"] = None
         state["task_context"] = None
         state["active_semantic_task_payload"] = None
         return None
+
+    @staticmethod
+    def _persist_coverage(
+        state: Mapping[str, Any], coverage_ledger: Any, *,
+        work_item_id: str | None = None,
+    ) -> None:
+        coverage_store = state.get("coverage_store")
+        if not isinstance(coverage_store, JsonCoverageLedgerStore):
+            raise PlatformContractError(
+                "COVERAGE_PERSISTENCE_FAILED",
+                "Interactive Run has no Host-owned coverage store",
+                work_item_id=work_item_id,
+            )
+        try:
+            coverage_store.save(coverage_ledger)
+        except PlatformContractError:
+            raise
+        except OSError as error:
+            raise PlatformContractError(
+                "COVERAGE_PERSISTENCE_FAILED",
+                "Review coverage could not be durably persisted",
+                work_item_id=work_item_id,
+            ) from error
+        state["coverage_ledger"] = coverage_ledger
 
     @staticmethod
     def _domain_agent_data(
@@ -2510,7 +2832,7 @@ class InteractivePluginController:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         contract = state.get("domain_result_contract")
-        if contract is None or state.get("agent_contract") is not None:
+        if contract is None:
             raise PlatformContractError(
                 "DOMAIN_RESULT_CONTRACT_UNAVAILABLE",
                 "The active Run does not expose the domain-result submission boundary",
@@ -2543,7 +2865,7 @@ class InteractivePluginController:
                 "DomainResult must be an object",
                 work_item_id=task_context.work_item_id,
             )
-        _validate_agent_schema(
+        _validate_domain_result_schema(
             contract.result_schema, bound_result, work_item_id=task_context.work_item_id,
             error_code="DOMAIN_RESULT_INVALID",
             error_message="DomainResult does not satisfy the Run-frozen domain contract; correct the reported fields",
@@ -2619,8 +2941,7 @@ class InteractivePluginController:
             )
         platform_fields = {
             "runId", "run_id", "workItemId", "work_item_id", "taskDigest",
-            "task_digest", "contractDigest", "contract_digest", "checkpointId",
-            "checkpoint_id", "reviewCheckpointIds", "review_checkpoint_ids",
+            "task_digest", "contractDigest", "contract_digest",
             "finalization", "revision", "runRevision", "run_revision",
             "checkId", "checkVersion",
         }
@@ -2658,9 +2979,80 @@ class InteractivePluginController:
         decision["workItemId"] = task_context.work_item_id
         decision["checkId"] = run.check.check_id
         decision["checkVersion"] = run.check.version
-        response = self.submit_decisions(run_id, (decision,))
+        coverage_ledger = append_legacy_domain_result(
+            state.get("coverage_ledger"),
+            run_id=run_id,
+            work_item_id=task_context.work_item_id,
+            check_id=run.check.check_id,
+            domain_result=bound_result,
+        )
+        self._persist_coverage(
+            state, coverage_ledger, work_item_id=task_context.work_item_id,
+        )
+        response = self._commit_decision_proposals(run_id, (decision,))
         state["task_context"] = None
         return response
+
+    def _commit_common_review_if_complete(
+        self, run_id: str,
+    ) -> dict[str, Any] | None:
+        state = self._state(run_id)
+        if state.get("review_mode") != "common_review":
+            return None
+        coordinator = state.get("review_coordinator")
+        if not isinstance(coordinator, IncrementalReviewCoordinator):
+            return None
+        if any(batch.status != "accepted" for batch in coordinator.ledger.batches):
+            return None
+        run: InteractivePlatformRun = state["run"]
+        undecided = set(run.investigations) - set(run.decisions)
+        if not undecided:
+            return None
+        decisions = assemble_common_review_decisions(
+            coordinator.ledger,
+            check_id=run.check.check_id,
+            check_version=run.check.version,
+        )
+        return self._commit_decision_proposals(run_id, decisions)
+
+    def submit_common_review(
+        self, run_id: str, submission: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Accept one common batch through generated invariant and Host validation."""
+        self._assert_active_owner(run_id)
+        state = self._state(run_id)
+        if state.get("review_mode") != "common_review":
+            raise PlatformContractError(
+                "COMMON_REVIEW_UNAVAILABLE",
+                "The active Run does not use the Host common-review boundary",
+            )
+        task_context = state.get("task_context")
+        if not isinstance(task_context, TaskContext) or task_context.kind != "common_review":
+            raise PlatformContractError(
+                "AGENT_SEMANTIC_TASK_STALE",
+                "There is no active common-review task; refresh the semantic boundary",
+            )
+        coordinator = state.get("review_coordinator")
+        if not isinstance(coordinator, IncrementalReviewCoordinator):
+            raise PlatformContractError(
+                "COMMON_REVIEW_UNAVAILABLE", "The common-review coordinator is unavailable",
+            )
+        _simple_invariants(state["plugin"]).validate(submission)
+        coordinator.submit(submission)
+        state["coverage_ledger"] = coordinator.ledger
+        state["active_semantic_task"] = None
+        state["active_semantic_task_payload"] = None
+        state["task_context"] = None
+        state["evidence_handle_registry"] = None
+        committed = self._commit_common_review_if_complete(run_id)
+        if committed is not None:
+            return committed
+        return self._response(run_id, "review_batch_accepted", {
+            "accepted": True,
+            "remainingBatches": sum(
+                batch.status == "planned" for batch in coordinator.ledger.batches
+            ),
+        })
 
     @staticmethod
     def _resolve_task_handles(
@@ -2668,9 +3060,9 @@ class InteractivePluginController:
     ) -> dict[str, Any]:
         """Resolve task-local Agent handles before plugin semantic validation.
 
-        This is intentionally a compatibility bridge: legacy platform Evidence
-        references remain unchanged until the plugin contract migrates, while
-        opaque handles are translated only through the active Host registry.
+        Only Host-issued task-local handles are translated through the active
+        registry. Platform Evidence IDs are never accepted as a compatibility
+        fallback.
         """
         if registry is None:
             return dict(value)
@@ -2679,7 +3071,12 @@ class InteractivePluginController:
             if isinstance(current, Mapping):
                 result: dict[str, Any] = {}
                 for key, item in current.items():
-                    if key in {"evidenceRefs", "evidence_refs", "classificationEvidenceRefs", "supportedBy", "supported_by"} and isinstance(item, (tuple, list)):
+                    if key in {"evidenceRefs", "evidence_refs", "classificationEvidenceRefs"}:
+                        raise PlatformContractError(
+                            "PLATFORM_EVIDENCE_REFERENCE_FORBIDDEN",
+                            "DomainResult must use supportedBy task-local handles instead of platform Evidence fields",
+                        )
+                    if key in {"supportedBy", "supported_by"} and isinstance(item, (tuple, list)):
                         resolved: list[Any] = []
                         for ref in item:
                             if isinstance(ref, str) and ref.startswith("R"):
@@ -2698,7 +3095,10 @@ class InteractivePluginController:
                                 else:
                                     resolved.append(bound.source_chunk_id or bound.evidence_id)
                             else:
-                                resolved.append(ref)
+                                raise PlatformContractError(
+                                    "PLATFORM_EVIDENCE_REFERENCE_FORBIDDEN",
+                                    "DomainResult Evidence must use Host-issued task-local handles",
+                                )
                         result[str(key)] = resolved
                     else:
                         result[str(key)] = visit(item)
@@ -2710,11 +3110,11 @@ class InteractivePluginController:
         return visit(value)
 
     def advance(
-        self, run_id: str, *, review_checkpoint: Mapping[str, Any] | None = None,
-        decision: Mapping[str, Any] | None = None,
-        domain_result: Mapping[str, Any] | None = None,
+        self, run_id: str, *, domain_result: Mapping[str, Any] | None = None,
+        review_submission: Mapping[str, Any] | None = None,
         closeout: Mapping[str, Any] | None = None,
         page_size: int | None = None,
+        transport_started_ns: int | None = None,
     ) -> dict[str, Any]:
         """Drive deterministic work until the next semantic boundary or terminal result."""
         self._assert_active_owner(run_id)
@@ -2732,50 +3132,49 @@ class InteractivePluginController:
         accepted_operation_id: str | None = None
         operation_replayed = False
         if closeout is not None:
-            if review_checkpoint is not None or decision is not None or domain_result is not None:
+            if domain_result is not None or review_submission is not None:
                 raise PlatformContractError(
                     "WORKFLOW_INPUT_CONFLICT",
                     "Run closeout cannot be combined with semantic input",
                 )
             return self.finish(
                 run_id, str(closeout["status"]), closeout.get("failures", ()),
+                transport_started_ns=transport_started_ns,
             )
         size = min(page_size or DEFAULT_EVIDENCE_COLLECTION_PAGE_SIZE, MAX_EVIDENCE_COLLECTION_PAGE_SIZE)
-        semantic_inputs = sum(item is not None for item in (review_checkpoint, decision, domain_result))
-        if semantic_inputs > 1:
+        if domain_result is not None and review_submission is not None:
             raise PlatformContractError(
                 "WORKFLOW_INPUT_CONFLICT",
-                "A Run advance accepts only one semantic input",
+                "Submit either a DomainResult or a common review batch, not both",
             )
         if domain_result is not None:
+            published_at_ns = state.get("semantic_task_published_at_ns")
             domain_response = self.submit_domain_result(run_id, domain_result)
+            # Do not persist wait telemetry until the DomainResult itself has
+            # passed validation; rejected Agent input must leave the ledger
+            # byte-for-byte unchanged.
+            state.pop("semantic_task_published_at_ns", None)
+            if isinstance(published_at_ns, int):
+                state["run"].record_agent_wait(
+                    duration_ms=max(0, int((time.monotonic_ns() - published_at_ns) / 1_000_000)),
+                )
             accepted_operation_id = domain_response.get("operationId")
             operation_replayed = bool(domain_response.get("replayed"))
-        if review_checkpoint is not None:
-            checkpoint_response = self.checkpoint_review(
-                run_id,
-                str(review_checkpoint["workItemId"]),
-                str(review_checkpoint["collectionId"]),
-                tuple(review_checkpoint["itemIds"]),
-                review_checkpoint["payload"],
-                review_checkpoint.get("supersedesCheckpointId"),
-                review_checkpoint.get("contractDigest"),
-                review_checkpoint.get("taskDigest"),
-            )
-            accepted_operation_id = checkpoint_response.get("operationId")
-            operation_replayed = bool(checkpoint_response.get("replayed"))
-        if decision is not None:
-            submitted = dict(decision)
-            work_item_id = str(submitted.get("workItemId", ""))
-            if "finalization" in submitted and "reviewCheckpointIds" not in submitted:
-                submitted["reviewCheckpointIds"] = [
-                    item.checkpoint_id for item in state["run"].effective_review_checkpoints
-                    if item.work_item_id == work_item_id
-                ]
-            decision_response = self.submit_decisions(run_id, (submitted,))
-            accepted_operation_id = decision_response.get("operationId")
-            operation_replayed = bool(decision_response.get("replayed"))
-
+        elif review_submission is not None:
+            published_at_ns = state.get("semantic_task_published_at_ns")
+            review_response = self.submit_common_review(run_id, review_submission)
+            state.pop("semantic_task_published_at_ns", None)
+            if isinstance(published_at_ns, int):
+                state["run"].record_agent_wait(
+                    duration_ms=max(0, int((time.monotonic_ns() - published_at_ns) / 1_000_000)),
+                )
+            accepted_operation_id = review_response.get("operationId")
+            operation_replayed = bool(review_response.get("replayed"))
+        else:
+            recovered_commit = self._commit_common_review_if_complete(run_id)
+            if recovered_commit is not None:
+                accepted_operation_id = recovered_commit.get("operationId")
+                operation_replayed = bool(recovered_commit.get("replayed"))
         # One call can cross at most discovery, one bounded inspection batch,
         # and the resulting semantic or terminal boundary.
         for _ in range(3):
@@ -2793,8 +3192,16 @@ class InteractivePluginController:
                 self.inspect(run_id, pending_ids, page_size=min(size, len(pending_ids)))
                 continue
             if workflow["state"] == "awaiting_agent_decision":
-                workflow = {**workflow, "requiredNextStep": "advance_plugin_run"}
+                workflow = {
+                    **workflow,
+                    "requiredNextStep": (
+                        "submit_common_review"
+                        if state.get("review_mode") == "common_review"
+                        else "submit_domain_result"
+                    ),
+                }
                 state["run"].record_workflow(workflow)
+                self._record_transport_timing(state, transport_started_ns)
                 return self._response(
                     run_id, "awaiting_agent_decision",
                     {"semanticTask": self._semantic_task(state, size)},
@@ -2802,7 +3209,9 @@ class InteractivePluginController:
                     replayed=operation_replayed,
                 )
             if workflow["state"] == "ready_to_finish":
-                terminal = self.finish(run_id, "completed")
+                terminal = self.finish(
+                    run_id, "completed", transport_started_ns=transport_started_ns,
+                )
                 if accepted_operation_id is not None:
                     terminal["operationId"] = accepted_operation_id
                     terminal["replayed"] = operation_replayed
@@ -2813,6 +3222,7 @@ class InteractivePluginController:
                 "requiredNextStep": "advance_plugin_run_or_recover_work_item",
             }
             state["run"].record_workflow(workflow)
+            self._record_transport_timing(state, transport_started_ns)
             return self._response(
                 run_id, "blocked", {"semanticTask": None}, workflow=workflow,
                 operation_id=accepted_operation_id, replayed=operation_replayed,
@@ -2821,133 +3231,19 @@ class InteractivePluginController:
             "WORKFLOW_ADVANCE_INVALID", "Host workflow did not reach a semantic or terminal boundary",
         )
 
-    def _assemble_checkpointed_decision(
-        self, state: Mapping[str, Any], value: Mapping[str, Any],
-    ) -> Mapping[str, Any]:
-        checkpoint_ids = value.get("reviewCheckpointIds")
-        finalization = value.get("finalization")
-        if checkpoint_ids is None and finalization is None:
-            return value
-        if not isinstance(checkpoint_ids, (tuple, list)) or not checkpoint_ids or not isinstance(finalization, Mapping):
-            raise PlatformContractError(
-                "INVALID_REVIEW_CHECKPOINT", "Checkpointed decision requires checkpoint IDs and finalization",
-            )
-        if "details" in value:
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_CONFLICT", "Checkpointed decision cannot also provide preassembled details",
-            )
-        run: InteractivePlatformRun = state["run"]
-        work_item_id = value.get("workItemId")
-        effective_ids = {item.checkpoint_id for item in run.effective_review_checkpoints}
-        checkpoints: list[ReviewCheckpoint] = []
-        for checkpoint_id in checkpoint_ids:
-            checkpoint = run.review_checkpoints.get(checkpoint_id)
-            if (
-                checkpoint is None or checkpoint.work_item_id != work_item_id
-                or checkpoint_id not in effective_ids
-            ):
-                raise PlatformContractError(
-                    "UNKNOWN_REVIEW_CHECKPOINT",
-                    "Decision references an unknown or superseded checkpoint for this WorkItem",
-                )
-            checkpoints.append(checkpoint)
-        collection_ids = {item.collection_id for item in checkpoints}
-        collections = state["evidence_collections"].get(work_item_id, {})
-        if not collection_ids or not collection_ids.issubset(collections):
-            raise PlatformContractError(
-                "UNKNOWN_EVIDENCE_COLLECTION", "Decision references an unknown Evidence collection",
-            )
-        required_collection_ids = {
-            collection_id for collection_id, collection in collections.items()
-            if collection["reviewRequired"] and collection["itemIds"]
-        }
-        if collection_ids != required_collection_ids:
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_INCOMPLETE",
-                "Decision checkpoints must cover every required Evidence collection",
-            )
-        for collection_id in collection_ids:
-            expected = set(collections[collection_id]["itemIds"])
-            covered = [
-                item_id for checkpoint in checkpoints
-                if checkpoint.collection_id == collection_id
-                for item_id in checkpoint.item_ids
-            ]
-            if len(covered) != len(set(covered)):
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_CONFLICT", "Decision checkpoints cover an Evidence item more than once",
-                )
-            if set(covered) != expected:
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_INCOMPLETE", "Decision checkpoints must cover every Evidence collection item exactly once",
-                )
-        assembler = getattr(state["plugin"], "assemble_review_checkpoints", None)
-        if not callable(assembler):
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin does not implement its declared checkpoint assembler",
-                    work_item_id=str(work_item_id),
-                )
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_UNSUPPORTED", "Plugin does not provide checkpointed decision assembly",
-            )
-        try:
-            details = assembler(
-                tuple(checkpoints), dict(finalization), run.investigations[work_item_id],
-                run.check, state["context"],
-            )
-        except PlatformContractError as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin rejected schema-valid finalization outside its declared contract",
-                    work_item_id=str(work_item_id),
-                ) from error
-            raise
-        except (AssertionError, KeyError, TypeError) as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin failed while assembling schema-valid finalization input",
-                    work_item_id=str(work_item_id),
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin could not assemble checkpointed review details",
-            ) from error
-        except Exception as error:
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_RUNTIME_FAILURE",
-                    "The plugin failed unexpectedly while assembling finalization input",
-                    work_item_id=str(work_item_id),
-                ) from error
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin could not assemble checkpointed review details",
-            ) from error
-        if not isinstance(details, Mapping):
-            if state.get("agent_contract") is not None:
-                raise PlatformContractError(
-                    "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                    "The plugin checkpoint assembler returned a value outside its declared runtime contract",
-                    work_item_id=str(work_item_id),
-                )
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_ASSEMBLY_FAILED", "Plugin checkpoint assembler must return decision details",
-            )
-        assembled = dict(value)
-        assembled.pop("reviewCheckpointIds", None)
-        assembled.pop("finalization", None)
-        assembled["details"] = dict(details)
-        return assembled
 
-    def submit_decisions(self, run_id: str, decisions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    def _commit_decision_proposals(
+        self, run_id: str, decisions: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         run: InteractivePlatformRun = state["run"]
         for item in decisions:
-            self._validate_decision_contract(state, item)
-        assembled = tuple(self._assemble_checkpointed_decision(state, item) for item in decisions)
+            if not isinstance(item, Mapping):
+                raise PlatformContractError(
+                    "INVALID_DECISION", "Decision input must be an object",
+                )
+        assembled = tuple(dict(item) for item in decisions)
         proposals = tuple(_proposal(item, run.check.check_id, run.check.version) for item in assembled)
         # Validate the platform delivery projection before a Decision becomes
         # durable. A plugin contract/runtime mismatch must not surface for the
@@ -2962,16 +3258,7 @@ class InteractivePluginController:
                 )
             try:
                 extract_result_delivery(proposal, packet)
-            except PlatformContractError as error:
-                if (
-                    state.get("agent_contract") is not None
-                    and error.code == "RESULT_DELIVERY_INVALID"
-                ):
-                    raise PlatformContractError(
-                        "PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH",
-                        "The plugin assembled terminal delivery data outside the platform result contract",
-                        work_item_id=proposal.work_item_id,
-                    ) from error
+            except PlatformContractError:
                 raise
         receipts: list[CommitReceipt] = []
         operation_ids: list[str] = []
@@ -3065,9 +3352,6 @@ class InteractivePluginController:
             "inspected": len(run.investigations),
             "decisionsCommitted": len(run.decisions),
             "operations": len(run.operations),
-            "reviewCheckpoints": len(run.effective_review_checkpoints),
-            "reviewCheckpointRecords": len(run.review_checkpoints),
-            "reviewItemsCheckpointed": sum(len(item.item_ids) for item in run.effective_review_checkpoints),
             "evidenceGraph": _evidence_graph_progress(run),
             "inspectionBatching": {
                 "attempts": run.inspection_batches,
@@ -3090,18 +3374,13 @@ class InteractivePluginController:
             operation_id=operation_id, message=message, details=details,
         )
 
-    def uses_agent_contract(self, run_id: str) -> bool:
-        """Return whether the active Run uses the strict executable boundary."""
-        return self._state(run_id).get("agent_contract") is not None
-
     @staticmethod
     def _submitted_work_item_id(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
         value: Any = arguments
         if tool_name == "advance_plugin_run":
-            value = arguments.get("reviewCheckpoint") or arguments.get("decision")
-        elif tool_name == "submit_decisions":
-            decisions = arguments.get("decisions")
-            value = decisions[0] if isinstance(decisions, (tuple, list)) and decisions else None
+            # DomainResult deliberately contains no platform identity. The
+            # active task context is the sole source of WorkItem binding.
+            value = None
         if isinstance(value, Mapping):
             work_item_id = value.get("workItemId")
             if isinstance(work_item_id, str) and work_item_id:
@@ -3113,61 +3392,24 @@ class InteractivePluginController:
         state: Mapping[str, Any], work_item_id: str | None,
         tool_name: str, arguments: Mapping[str, Any],
     ) -> dict[str, Any]:
-        contract = state.get("agent_contract")
         domain_contract = state.get("domain_result_contract")
         descriptor: dict[str, Any] = {
             "contractDigest": (
-                contract.contract_digest if contract is not None
-                else domain_contract.contract_digest if domain_contract is not None
-                else None
+                domain_contract.contract_digest if domain_contract is not None else None
             ),
             "workItemId": work_item_id or "run",
         }
-        if domain_contract is not None and contract is None:
+        if state.get("review_mode") == "common_review":
+            descriptor["contractDigest"] = COMMON_REVIEW_CONTRACT
+            descriptor["inputKind"] = "commonReviewSubmission"
+            return descriptor
+        if domain_contract is not None:
             descriptor["inputKind"] = "domainResult"
             return descriptor
-        submitted: Any = arguments
-        if tool_name == "advance_plugin_run":
-            submitted = arguments.get("reviewCheckpoint") or arguments.get("decision")
-        if (
-            isinstance(submitted, Mapping)
-            and isinstance(submitted.get("supersedesCheckpointId"), str)
-        ):
-            descriptor.update({
-                "inputKind": "reviewCheckpointCorrection",
-                "collectionId": submitted.get("collectionId"),
-                "supersedesCheckpointId": submitted["supersedesCheckpointId"],
-            })
-            return descriptor
-
-        run: InteractivePlatformRun = state["run"]
-        collections = state.get("evidence_collections", {}).get(work_item_id, {})
-        has_required_collection = False
-        for collection in collections.values():
-            if not collection["reviewRequired"] or not collection["itemIds"]:
-                continue
-            has_required_collection = True
-            reviewed = {
-                item_id
-                for checkpoint in run.effective_review_checkpoints
-                if checkpoint.work_item_id == work_item_id
-                and checkpoint.collection_id == collection["collectionId"]
-                for item_id in checkpoint.item_ids
-            }
-            remaining = sorted(set(collection["itemIds"]) - reviewed)
-            if remaining:
-                descriptor.update({
-                    "inputKind": "reviewCheckpoint",
-                    "collectionId": collection["collectionId"],
-                    "remainingItemsDigest": hashlib.sha256(
-                        "\x1f".join(remaining).encode("utf-8")
-                    ).hexdigest(),
-                })
-                return descriptor
-        descriptor["inputKind"] = (
-            "finalization" if has_required_collection else "decision"
+        raise PlatformContractError(
+            "DOMAIN_RESULT_REQUIRED",
+            "Interactive Runs require a DomainResultContract",
         )
-        return descriptor
 
     def handle_boundary_error(
         self, run_id: str, error: PlatformContractError, *,
@@ -3177,7 +3419,6 @@ class InteractivePluginController:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
         run: InteractivePlatformRun = state["run"]
-        contract = state.get("agent_contract")
         domain_contract = state.get("domain_result_contract")
         policy = boundary_error_policy(error.code)
         if run.status != "running":
@@ -3188,9 +3429,7 @@ class InteractivePluginController:
                 "retryDisposition": policy.retry_disposition,
                 "requiredNextStep": policy.required_next_step,
                 "requestId": f"request:{uuid.uuid4().hex}",
-                "contractDigest": (
-                    contract.contract_digest if contract is not None else None
-                ),
+                "contractDigest": None,
                 "errors": [dict(item) for item in error.errors],
                 "correctionBudget": None,
                 "terminalStatus": None,
@@ -3223,7 +3462,10 @@ class InteractivePluginController:
             and event.details.get("retryDisposition") == "agent_correction"
             for event in run.events
         )
-        strict_boundary = contract is not None or domain_contract is not None
+        strict_boundary = (
+            domain_contract is not None
+            or state.get("review_mode") == "common_review"
+        )
         exhausted = (
             strict_boundary
             and policy.retry_disposition == "agent_correction"
@@ -3284,6 +3526,8 @@ class InteractivePluginController:
                         for item in error.errors
                     )
                     outward_message += f". Original validation errors: {details}"
+                else:
+                    outward_message += f". Original validation error: {error.message}"
             terminal_policy = boundary_error_policy(outward_code)
             required_next_step = terminal_policy.required_next_step
             retry_disposition = terminal_policy.retry_disposition
@@ -3305,9 +3549,7 @@ class InteractivePluginController:
             "retryDisposition": retry_disposition,
             "requiredNextStep": required_next_step,
             "requestId": request_id,
-            "contractDigest": (
-                contract.contract_digest if contract is not None else None
-            ),
+            "contractDigest": None,
             "errors": [dict(item) for item in error.errors],
             "correctionBudget": correction_budget,
             "terminalStatus": terminal_status,
@@ -3366,10 +3608,84 @@ class InteractivePluginController:
                 "RESULT_PUBLICATION_FAILED", "Complete terminal result could not be durably published",
             ) from error
 
+    def _terminalize_coverage(self, state: Mapping[str, Any], status: str) -> None:
+        """Freeze the Host-owned review ledger before the platform terminal commit."""
+        run: InteractivePlatformRun = state["run"]
+        if state.get("review_mode") == "common_review":
+            coordinator = state.get("review_coordinator")
+            if coordinator is None:
+                return
+            if not isinstance(coordinator, IncrementalReviewCoordinator):
+                raise PlatformContractError(
+                    "COMMON_REVIEW_UNAVAILABLE", "The common-review coordinator is unavailable",
+                )
+            if status in {"partial", "failed"}:
+                reason = f"Run closed as {status} before this review batch was accepted."
+                for batch in coordinator.ledger.batches:
+                    if batch.status in {"planned", "offered"}:
+                        coordinator.block(batch.batch_id, reason)
+            coordinator.finish(status)
+            state["coverage_ledger"] = coordinator.ledger
+            return
+        coverage_ledger = state.get("coverage_ledger")
+        if coverage_ledger is not None and coverage_ledger.terminal_status is not None:
+            terminal = coverage_ledger.finalize(status)
+            self._persist_coverage(state, terminal)
+            return
+        coverage_ledger = ensure_legacy_domain_results(
+            coverage_ledger,
+            run_id=run.context.run_id,
+            work_item_ids=tuple(run.work_items),
+            check_id=run.check.check_id,
+        )
+        # Active Runs created before coverage side-ledgers existed may already
+        # contain durable Decisions. Recover only the missing migration record;
+        # current Runs retain the original validated DomainResult instead.
+        for work_item_id, decision in run.decisions.items():
+            atom = next(
+                item for item in coverage_ledger.atoms
+                if item.work_item_id == work_item_id
+            )
+            batch = next(
+                item for item in coverage_ledger.batches if atom.atom_id in item.atom_ids
+            )
+            if batch.status == "accepted":
+                continue
+            recovered = {
+                "migrationRecoveredDecision": {
+                    "result": decision.result,
+                    "reason": decision.reason,
+                    "findings": [
+                        {
+                            "dimension": finding.dimension,
+                            "status": finding.status,
+                            "reason": finding.reason,
+                        }
+                        for finding in decision.findings
+                    ],
+                    "details": _plain(decision.details),
+                },
+            }
+            coverage_ledger = append_legacy_domain_result(
+                coverage_ledger,
+                run_id=run.context.run_id,
+                work_item_id=work_item_id,
+                check_id=run.check.check_id,
+                domain_result=recovered,
+            )
+        if status in {"partial", "failed"}:
+            reason = f"Run closed as {status} before this review batch was accepted."
+            for batch in coverage_ledger.batches:
+                if batch.status in {"planned", "offered"}:
+                    coverage_ledger = coverage_ledger.block(batch.batch_id, reason)
+        terminal = coverage_ledger.finalize(status)
+        self._persist_coverage(state, terminal)
+
     def finish(
         self, run_id: str, status: str,
         failures: Sequence[Mapping[str, Any]] = (), *,
         invoke_plugin_hooks: bool = True,
+        transport_started_ns: int | None = None,
     ) -> dict[str, Any]:
         self._assert_active_owner(run_id)
         state = self._state(run_id)
@@ -3391,8 +3707,9 @@ class InteractivePluginController:
             },
         }
         published_artifacts: list[str] = []
+        host_owned_common_review = state.get("review_mode") == "common_review"
         finalize = getattr(state["plugin"], "finalize", None)
-        if invoke_plugin_hooks and callable(finalize):
+        if invoke_plugin_hooks and not host_owned_common_review and callable(finalize):
             try:
                 paths = finalize(
                     tuple(state["run"].work_items.values()),
@@ -3410,7 +3727,7 @@ class InteractivePluginController:
                 ) from error
         summary: Mapping[str, Any] = {}
         summarize = getattr(state["plugin"], "summarize", None)
-        if invoke_plugin_hooks and callable(summarize):
+        if invoke_plugin_hooks and not host_owned_common_review and callable(summarize):
             try:
                 value = summarize(
                     tuple(state["run"].work_items.values()),
@@ -3438,6 +3755,23 @@ class InteractivePluginController:
                 prospective_failures.append(failure)
         prospective_metrics = state["run"].metrics()
         canonical_result_name = f"{run_id}.canonical-result.json"
+        audit_report_name = f"{run_id}.audit-report.md"
+        prospective_ledger = PlatformLedger(
+            state["run"].run,
+            status,
+            receipts=tuple(state["run"].receipts.values()),
+            work_items=tuple(state["run"].work_items.values()),
+            investigations=tuple(state["run"].investigations.values()),
+            decisions=tuple(state["run"].decisions.values()),
+            failures=tuple(prospective_failures),
+            decision_authority=(
+                next(iter(state["run"].receipts.values())).authority
+                if state["run"].receipts else "platform"
+            ),
+        )
+        audit_report = render_audit_report(
+            prospective_ledger, snapshot_root=state["run"].store.root,
+        ).decode("utf-8")
         result_overview, decision_views, review_items = _terminal_result_views(
             status,
             tuple(state["run"].work_items.values()),
@@ -3456,8 +3790,9 @@ class InteractivePluginController:
                 {"workItemId": item.work_item_id, "code": item.code, "message": item.message}
                 for item in prospective_failures
             ],
+            "auditReport": audit_report,
             "metrics": prospective_metrics,
-            "artifacts": [*published_artifacts, canonical_result_name],
+            "artifacts": [*published_artifacts, audit_report_name, canonical_result_name],
             "canonicalResult": canonical_result_name,
         }
         if summary and status != "failed":
@@ -3470,7 +3805,10 @@ class InteractivePluginController:
         ).encode("utf-8")).hexdigest()
         result_document = StagedResultDocument({
             key: value for key, value in full_result_payload.items()
-            if key in {"resultOverview", "summary", "decisions", "reviewItems", "evidenceGraph", "failures"}
+            if key in {
+                "resultOverview", "summary", "decisions", "reviewItems",
+                "evidenceGraph", "failures", "auditReport",
+            }
         }, source_digest=full_result_digest)
         result_artifact = state["run"].store.root / "result-summary.json"
         pending_result_artifact = state["run"].store.root / "result-summary.pending.json"
@@ -3481,11 +3819,34 @@ class InteractivePluginController:
         # Publish the complete result before committing the terminal ledger.
         # If publication fails, the active ledger remains running and a new
         # Host can safely retry closeout from the last committed Decision.
+        timing_snapshot = None
+        if isinstance(transport_started_ns, int):
+            timing_snapshot = (
+                state["run"].transport_ms,
+                state["run"].transport_samples,
+                len(state["run"].events),
+            )
         try:
+            # Delay terminal transport telemetry until all report-generation
+            # work has succeeded.  The timing event is kept in memory and is
+            # committed atomically with the terminal ledger below.
+            if isinstance(transport_started_ns, int):
+                self._record_transport_timing(
+                    state, transport_started_ns, persist=False,
+                )
+            self._terminalize_coverage(state, status)
             result: PlatformRunResult = state["run"].finish(status, typed_failures)
         except PlatformContractError:
+            if timing_snapshot is not None:
+                state["run"].transport_ms = timing_snapshot[0]
+                state["run"].transport_samples = timing_snapshot[1]
+                del state["run"].events[timing_snapshot[2]:]
             raise
         except Exception as error:
+            if timing_snapshot is not None:
+                state["run"].transport_ms = timing_snapshot[0]
+                state["run"].transport_samples = timing_snapshot[1]
+                del state["run"].events[timing_snapshot[2]:]
             raise PlatformContractError(
                 "PLATFORM_LEDGER_PERSIST_FAILED", "Terminal platform ledger could not be durably persisted",
             ) from error
@@ -3493,6 +3854,22 @@ class InteractivePluginController:
         if not canonical_path.is_file():
             raise PlatformContractError(
                 "RESULT_PUBLICATION_FAILED", "Canonical result was not durably published",
+            )
+        audit_report_path = state["run"].store.root / audit_report_name
+        if not audit_report_path.is_file():
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED", "Formal audit report was not durably published",
+            )
+        try:
+            published_report = audit_report_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED", "Formal audit report could not be read",
+            ) from error
+        if published_report != audit_report:
+            raise PlatformContractError(
+                "RESULT_PUBLICATION_FAILED",
+                "Formal audit report differs from the terminal result projection",
             )
         try:
             pending_result_artifact.replace(result_artifact)
@@ -3545,54 +3922,22 @@ class InteractivePluginController:
         failed_ids = {failure.work_item_id for failure in run.failures}
         uninspected = work_item_ids - inspected_ids - failed_ids
         undecided = inspected_ids - set(run.decisions)
-        review_remaining = 0
-        for work_item_id in undecided:
-            for collection in state.get("evidence_collections", {}).get(work_item_id, {}).values():
-                if not collection["reviewRequired"]:
-                    continue
-                item_ids = set(collection["itemIds"])
-                reviewed = {
-                    item_id
-                    for checkpoint in run.effective_review_checkpoints
-                    if checkpoint.work_item_id == work_item_id
-                    and checkpoint.collection_id == collection["collectionId"]
-                    for item_id in checkpoint.item_ids
-                }
-                review_remaining += len(item_ids - reviewed)
         if not state.get("discovery_complete"):
             phase, lifecycle_state, next_step = "discovery", "running", "discover_work_items"
         elif uninspected:
             phase, lifecycle_state, next_step = "inspection", "running", "inspect_work_items"
-        elif undecided and review_remaining:
-            phase, lifecycle_state = "semantic_review", "awaiting_agent_decision"
-            # DomainResult Runs do not expose the removed platform checkpoint
-            # protocol.  Keep the durable progress boundary aligned with the
-            # public MCP catalog so an Agent never follows a stale
-            # ``checkpoint_review`` instruction.
-            next_step = (
-                "advance_plugin_run"
-                if state.get("domain_result_contract") is not None
-                and state.get("agent_contract") is None
-                else "checkpoint_review"
-            )
         elif undecided:
             phase, lifecycle_state = "semantic_review", "awaiting_agent_decision"
             next_step = (
-                "advance_plugin_run"
-                if state.get("domain_result_contract") is not None
-                and state.get("agent_contract") is None
-                else "submit_decisions"
+                "submit_common_review"
+                if state.get("review_mode") == "common_review"
+                else "submit_domain_result"
             )
         elif failed_ids:
             phase, lifecycle_state, next_step = "recovery", "blocked", "recover_work_item"
         else:
             phase, lifecycle_state = "closeout", "ready_to_finish"
-            next_step = (
-                "advance_plugin_run"
-                if state.get("domain_result_contract") is not None
-                and state.get("agent_contract") is None
-                else "finish_plugin_run"
-            )
+            next_step = "advance_plugin_run" if state.get("domain_result_contract") is not None else "finish_plugin_run"
         return {
             "state": lifecycle_state,
             "phase": phase,
@@ -3601,7 +3946,15 @@ class InteractivePluginController:
             "remaining": {
                 "workItemsToInspect": len(uninspected),
                 "workItemsToDecide": len(undecided),
-                "reviewItems": review_remaining,
+                "reviewItems": (
+                    sum(
+                        entry.status in {"planned", "offered"}
+                        for entry in state["review_coordinator"].ledger.entries
+                    )
+                    if isinstance(
+                        state.get("review_coordinator"), IncrementalReviewCoordinator,
+                    ) else 0
+                ),
                 "failures": len(run.failures),
             },
         }
@@ -3643,10 +3996,6 @@ class InteractivePluginController:
                 discovered=len(run.work_items) if run is not None else int(metrics.get("discovered", 0) or 0),
                 inspected=len(run.investigations) if run is not None else int(metrics.get("inspected", 0) or 0),
                 decisions=len(run.decisions) if run is not None else int(metrics.get("decisionsCommitted", 0) or 0),
-                checkpoints=(
-                    len(run.effective_review_checkpoints)
-                    if run is not None else int(metrics.get("reviewCheckpoints", 0) or 0)
-                ),
                 entered_at=boundary_event.occurred_at if boundary_event is not None else (
                     run.run.started_at if run is not None else None
                 ),

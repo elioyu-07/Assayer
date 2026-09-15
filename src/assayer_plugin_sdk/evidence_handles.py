@@ -7,11 +7,12 @@ semantic task.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 import re
+import hashlib
 
 from .contract import InvestigationPacket, PlatformContractError
 
@@ -79,6 +80,76 @@ class EvidenceHandleRegistry:
                 )
         return cls(task_key, handles)
 
+    @classmethod
+    def from_bindings(
+        cls,
+        task_key: str,
+        bindings: Sequence[tuple[str, str]],
+        packets: Sequence[InvestigationPacket],
+        *,
+        content_by_reference: Mapping[str, Any] | None = None,
+    ) -> "EvidenceHandleRegistry":
+        """Bind Host-selected task refs to frozen packet Evidence lineage.
+
+        This is used by incremental common review, whose current batch may
+        expose only a small subset of the Run's Evidence and source chunks.
+        """
+        known: dict[str, tuple[str, str | None]] = {}
+        for packet in packets:
+            for evidence in packet.evidence:
+                known[evidence.evidence_id] = (evidence.evidence_id, None)
+                payload = evidence.payload if isinstance(evidence.payload, Mapping) else {}
+                chunks = payload.get("sourceChunks", ())
+                if not isinstance(chunks, (tuple, list)):
+                    continue
+                for chunk in chunks:
+                    if not isinstance(chunk, Mapping):
+                        continue
+                    chunk_id = str(chunk.get("source_chunk_id") or "").strip()
+                    if chunk_id:
+                        known[chunk_id] = (evidence.evidence_id, chunk_id)
+        content = content_by_reference or {}
+        handles: dict[str, EvidenceHandle] = {}
+        internal_refs: list[str] = []
+        for binding in bindings:
+            if not isinstance(binding, (tuple, list)) or len(binding) != 2:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_BINDING", "Common Evidence binding is malformed",
+                )
+            handle, internal_ref = binding
+            if not isinstance(handle, str) or re.fullmatch(r"R[1-9][0-9]*", handle) is None:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_BINDING", "Common Evidence handle is malformed",
+                )
+            if not isinstance(internal_ref, str) or not internal_ref:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_BINDING", "Common Evidence identity is malformed",
+                )
+            lineage = known.get(internal_ref)
+            if lineage is None:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_BINDING",
+                    "Common Evidence binding is outside the frozen InvestigationPacket",
+                )
+            if handle in handles:
+                raise PlatformContractError(
+                    "INVALID_REVIEW_BINDING", "Common Evidence handles must be unique",
+                )
+            internal_refs.append(internal_ref)
+            evidence_id, chunk_id = lineage
+            handles[handle] = EvidenceHandle(
+                handle=handle,
+                task_key=task_key,
+                evidence_id=evidence_id,
+                source_chunk_id=chunk_id,
+                content=content.get(internal_ref),
+            )
+        if len(internal_refs) != len(set(internal_refs)):
+            raise PlatformContractError(
+                "INVALID_REVIEW_BINDING", "Common Evidence identities must be unique",
+            )
+        return cls(task_key, handles)
+
     @property
     def handles(self) -> tuple[str, ...]:
         return tuple(self._handles)
@@ -112,6 +183,47 @@ class EvidenceHandleRegistry:
                 f"Unknown Evidence handle: {handle}",
             )
         return value
+
+    def page(self, *, cursor: str | None = None, page_size: int = 20) -> dict[str, Any]:
+        """Return a bounded page of task-local evidence for Host expansion.
+
+        The cursor is derived from this registry's immutable handle set and
+        never exposes WorkItem, Evidence, or source identities.  This keeps
+        pagination in the platform/SDK while plugins only provide evidence.
+        """
+        if not isinstance(page_size, int) or isinstance(page_size, bool) or page_size < 1:
+            raise PlatformContractError(
+                "INVALID_PAGE_SIZE", "Semantic evidence page size must be a positive integer",
+            )
+        size = min(page_size, 100)
+        handles = self.handles
+        fingerprint = hashlib.sha256(
+            "\x1f".join(handles).encode("utf-8"),
+        ).hexdigest()[:16]
+        start = 0
+        if cursor is not None:
+            if not isinstance(cursor, str) or not cursor.startswith(f"{fingerprint}:"):
+                raise PlatformContractError(
+                    "INVALID_CURSOR", "Semantic evidence cursor does not match the active task",
+                )
+            try:
+                start = int(cursor.split(":", 1)[1])
+            except (TypeError, ValueError):
+                raise PlatformContractError(
+                    "INVALID_CURSOR", "Semantic evidence cursor is malformed",
+                ) from None
+            if start < 0 or start > len(handles):
+                raise PlatformContractError(
+                    "INVALID_CURSOR", "Semantic evidence cursor is outside the active task",
+                )
+        selected = handles[start:start + size]
+        end = start + len(selected)
+        return {
+            "items": [self.resolve(handle).as_public() for handle in selected],
+            "itemIds": list(selected),
+            "page": {"start": start, "count": len(selected), "total": len(handles)},
+            "nextCursor": f"{fingerprint}:{end}" if end < len(handles) else None,
+        }
 
 
 __all__ = ["EvidenceHandle", "EvidenceHandleRegistry"]

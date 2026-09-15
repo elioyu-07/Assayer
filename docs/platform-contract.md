@@ -16,7 +16,12 @@ v1](capability-provider-contract-v1.md), and [Canonical Audit Result Contract
 v1](canonical-result-contract-v1.md). Those documents resolve ownership and
 versioning; this reference must not introduce a conflicting rule.
 
-The in-process reference kernel, manifest loader, configuration-quality plugin, and frontend compatibility plugin are implemented under `src/assayer_platform`. The frontend plugin adapts the existing product facade for discovery and investigation, and its Check/Finding gates are applied on the product-facing decision path. The product MCP transport now starts an interactive platform Run by default and persists its lifecycle checkpoints in the Host-owned SQLite database. The browser-shaped ledger and public MCP tools remain compatibility surfaces while the generic ledger supplies the cross-domain lifecycle record.
+The in-process reference kernel and manifest loader are implemented under
+`src/assayer_platform`. Frontend is no longer a compatibility plugin in that
+source tree: its Policy Pack is compiled into the ordinary common-review
+contract and receives frozen input through the browser capability provider.
+The product MCP transport persists interactive lifecycle checkpoints in the
+Host-owned SQLite database.
 
 ## 1. Purpose
 
@@ -343,4 +348,7 @@ The suite uses a deterministic adapter for contract tests and a real adapter for
 
 ## 11. Adoption Rule
 
-The frontend FUA-10 implementation is the first compatibility plugin. It may keep a browser-specific adapter while the platform contract is extracted. No new platform-level field may be named after a frontend-only concept. A second, non-browser plugin must pass the conformance suite before this contract becomes implementation-ready.
+The former Frontend compatibility exception is closed. FUA-10 is distributed
+only from its compiler-generated Policy Pack, and browser-specific collection
+belongs to the browser provider. No platform-level field may be named after a
+frontend-only concept.

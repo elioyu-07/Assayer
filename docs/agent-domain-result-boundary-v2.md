@@ -4,9 +4,18 @@
 |---|---|
 | Document version | 0.1.0 |
 | Date | 2026-09-09 |
-| Status | Adopted; core boundary and installed release gate implemented |
+| Status | Superseded for ordinary authoring; retained as the current Advanced SPI migration record |
 | Owner | Assayer maintainers |
 | Scope | Agent-facing interactive plugin submission and Plugin SDK ownership |
+
+> This document records the current SDK v2 DomainResult implementation. The
+> ordinary authoring target no longer asks a plugin to declare a complete
+> DomainResult Schema or mapper. Platform Constitution v1.1, the Audit Plugin
+> Contract v1.1, and the
+> [Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md)
+> supersede those author-facing requirements. The Host will retain the useful
+> domain-only Agent boundary while replacing complete-WorkItem submission with
+> the common incremental review model.
 
 ## 1. Decision
 
@@ -186,7 +195,8 @@ This target boundary is implemented only when all of the following hold:
 - the Agent Skill no longer instructs checkpoint, preflight, or finalization construction;
 - old interactive envelope submissions are rejected rather than translated.
 
-The core boundary is implemented. Domain plugins that need to split a large
-business review across multiple turns may add a domain-stage contract later;
-that extension must remain domain-only and cannot reintroduce platform
-checkpoint, digest, cursor, or finalization fields.
+This historical core boundary is implemented for the Advanced migration path.
+Ordinary plugins do not add domain-stage contracts. The Host plans bounded
+ReviewBatches, persists common review values, and owns CoverageLedger without
+reintroducing platform checkpoint, digest, cursor, or finalization fields at
+the Agent boundary.

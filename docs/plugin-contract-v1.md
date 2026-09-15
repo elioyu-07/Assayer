@@ -2,260 +2,256 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.2 |
-| Date | 2026-09-07 |
-| Status | Frozen for M2; executable Agent-boundary enforcement is active for declared bundles and pending legacy-plugin migration |
+| Document version | 1.2.0 |
+| Date | 2026-09-14 |
+| Status | Simple author and formal-report contracts frozen; migration in progress |
 | Owner | Assayer maintainers |
+| Authority | Platform Constitution v1.2 |
 
 ## 1. Contract surface
 
-An audit plugin is an independently inspectable package that contributes one
-or more domain Checks. It is selected by `pluginId` and Check identity before a
-Run starts. Registration, manifest loading, lifecycle, safety, persistence,
-commit, and reporting remain platform-owned.
+An ordinary audit plugin is an independently inspectable executable domain
+policy. It contributes Checks, deterministic domain observations, semantic
+guidance, and business examples. It does not implement the Assayer lifecycle.
 
-The required domain operations are:
+The ordinary contract has two forms:
+
+- a **Policy Pack** containing declarations and examples only; or
+- a **Simple SDK plugin** adding deterministic `scan` logic over frozen typed
+  source objects.
+
+The existing WorkItem, InvestigationPacket, Evidence, registration, Agent
+contract, mapper, committer, and summary interfaces are the **Advanced SPI**.
+They are not ordinary plugin requirements and must not appear in the default
+tutorial or scaffold.
+
+## 2. Author-maintained declarations
+
+An ordinary plugin declares only:
+
+- stable plugin ID, display metadata, one business version, and input kind;
+- stable Check, rule, and dimension IDs;
+- rule meaning, applicability, default severity, and remediation guidance;
+- unknown, escalation, and not-applicable semantics;
+- semantic-review instructions and domain invariants; and
+- business cases with expected domain outcomes.
+
+The SDK compiler generates manifests, registrations, entry points, input and
+review Schemas, semantic digests, compatibility metadata, safe execution
+profiles, release descriptors, and platform lifecycle acceptance cases.
+Generated projections are immutable distribution artifacts, not parallel
+author inputs.
+
+An author declares one plugin business version. Check, protocol, SDK,
+domain-contract, package, and compatibility identities remain distinct in the
+generated artifact and ledger, but the compiler derives them deterministically.
+
+## 3. Policy Pack
+
+A Policy Pack MUST be capable of expressing a useful audit without Python. It
+contains plugin metadata, Check declarations, semantic-review instructions, and
+business examples. Declarative recognizers MAY create Candidates, Facts,
+Relations, Supports, or Unknowns.
+
+A Policy Pack cannot request arbitrary code execution, source access, a
+transport tool, an external effect, or a custom result protocol. If its domain
+requires deterministic logic beyond the declaration language, it moves to the
+Simple SDK rather than embedding an escape command.
+
+## 4. Simple SDK
+
+The Simple SDK exposes at most `policy_plugin`, `Document`, `Candidate`, `Fact`,
+`Relation`, `Support`, `Unknown`, and `invariant`.
+
+A normal Simple plugin implements:
 
 ```text
-discover(scope, capability_context) -> WorkItemSet
-inspect(work_items, check, capability_context) -> InvestigationPacketSet
-restore(case, capability_context) -> RecoveryResult (optional when recovery is required)
-summarize(canonical_result) -> domain_extension (optional)
+scan(document) -> Candidate | Fact | Relation | Unknown stream
 ```
 
-`decide` is an Agent semantic operation. The plugin may provide prompts,
-rubrics, or a decision provider, but the Host validates the proposal and owns
-the commit transaction.
+A cross-document plugin MAY additionally implement:
 
-## 2. Manifest requirements
+```text
+relations(documents) -> Candidate | Relation | Unknown stream
+```
 
-Every manifest declares:
+The plugin receives only frozen typed source abstractions. It MUST NOT receive
+or construct a Run ID, WorkItem, EvidenceRecord, Finding or receipt identity,
+digest, provider envelope, platform context, transport client, mutable source,
+or persistence handle.
 
-- stable `pluginId`, semantic `version`, and supported `platformApiVersion`;
-- one or more domain and subject-kind identifiers;
-- each Check's ID, version, applicable subject kinds, dimensions, allowed
-  result states, required Evidence kinds, required capabilities, capability
-  absence outcome, and invalidation signals;
-- execution constraints for batching, ordering, parallelism, cache reuse,
-  failed-batch splitting, and checkpoints;
+Simple code MUST be deterministic and side-effect free. It cannot reopen a
+path, access a network, read credentials, use clock or randomness as domain
+input, spawn a process, write an external system, or import the Host or
+Advanced SPI. Source support is obtained only through the typed snapshot API.
 
-Every registration also publishes its supported execution modes, factories,
-capability set, and a JSON-compatible `scopeSchema` used to validate business
-input. Registration metadata is platform packaging data and does not expand
-the manifest's safety authority.
+A Candidate is an unverified domain observation. It never becomes a formal
+Finding until semantic or deterministic review has passed Host validation and
+commit gates.
 
-An interactive release claiming conformance to the
-[Plugin Development Standard v1](plugin-development-standard-v1.md) also
-publishes one versioned, machine-readable Agent contract bundle per interactive
-Check. The bundle maps every review-required Evidence `collectionId` to its
-checkpoint payload schema and declares the finalization schema. The Host
-freezes its identity and digest for the Run. Prose or runtime validation cannot
-add an undeclared required field.
+## 5. Source and support
 
-The manifest is a declaration, not a permission grant. A plugin cannot request
-credentials, writes, or a capability that the platform and user scope have not
-authorized.
+The capability provider acquires, decodes, freezes, indexes, and navigates the
+source. A provider may expose `discover_sources(scope, context)` to return SDK
+`ProviderSourceSnapshot` values; the Host binds those snapshots to the Run and
+creates WorkItems. The plugin interprets only the resulting frozen snapshot.
 
-## 3. WorkItem and investigation rules
+Support returned by a plugin is a typed reference created by the source API.
+The Host resolves it to canonical Evidence and owns its identity and lineage.
+Plugins cannot manufacture, copy, or rewrite canonical source metadata.
 
-`WorkItem` identity is stable within a Run and includes a domain kind, source
-identity, and state digest. Discovery must reject duplicate IDs and must not
-promote an unverified candidate directly into a formal WorkItem.
+An absence Support is valid only over a provider-confirmed closed scope and
+records the normalized query, inspected range, frozen source state, and
+provider algorithm version. Truncated, unavailable, open, or stale scope yields
+Unknown and cannot support a pass or confirmed issue.
 
-Each inspected WorkItem returns exactly one `InvestigationPacket` for the
-selected Check. The packet contains every declared dimension, concise
-observations, Evidence references, source identity, and recovery status.
-Evidence is immutable and Host-verified; a plugin runtime may collect it but
-cannot rewrite it after the packet is returned.
+## 6. Common review contract
 
-## 4. Decision and recovery rules
+All ordinary plugins use the platform common review model:
 
-The Agent returns exactly one `DecisionProposal` per inspected WorkItem. The
-proposal must cover every Check dimension exactly once and use only states
-declared by that Check:
+- dimension verdict;
+- candidate disposition;
+- finding;
+- relationship verdict;
+- applicability;
+- confidence;
+- Evidence support; and
+- escalation or unknown.
 
-- `scanned_no_issue`: every required dimension is `satisfied` and coverage is
-  complete;
-- `issue_found`: at least one dimension is `violated`, with the Evidence and
-  issue details required by the Check;
-- `needs_review`: at least one dimension is `unresolved`, `blocked`, or
-  `conflicted`, with a concrete blocker and next action;
-- `not_applicable`: the Check is inapplicable and the proposal explains why;
-- `noise`: the observation is intentionally excluded with a reason.
+Plugins declare dimension meaning and domain invariants. They do not publish a
+complete DomainResult Schema, validate raw Agent JSON, map results into platform
+Decisions, build an Evidence Graph, issue receipts, or assemble terminal
+summaries.
 
-The Host rejects malformed, under-covered, stale, cross-identity, or
-post-recovery proposals. Commit receipts are durable when production
-persistence is available and are replay-safe by Run/WorkItem/Check identity
-and proposal digest.
+A plugin MAY contribute a compiler-generated, typed, namespaced domain
+extension. It cannot replace common review fields, alter conclusion validity,
+hide coverage, or create a second final result authority.
 
-The latest recovery outcome is an active commit barrier, not merely a diary
-entry. `uncertain` or `failed` recovery blocks a new Decision; a later
-`restored` or `not_required` outcome is required before commit. Recovery state
-cannot change after that WorkItem Decision is committed. Failed terminal Runs
-may retain earlier invalidated Decisions in the canonical ledger for
-diagnosis, but their formal result and publication surface must suppress those
-Decisions and receipts.
+## 7. Incremental review and coverage
 
-## 5. Execution and optimization
+The Host partitions semantic work into bounded ReviewBatches. Each batch names
+only current Candidates, dimensions, relationships, and available Supports. The
+Agent returns only the corresponding common review values.
 
-The plugin declares whether discovery, inspection, or decision batching,
-parallelism, and cache reuse are safe. The Host may combine public calls but
-must retain per-WorkItem Cases, Evidence, Findings, Decisions, receipts, and
-timing. A failed batch is split only when the declared ordering and isolation
-rules permit it; otherwise affected items become blocked or `needs_review`.
-`failureSplitting=allowed` is an explicit assertion that a failed inspection
-batch can be retried as smaller independent batches without unsafe duplicate
-effects. It is effective only with `inspectBatching=allowed` and
-`ordering=independent`; omission means `forbidden`. After a successful split,
-the platform may retain the largest successful sub-batch as the safe size for
-later WorkItems in the same Run.
+The Host validates membership and Evidence, atomically persists every accepted
+batch, and updates a durable CoverageLedger. Candidate exactly-once processing
+and required-dimension closure are ledger-wide invariants. No individual Agent
+submission must contain or remember the complete WorkItem.
 
-A plugin with a large array inside one Evidence payload may declare an
-`evidenceCollections` entry in its InvestigationPacket metadata. Each entry
-identifies the Evidence ID, an RFC 6901 JSON pointer to the array, a stable
-unique item-ID field, and optional mechanical grouping fields. The platform
-validates the declaration, retains the full immutable Evidence in the ledger,
-and owns bounded paging, cursors, and the mapping from groups back to original
-item IDs. A declared group is never a semantic finding merge.
+Paging, batch size, ordering, safe parallelism, caching, failure splitting,
+retry, correction, resume, replay, and terminal completeness are Host concerns.
+Ordinary plugins neither declare nor implement them. The Host may use only
+optimizations that preserve the frozen domain declaration, per-item Evidence,
+and observable coverage.
 
-An Evidence collection may set `reviewRequired=false` when it is immutable
-reference context rather than a semantic review queue. Reference collections
-use the same validation, grouping, and paging contract, but do not contribute
-to review coverage, do not block a WorkItem Decision, and reject review
-checkpoints. Omitting `reviewRequired` preserves the default value `true`.
-At a decision or finalization boundary, the Host includes a compact
-`referenceCollectionIndex` so an Agent can select a group and page without
-reloading the full Evidence payload.
+## 8. Constraint authority
 
-Long semantic reviews may be persisted as `ReviewCheckpoint` records. Each
-checkpoint binds plugin-owned domain semantics to one WorkItem, Check version,
-declared Evidence collection, and a non-empty set of stable item IDs. Domain
-meaning remains opaque to the platform; payload structure does not. Under the
-[Plugin Development Standard v1](plugin-development-standard-v1.md), the Host
-must validate the checkpoint against the Run-frozen schema for that exact
-`collectionId` before plugin code runs.
+Each field or invariant has one executable declaration. The compiler derives
+the Agent rule, Schema, validation path, and conformance cases from it.
 
-The platform rejects stale contract identity, malformed payload structure,
-unknown IDs, and overlapping coverage, makes identical accepted replays
-idempotent, and only then calls the plugin's required
-`validate_review_checkpoint` hook for declared domain invariants. The hook
-receives the proposed checkpoint, its selected immutable collection items,
-earlier accepted checkpoints for that WorkItem and collection, the
-InvestigationPacket, Check, and PlatformContext. It must reject malformed
-domain Findings, unknown or incomplete domain references, and Evidence that
-does not trace to the selected items. It must not require structure absent from
-the executable schema. A plugin without this hook cannot persist semantic
-checkpoints. A rejected checkpoint leaves no checkpoint, operation, decision,
-receipt, or revision change in the ledger.
+A runtime rejection of data accepted by the generated contract is a compiler,
+platform, or Advanced SPI implementation defect. It is not an Agent correction
+opportunity. An ordinary plugin cannot add a handwritten validator that creates
+a hidden second contract.
 
-A final decision may reference checkpoints only when they cover every
-non-empty collection whose `reviewRequired` value is `true`, with every item
-covered exactly once. Reference collections are excluded. The Host validates
-the declared finalization schema before the plugin assembles domain details;
-the normal decision and commit gates then apply without exception. A
-schema-valid payload rejected for undeclared structure is a plugin contract
-implementation mismatch and is never an Agent retry condition.
+Algorithmic domain recognition remains plugin-owned. It must return typed
+domain objects or Unknown rather than validating or mutating platform state.
 
-Strict boundary failures use the structured
-[`plugin-agent-error.schema.json`](../schemas/plugin-agent-error.schema.json)
-contract. An Agent-owned structural failure allows one explicit correction at
-that durable semantic boundary, never an automatic retry. A second rejection
-records the unresolved WorkItem and closes the Run `partial`; plugin- or
-platform-owned contract failures have no Agent correction budget. This
-terminalization does not create a synthetic `needs_review` Decision.
+## 9. Decision, persistence, and results
 
-An accepted checkpoint is immutable. Before its WorkItem Decision is
-committed, a reviewer may append a correction with
-`supersedesCheckpointId`. The target must be the current effective checkpoint
-for the same Run, WorkItem, Check version, Evidence collection, and exact item
-IDs. The ledger retains both records, while coverage, subsequent validation,
-decision assembly, and finalization use only unsuperseded leaves. Exact
-correction replay is idempotent; unknown targets, stale branches, scope
-changes, and post-Decision corrections fail without mutation.
+The Host alone maps accepted common review values to Decisions, creates Finding
+and receipt identities, commits the ledger, and publishes the canonical result.
+Read-only audits always use the default Host committer.
 
-Interactive plugins may expose the Host-driven `advance_plugin_run` operation.
-It performs deterministic discovery and inspection, pauses at an explicit
-semantic boundary, persists supplied checkpoints, assembles supplied decisions,
-and performs eligible closeout. Normal product transports must make this the
-only route for discovery, inspection, checkpoints, decisions, and closeout;
-primitive lifecycle operations belong to diagnostic transports. They may also
-expose `expand_evidence_collection` as a bounded read-only operation for
-reference collections named by the semantic task; it cannot checkpoint,
-decide, recover, or advance a Run. Responses identify `state`, `phase`,
-`requiredNextStep`, `canFinish`, and remaining work counts.
-`awaiting_agent_decision` means semantic input is required;
-`ready_to_finish` means all coverage gates pass and the Host may produce the
-formal summary. A Run with pending mechanical work is never represented as
-terminal.
+External writes require the Advanced SPI, explicit capability authorization,
+effect-specific recovery, and user confirmation. They cannot be introduced by
+a Simple plugin declaration.
 
-The product transport owns semantic operation identity. Agents and users do
-not supply `operationId` or revision fields. The Host derives stable operation
-identity from canonical semantic content, persists the accepted mutation and
-its acknowledgement in the same ledger replacement, and returns the current
-`runRevision`. Replaying identical checkpoint or Decision content cannot add a
-second ledger mutation or invoke the plugin committer again. Changed semantic
-content for an already committed WorkItem fails closed rather than inheriting
-the earlier receipt.
+Reports and paged result views are deterministic projections of the canonical
+result and immutable ledger. A plugin MAY supply a presentation template or
+domain labels, but no summarize or finalize lifecycle hook.
 
-The interactive Host persists a validated active-Run resume descriptor beside
-the canonical ledger. A replacement Host must verify frozen plugin/Check
-identity and scope digest before hydrating state. Ownership transfer creates a
-new internal epoch and fences the older Host before any mutation. A no-input
-`advance_plugin_run` call is the normal synchronization path: it returns the
-current durable revision, last accepted operation, workflow boundary, and
-required next step without asking the Agent to provide internal identifiers.
-Resume metadata is removed after terminal closeout.
+## 10. Formal report contract
 
-Terminal publication uses recoverable two-phase files. The Host first writes a
-complete pending result, then commits the terminal ledger, promotes the result
-atomically, and publishes a latest-terminal pointer before removing active-Run
-metadata. A replacement Host can repair a missing active pointer from one
-unambiguous Run descriptor and can promote a valid pending result after a
-terminal-ledger interruption. Result identity and digest mismatches fail
-closed; a terminal acknowledgement is never returned before its replay route
-is durable.
+The Host publishes one formal Markdown report for every terminal Run, following
+the [Formal Audit Report Format](audit-report-format-v1.md). It contains the
+fixed sections Audit Conclusion, Issue Details, Pending Matters when present,
+Coverage, and Audit Information. Its issue table uses the exact columns
+`严重程度 | 问题位置 | 问题说明 | 判定依据 | 整改要求`.
 
-Terminal plugin summaries are delivered through the platform's staged-result
-contract. Non-empty arrays and oversized text become stable section
-references; `get_plugin_result` pages those sections with result-bound opaque
-cursors. Each page is a delta and must not repeat already delivered items. The
-full plugin summary is durably published as `result-summary.json`, and staging
-must never remove Evidence, decisions, receipts, or failures from the ledger.
-Plugins provide semantic summary content but do not own transport pagination.
+Plugins provide only typed domain content. They do not calculate source
+locations, select or quote canonical Evidence, group or sort rows, describe
+coverage, paginate report text, or publish a second report. Candidate,
+Dimension, Relationship, Finding, and Evidence projections that refer to one
+root cause are represented once at problem level. Dimension verdicts remain
+coverage facts unless no problem-level record represents the violation.
 
-The platform also derives a mandatory terminal `resultOverview` from the
-ledger. It exposes conclusion validity, discovery and WorkItem coverage,
-outcome counts, review and failure counts, and a next action independently of
-optional plugin summary content. Decision pages preserve the committed reason
-and every dimension reason. `needs_review` creates an actionable review item
-from its unresolved, blocked, or conflicting Findings. A failed Run publishes
-no formal decision or plugin-summary content; invalidated Decisions remain in
-the immutable ledger for diagnosis and are counted only as invalidated.
+The exact report is returned as terminal `auditReport` and durably stored as
+`<runId>.audit-report.md`. Agent and product adapters reconstruct paged report
+text when necessary and present it without rewriting its recorded contents.
 
-## 6. Summary and release requirements
+## 11. Errors and recovery
 
-An optional plugin summary is a domain explanation derived from the canonical
-result. It cannot add a new terminal state, override a decision, hide
-unverified scope, or mutate the ledger. A release must include the manifest,
-runtime source, scope schema, semantic-review instructions, deterministic
-fixtures, conformance metadata, and every executable Agent schema required by
-its interactive Checks. The first M3 gate validates registrations, manifest
-compatibility, capability declarations, scope schemas, execution profiles,
-Agent contract completeness, and constructed runtime interfaces before
-publication. Package resource completeness and independent installer
-enforcement remain mandatory gates for built-in and external packages alike.
+Shape, stale-task, Evidence, provider, plugin, platform, and transport failures
+have platform-owned classifications. Rejected input creates no durable review,
+Decision, receipt, or revision change. Agent-owned correctable input receives a
+bounded correction opportunity; contract defects receive none.
 
-The complete release gate must run against the exact built artifact and prove
-schema/runtime equivalence, pre-plugin rejection of malformed payloads,
-page-compatible checkpoint validation, finalization, replay, resume, and
-terminal publication. Deterministic contract failures fail fast and cannot be
-hidden by Agent retry. The complete requirements and staged implementation are
-defined by the
-[Plugin Development Standard v1](plugin-development-standard-v1.md).
+Unknown, missing, stale, ambiguous, contaminated, or insufficient Evidence
+cannot be converted into a positive or negative conclusion. Resume and replay
+continue from the last accepted Host boundary without plugin-authored IDs or
+cursors.
 
-Every isolated release fixture also passes the shared terminal result
-conformance gate. The gate validates ledger/result identity, terminal-event
-closure, Evidence and Decision references, latest recovery state,
-authoritative receipts, completed coverage, failed-result suppression, and
-artifact-to-receipt traceability. A fixture whose expected outcome happens to
-match still fails release when any of these platform invariants is broken.
+## 12. Build and release
+
+The ordinary author invokes one deterministic verification action:
+
+```text
+assayer plugin verify
+```
+
+The action compiles declarations, builds an isolated wheel, validates the exact
+wheel, installs that wheel into an isolated environment, and derives lifecycle,
+resume, replay, correction, pagination, result, and artifact checks from the
+business cases.
+
+Installation and publication consume only the verified wheel and its digest.
+Local repositories are never copied into the installation store. A generated
+plugin receives no exemption from inspection, safety, conformance, or exact
+artifact verification.
+
+## 13. Advanced SPI
+
+The Advanced SPI is reserved for:
+
+- a custom capability provider;
+- an authorized external write/effect;
+- a non-standard audit lifecycle; or
+- result semantics that provably cannot map to the common review model.
+
+It is explicitly imported from `assayer_plugin_sdk.advanced`. Its packages must
+declare and test their public contracts and compatibility. Missing convenience,
+performance, reporting, paging, caching, or packaging helpers are not valid
+reasons to use it.
+
+Existing low-level plugins remain supported only through a versioned migration
+adapter. New ordinary plugins cannot claim conformance by implementing the old
+SPI directly.
+
+## 14. Conformance
+
+An ordinary plugin is conformant only when:
+
+- all author source belongs to the domain-only list in §2;
+- imports stay within the Simple SDK surface;
+- generated contracts are deterministic and contain no undeclared capability;
+- source support resolves to the frozen Run snapshot;
+- common review and coverage gates close without plugin lifecycle hooks;
+- large-input tasks remain bounded and incrementally durable;
+- the formal report is Host-generated, non-duplicative, losslessly pageable,
+  and identical to its durable artifact;
+- the exact installed wheel passes generated platform journeys; and
+- the canonical result validates with complete traceability.
+
+The detailed target architecture and migration order are defined by
+[Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).

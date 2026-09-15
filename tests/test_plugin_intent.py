@@ -12,15 +12,22 @@ KNOWN = ("test-minimal", "assayer.frontend-audit")
 
 
 class PluginIntentResolutionTest(unittest.TestCase):
-    def test_resolves_list_intent(self):
-        plan = resolve_intent("what plugins do i have", known_plugin_ids=KNOWN)
-        self.assertEqual([step.operation for step in plan], ["list"])
-
-    def test_resolves_info_intent_by_short_name(self):
-        plan = resolve_intent("tell me about test-minimal", known_plugin_ids=KNOWN)
-        self.assertEqual(len(plan), 1)
-        self.assertEqual(plan[0].operation, "info")
-        self.assertEqual(plan[0].plugin_id, "test-minimal")
+    def test_resolves_supported_management_intents(self):
+        cases = (
+            ("what plugins do i have", "list", None, None),
+            ("tell me about test-minimal", "info", "test-minimal", None),
+            ("pin test-minimal to 0.9.0", "downgrade", "test-minimal", "0.9.0"),
+            ("undo the last update for test-minimal", "rollback", "test-minimal", None),
+            ("remove test-minimal", "uninstall", "test-minimal", None),
+            ("install test-minimal", "install", "test-minimal", None),
+        )
+        for source, operation, plugin_id, version in cases:
+            with self.subTest(source=source):
+                plan = resolve_intent(source, known_plugin_ids=KNOWN)
+                self.assertEqual(len(plan), 1)
+                self.assertEqual(plan[0].operation, operation)
+                self.assertEqual(plan[0].plugin_id, plugin_id)
+                self.assertEqual(plan[0].version, version)
 
     def test_resolves_install_intent_from_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -30,22 +37,6 @@ class PluginIntentResolutionTest(unittest.TestCase):
             self.assertEqual(plan[0].operation, "install")
             self.assertEqual(plan[0].package, str(package.resolve()))
             self.assertTrue(plan[0].dangerous)
-
-    def test_resolves_downgrade_with_version(self):
-        plan = resolve_intent("pin test-minimal to 0.9.0", known_plugin_ids=KNOWN)
-        self.assertEqual(plan[0].operation, "downgrade")
-        self.assertEqual(plan[0].plugin_id, "test-minimal")
-        self.assertEqual(plan[0].version, "0.9.0")
-
-    def test_resolves_rollback_and_uninstall(self):
-        self.assertEqual(
-            resolve_intent("undo the last update for test-minimal", known_plugin_ids=KNOWN)[0].operation,
-            "rollback",
-        )
-        self.assertEqual(
-            resolve_intent("remove test-minimal", known_plugin_ids=KNOWN)[0].operation,
-            "uninstall",
-        )
 
     def test_run_requires_check_and_scope_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -58,26 +49,16 @@ class PluginIntentResolutionTest(unittest.TestCase):
             self.assertEqual(plan[0].check_id, "TST-001")
             self.assertEqual(plan[0].scope_file, str(scope.resolve()))
 
-    def test_unresolvable_intent_fails_closed(self):
-        with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("do the thing", known_plugin_ids=KNOWN)
-        self.assertEqual(ctx.exception.code, "INTENT_UNRESOLVED")
-
-    def test_downgrade_without_version_asks_for_detail(self):
-        with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("downgrade test-minimal", known_plugin_ids=KNOWN)
-        self.assertEqual(ctx.exception.code, "INTENT_NEEDS_DETAIL")
-
-    def test_install_bare_name_resolves_by_name(self):
-        plan = resolve_intent("install test-minimal", known_plugin_ids=KNOWN)
-        self.assertEqual(plan[0].operation, "install")
-        self.assertEqual(plan[0].plugin_id, "test-minimal")
-        self.assertIsNone(plan[0].package)
-
-    def test_empty_intent_fails_closed(self):
-        with self.assertRaises(IntentResolutionError) as ctx:
-            resolve_intent("   ", known_plugin_ids=KNOWN)
-        self.assertEqual(ctx.exception.code, "INTENT_EMPTY")
+    def test_invalid_or_incomplete_intents_fail_with_stable_codes(self):
+        cases = (
+            ("do the thing", "INTENT_UNRESOLVED"),
+            ("downgrade test-minimal", "INTENT_NEEDS_DETAIL"),
+            ("   ", "INTENT_EMPTY"),
+        )
+        for source, code in cases:
+            with self.subTest(source=source), self.assertRaises(IntentResolutionError) as caught:
+                resolve_intent(source, known_plugin_ids=KNOWN)
+            self.assertEqual(caught.exception.code, code)
 
 
 if __name__ == "__main__":

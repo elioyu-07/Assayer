@@ -6,13 +6,13 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from typing import Any
 
 from .contract import (
     CheckContract, CommitReceipt, DecisionProposal, DimensionObservation,
     EvidenceRecord, Finding, InvestigationPacket, Operation, PlatformContext,
     PlatformContractError, PlatformEvent, PlatformLedger, PlatformRun,
-    PlatformRunResult, PluginManifest, ProviderEvidenceExpectation,
-    ReviewCheckpoint, WorkFailure, WorkItem,
+    PlatformRunResult, PluginManifest, ProviderEvidenceExpectation, WorkFailure, WorkItem,
 )
 from .decision import validate_decision_shape
 from .ledger import PlatformLedgerStore
@@ -101,13 +101,19 @@ class InteractivePlatformRun:
         self.investigations: dict[str, InvestigationPacket] = {}
         self.decisions: dict[str, DecisionProposal] = {}
         self.receipts: dict[str, CommitReceipt] = {}
-        self.review_checkpoints: dict[str, ReviewCheckpoint] = {}
         self.failures: list[WorkFailure] = []
         self.operations: list[Operation] = []
         self.events: list[PlatformEvent] = []
         self.inspection_batches = 0
         self.batch_splits = 0
         self.inspection_failures = 0
+        self.semantic_task_builds = 0
+        self.semantic_task_build_ms = 0
+        self.semantic_task_bytes = 0
+        self.agent_wait_ms = 0
+        self.agent_wait_samples = 0
+        self.transport_ms = 0
+        self.transport_samples = 0
         self.adaptive_inspect_batch_size = manifest.execution_profile.inspect_batch_size
         self.discovery_complete = False
         self.status = "running"
@@ -207,20 +213,6 @@ class InteractivePlatformRun:
                 value.get("metadata", {}), str(value.get("authority", "platform")),
             )
             restored.receipts[receipt.work_item_id] = receipt
-        restored.review_checkpoints = {}
-        for value in ledger.get("review_checkpoints", ()):
-            checkpoint = ReviewCheckpoint(
-                str(value["checkpoint_id"]), str(value["work_item_id"]), str(value["check_id"]),
-                str(value["check_version"]), str(value["collection_id"]),
-                tuple(value.get("item_ids", ())), value.get("payload", {}),
-                value.get("supersedes_checkpoint_id"),
-            )
-            if checkpoint.checkpoint_id in restored.review_checkpoints:
-                raise PlatformContractError(
-                    "INVALID_REVIEW_CHECKPOINT", "Ledger review checkpoint IDs must be unique",
-                )
-            restored.review_checkpoints[checkpoint.checkpoint_id] = checkpoint
-        restored._validate_review_checkpoint_history()
         restored.failures = [WorkFailure(
             str(value["work_item_id"]), str(value["check_id"]), str(value["code"]), str(value["message"]),
         ) for value in ledger.get("failures", ())]
@@ -241,6 +233,13 @@ class InteractivePlatformRun:
         restored.inspection_failures = sum(
             item.kind == "inspect" and item.status == "failed" for item in restored.operations
         )
+        restored.semantic_task_builds = int(ledger.get("metrics", {}).get("semanticTaskBuilds", 0) or 0)
+        restored.semantic_task_build_ms = int(ledger.get("metrics", {}).get("semanticTaskBuildMs", 0) or 0)
+        restored.semantic_task_bytes = int(ledger.get("metrics", {}).get("semanticTaskBytes", 0) or 0)
+        restored.agent_wait_ms = int(ledger.get("metrics", {}).get("agentWaitMs", 0) or 0)
+        restored.agent_wait_samples = int(ledger.get("metrics", {}).get("agentWaitSamples", 0) or 0)
+        restored.transport_ms = int(ledger.get("metrics", {}).get("transportMs", 0) or 0)
+        restored.transport_samples = int(ledger.get("metrics", {}).get("transportSamples", 0) or 0)
         restored.adaptive_inspect_batch_size = manifest.execution_profile.inspect_batch_size
         restored.discovery_complete = any(
             item.kind == "discover" and item.status == "succeeded" for item in restored.operations
@@ -392,10 +391,54 @@ class InteractivePlatformRun:
         )
         self._save()
 
+    def record_semantic_task_metrics(self, *, duration_ms: int, payload_bytes: int) -> None:
+        """Record Host compilation cost for one bounded semantic task."""
+        self._require_running()
+        self.semantic_task_builds += 1
+        self.semantic_task_build_ms += max(0, int(duration_ms))
+        self.semantic_task_bytes = max(0, int(payload_bytes))
+        self._emit(
+            "semantic.task.compiled", "finish", "captured",
+            details={
+                "durationMs": max(0, int(duration_ms)),
+                "payloadBytes": max(0, int(payload_bytes)),
+            },
+        )
+        self._save()
+
+    def record_agent_wait(self, *, duration_ms: int) -> None:
+        """Record elapsed time between a semantic task and its next turn."""
+        self._require_running()
+        self.agent_wait_samples += 1
+        self.agent_wait_ms += max(0, int(duration_ms))
+        self._emit(
+            "agent.wait.finished", "finish", "captured",
+            details={
+                "durationMs": max(0, int(duration_ms)),
+                "sample": self.agent_wait_samples,
+            },
+        )
+        self._save()
+
+    def record_transport_timing(self, *, duration_ms: int, persist: bool = True) -> None:
+        """Record one successful Host transport request for this Run."""
+        self._require_running()
+        self.transport_samples += 1
+        self.transport_ms += max(0, int(duration_ms))
+        self._emit(
+            "transport.request.finished", "finish", "captured",
+            details={
+                "durationMs": max(0, int(duration_ms)),
+                "sample": self.transport_samples,
+            },
+        )
+        if persist:
+            self._save()
+
     def record_recovery(
         self, work_item_id: str, status: str, details: Mapping[str, object] | None = None,
     ) -> None:
-        """Record a domain-neutral recovery checkpoint.
+        """Record a domain-neutral recovery outcome.
 
         Recovery implementation belongs to the plugin/runtime adapter.  The
         platform still records its outcome so an Agent can reason about the
@@ -467,151 +510,6 @@ class InteractivePlatformRun:
                 self.receipts.pop(proposal.work_item_id, None)
             else:
                 self.receipts[proposal.work_item_id] = previous_receipt
-            del self.operations[operation_count:]
-            del self.events[event_count:]
-            raise
-
-    @staticmethod
-    def _effective_checkpoints(
-        checkpoints: Mapping[str, ReviewCheckpoint],
-    ) -> tuple[ReviewCheckpoint, ...]:
-        successors = {
-            item.supersedes_checkpoint_id: item.checkpoint_id
-            for item in checkpoints.values()
-            if item.supersedes_checkpoint_id is not None
-        }
-        leaves: list[ReviewCheckpoint] = []
-        for checkpoint in checkpoints.values():
-            if checkpoint.supersedes_checkpoint_id is not None:
-                continue
-            leaf_id = checkpoint.checkpoint_id
-            while leaf_id in successors:
-                leaf_id = successors[leaf_id]
-            leaves.append(checkpoints[leaf_id])
-        return tuple(leaves)
-
-    @property
-    def effective_review_checkpoints(self) -> tuple[ReviewCheckpoint, ...]:
-        """Return current checkpoint leaves while retaining all history in the ledger."""
-        return self._effective_checkpoints(self.review_checkpoints)
-
-    def _validate_review_checkpoint_history(self) -> None:
-        staged: dict[str, ReviewCheckpoint] = {}
-        for checkpoint in self.review_checkpoints.values():
-            self._validate_review_checkpoint_record(checkpoint, staged)
-            staged[checkpoint.checkpoint_id] = checkpoint
-
-    def _validate_review_checkpoint_record(
-        self, checkpoint: ReviewCheckpoint,
-        staged: Mapping[str, ReviewCheckpoint] | None = None,
-    ) -> None:
-        records = staged if staged is not None else self.review_checkpoints
-        if checkpoint.work_item_id not in self.investigations:
-            raise PlatformContractError(
-                "UNKNOWN_INVESTIGATION", "Review checkpoint references an uninspected WorkItem",
-            )
-        if (checkpoint.check_id, checkpoint.check_version) != self.check.ref:
-            raise PlatformContractError("CHECK_MISMATCH", "Review checkpoint Check identity is not current")
-        existing = records.get(checkpoint.checkpoint_id)
-        if existing is not None:
-            if existing != checkpoint:
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_CONFLICT", "Review checkpoint ID was reused with different content",
-                )
-            return
-        effective = self._effective_checkpoints(records)
-        target_id = checkpoint.supersedes_checkpoint_id
-        target = records.get(target_id) if target_id is not None else None
-        if target_id is not None:
-            if target is None:
-                raise PlatformContractError(
-                    "UNKNOWN_REVIEW_CHECKPOINT", "Checkpoint correction references an unknown checkpoint",
-                )
-            if target_id not in {item.checkpoint_id for item in effective}:
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_CONFLICT", "Checkpoint correction must supersede the current effective checkpoint",
-                )
-            if (
-                checkpoint.work_item_id != target.work_item_id
-                or checkpoint.check_id != target.check_id
-                or checkpoint.check_version != target.check_version
-                or checkpoint.collection_id != target.collection_id
-            ):
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_CONFLICT", "Checkpoint correction must retain the original review scope",
-                )
-            if checkpoint.item_ids != target.item_ids:
-                raise PlatformContractError(
-                    "REVIEW_CHECKPOINT_CONFLICT", "Checkpoint correction must cover exactly the original item IDs",
-                )
-        claimed = {
-            (item.work_item_id, item.collection_id, item_id): item.checkpoint_id
-            for item in effective if item.checkpoint_id != target_id
-            for item_id in item.item_ids
-        }
-        overlap = [
-            item_id for item_id in checkpoint.item_ids
-            if (checkpoint.work_item_id, checkpoint.collection_id, item_id) in claimed
-        ]
-        if overlap:
-            raise PlatformContractError(
-                "REVIEW_CHECKPOINT_CONFLICT", "Evidence collection item is already covered by another checkpoint",
-            )
-
-    def validate_review_checkpoint_record(self, checkpoint: ReviewCheckpoint) -> None:
-        """Validate append-only checkpoint identity and correction scope without mutation."""
-        self._require_running()
-        if self.review_checkpoints.get(checkpoint.checkpoint_id) == checkpoint:
-            return
-        if checkpoint.work_item_id in self.decisions:
-            raise PlatformContractError(
-                "COMMIT_CONFLICT", "Review checkpoints cannot change after the WorkItem decision is committed",
-            )
-        self._validate_review_checkpoint_record(checkpoint)
-
-    def record_review_checkpoints(self, checkpoints: Sequence[ReviewCheckpoint]) -> None:
-        """Atomically persist idempotent checkpoint records and append-only corrections."""
-        self._require_running()
-        if not checkpoints:
-            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "At least one review checkpoint is required")
-        staged = dict(self.review_checkpoints)
-        accepted: list[ReviewCheckpoint] = []
-        for checkpoint in checkpoints:
-            if staged.get(checkpoint.checkpoint_id) == checkpoint:
-                continue
-            if checkpoint.work_item_id in self.decisions:
-                raise PlatformContractError(
-                    "COMMIT_CONFLICT", "Review checkpoints cannot change after the WorkItem decision is committed",
-                )
-            self._validate_review_checkpoint_record(checkpoint, staged)
-            existing = staged.get(checkpoint.checkpoint_id)
-            if existing is not None:
-                continue
-            staged[checkpoint.checkpoint_id] = checkpoint
-            accepted.append(checkpoint)
-        previous = self.review_checkpoints
-        operation_count = len(self.operations)
-        event_count = len(self.events)
-        self.review_checkpoints = staged
-        for checkpoint in accepted:
-            self._record_operation(
-                "review_checkpoint", "succeeded", checkpoint.work_item_id,
-                operation_id=checkpoint.checkpoint_id,
-            )
-            self._emit(
-                "review.checkpoint.saved", "instant", "succeeded",
-                work_item_id=checkpoint.work_item_id,
-                details={
-                    "checkpointId": checkpoint.checkpoint_id,
-                    "collectionId": checkpoint.collection_id,
-                    "itemCount": len(checkpoint.item_ids),
-                    "supersedesCheckpointId": checkpoint.supersedes_checkpoint_id,
-                },
-            )
-        try:
-            self._save()
-        except Exception:
-            self.review_checkpoints = previous
             del self.operations[operation_count:]
             del self.events[event_count:]
             raise
@@ -721,9 +619,13 @@ class InteractivePlatformRun:
             "batchSplits": self.batch_splits,
             "inspectionFailures": self.inspection_failures,
             "inspectBatchSize": self.adaptive_inspect_batch_size,
-            "reviewCheckpoints": len(self.effective_review_checkpoints),
-            "reviewCheckpointRecords": len(self.review_checkpoints),
-            "reviewItemsCheckpointed": sum(len(item.item_ids) for item in self.effective_review_checkpoints),
+            "semanticTaskBuilds": self.semantic_task_builds,
+            "semanticTaskBuildMs": self.semantic_task_build_ms,
+            "semanticTaskBytes": self.semantic_task_bytes,
+            "agentWaitMs": self.agent_wait_ms,
+            "agentWaitSamples": self.agent_wait_samples,
+            "transportMs": self.transport_ms,
+            "transportSamples": self.transport_samples,
         }
 
     def _record_operation(
@@ -765,7 +667,7 @@ class InteractivePlatformRun:
             self.run, self.status, tuple(self.operations), tuple(self.events),
             tuple(self.receipts.values()), (), tuple(self.work_items.values()),
             tuple(self.investigations.values()), tuple(self.decisions.values()),
-            tuple(self.failures), authority, tuple(self.review_checkpoints.values()),
+            tuple(self.failures), authority,
             self.workflow, self.metrics(),
         )
         if ledger.status in {"completed", "partial", "failed"}:

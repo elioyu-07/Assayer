@@ -2,8 +2,8 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.2.0-draft |
-| Date | 2026-09-04 |
+| Document version | 1.3.0-draft |
+| Date | 2026-09-13 |
 | Status | Design converging |
 | Owner | Product Owner / Assayer Maintainers |
 | Baseline | Current design on `main` |
@@ -20,15 +20,19 @@ Resolve semantic conflicts in this order:
 2. Alpha user journey and end-to-end Definition of Done: current productization stage, observable acceptance, and release gates;
 3. Platform Constitution v1: domain-neutral ownership, trust, lifecycle,
    compatibility, and release laws;
-4. This document: frontend-product invariants, trust boundaries, and design governance;
-5. The frozen plugin, capability-provider, and canonical-result contracts;
-6. Top-level architecture: component responsibilities, dependency direction, and transaction boundaries;
-7. LLM investigation orchestration: multi-turn Agent loop, coverage Findings, stopping, and model-failure semantics;
-8. Domain model and safety, identity, evidence, and other specialist designs: domain semantics and algorithm contracts;
-9. Host-Agent protocol: messages, tool lifecycle, errors, and idempotency;
-10. Rule contract and enabled rule files: applicability, coverage, and decisions for individual rules;
-11. JSON Schema: persistent fields and local constraints;
-12. Examples, tests, report templates, and implementation: prove or execute upstream design but never redefine product semantics.
+4. The Audit Plugin Contract, Platform--Plugin Boundary Contract, Plugin
+   Development Standard, and Simple Plugin Authoring Architecture: the
+   domain-only author surface, generated contracts, incremental review, and
+   Advanced SPI admission;
+5. This document: frontend-product invariants, trust boundaries, and design governance;
+6. The capability-provider and canonical-result contracts;
+7. Top-level architecture: component responsibilities, dependency direction, and transaction boundaries;
+8. LLM investigation orchestration: multi-turn Agent loop, coverage Findings, stopping, and model-failure semantics;
+9. Domain model and safety, identity, evidence, and other specialist designs: domain semantics and algorithm contracts;
+10. Host-Agent protocol: messages, tool lifecycle, errors, and idempotency;
+11. Rule contract and enabled rule files: applicability, coverage, and decisions for individual rules;
+12. JSON Schema: generated or persistent fields and local constraints; a Schema cannot override its typed authoring source;
+13. Examples, tests, report templates, historical implementation slices, and implementation: prove or execute upstream design but never redefine product semantics.
 
 When downstream material discovers an upstream contradiction, stop the affected design or implementation, register an open question, and have the semantic owner update the authoritative source. Implementation details cannot silently choose an interpretation.
 

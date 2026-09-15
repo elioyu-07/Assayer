@@ -132,13 +132,12 @@ published artifacts agree. A failed conformance report blocks publication and
 identifies the violated `RCV1-*` invariant; it never repairs or rewrites the
 ledger silently.
 
-Every terminal plugin Run also publishes `canonical-result.json`. Generic Runs
-derive it from `platform-ledger.json`; the frontend compatibility journey
-derives it from its validated `audit-ledger.json`. It is the portable public
-result and contains only stable relative trace references. Its ledger digest
-covers the exact persisted source-ledger bytes. Historical result loading
-validates the schema, Run identity, status, and digest before returning a
-terminal acknowledgement. Plugin-specific summary content remains a separate
+Every terminal plugin Run, including compiler-generated Frontend Runs,
+publishes `canonical-result.json` from `platform-ledger.json`. It is the
+portable public result and contains only stable relative trace references. Its
+ledger digest covers the exact persisted source-ledger bytes. Historical result
+loading validates the schema, Run identity, status, and digest before returning
+a terminal acknowledgement. Plugin-specific summary content remains a separate
 derived view unless a declared extension schema and privacy gate authorize it.
 
 ## 11. Relationship to Deferred Work

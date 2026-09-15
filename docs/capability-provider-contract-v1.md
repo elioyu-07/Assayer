@@ -44,6 +44,19 @@ bounded fact response or a classified failure. A response must identify the
 source identity and state digest used to collect it. Raw credentials, hidden
 model reasoning, and unbounded source bodies are never ordinary Agent output.
 
+When a provider needs a live source adapter (for example, a browser snapshot
+source), the Host injects that adapter into the provider factory as an opaque
+runtime. The provider may use only the SDK runtime contract; it never starts a
+browser, obtains a page handle, or owns Run lifetime, authorization, recovery,
+or persistence.
+
+Providers that own source discovery may additionally expose the SDK
+`discover_sources(scope, context)` operation. It returns typed
+`ProviderSourceSnapshot` values containing only source identity, state digest,
+and bounded metadata. The Host converts those snapshots into WorkItems and
+caches them for the bound Run; plugins do not calculate or replace source
+identity, digest, or discovery records.
+
 The Host freezes provider ID and version, Check ID and version, capability,
 source state, scope, and effective limits in each request. A response must echo
 the request, provider, version, and capability identity. Timeout is a bounded

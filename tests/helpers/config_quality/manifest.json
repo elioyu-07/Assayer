@@ -2,6 +2,14 @@
   "pluginId": "test.config-quality",
   "version": "1.0.0",
   "platformApiVersion": "1.0.0",
+  "compatibility": {
+    "protocolMinVersion": "1.2.0",
+    "protocolMaxVersion": "1.2.0",
+    "sdkMinVersion": "0.1.2",
+    "sdkMaxVersion": "0.1.2",
+    "capabilities": [],
+    "domainContractVersion": "1.0.0"
+  },
   "domains": ["configuration-quality"],
   "subjectKinds": ["configuration_file"],
   "checks": [
@@ -23,7 +31,6 @@
     "decisionBatching": "allowed",
     "parallelism": "forbidden",
     "cacheReuse": "allowed",
-    "checkpoint": "required",
     "maxBatchSize": 32,
     "ordering": "independent",
     "failureSplitting": "allowed"

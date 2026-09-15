@@ -56,15 +56,11 @@ Public Decision, Finding, failure, and extension text is sanitized.
 Secret-like assignments, environment values, and absolute local paths cannot
 be copied from a plugin or exception into the portable result.
 
-The legacy frontend journey follows the same public contract through a
-compatibility adapter over its validated terminal `audit-ledger.json`.
-Frontend Assessments become outcomes, DimensionFindings retain their Evidence
-references, and unfinished object or entrypoint scope becomes unverified.
-Failed Scans suppress all formal history. Page, object, entrypoint, issue, and
-browser diagnostic counts remain in a validated namespaced extension instead
-of adding frontend vocabulary to the common schema. The existing frontend
-reports remain unchanged and the canonical trace binds the exact published
-AuditLedger bytes.
+The compiler-generated Frontend plugin follows the same generic interactive
+path as other ordinary plugins. Its common-review Decisions become canonical
+outcomes, retain Host-bound Evidence references, and are rendered by the
+platform report projector. Browser diagnostics remain provider-owned and do
+not add Frontend vocabulary to the canonical schema.
 
 Plugin summaries remain separate derived views. A namespaced
 `domainExtension` is optional and cannot replace or override status, validity,

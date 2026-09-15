@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from jsonschema import Draft202012Validator, RefResolver
@@ -24,20 +25,22 @@ from assayer_platform import (
     ProviderFact,
     ProviderFailure,
     ProviderRegistration,
+    ProviderRuntimeLease,
     ProviderRegistry,
     ProviderResponse,
     WorkItem,
     load_plugin_manifest,
     load_provider_descriptor,
 )
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
 
 
-def provider_descriptor(*, max_bytes=10000, max_items=10):
-    return load_provider_descriptor({
+def provider_descriptor(*, max_bytes=10000, max_items=10, **overrides):
+    value = {
         "providerId": "fixture.source-provider",
         "version": "1.2.0",
         "platformApiVersion": "1.0.0",
@@ -84,7 +87,9 @@ def provider_descriptor(*, max_bytes=10000, max_items=10):
             "stateDigest": "1.0.0",
             "sanitization": "1.0.0",
         },
-    })
+    }
+    value.update(overrides)
+    return load_provider_descriptor(value)
 
 
 class RecordingProvider:
@@ -120,6 +125,14 @@ class RecordingProvider:
                 "failed",
                 failure=ProviderFailure("unexpected_failure", "private detail"),
             )
+        if self.mode == "missing_failure":
+            return ProviderResponse(
+                request.request_id,
+                request.provider_id,
+                request.provider_version,
+                request.capability,
+                "failed",
+            )
         fact = ProviderFact(
             "undeclared" if self.mode == "wrong_kind" else "structured",
             "another-source" if self.mode == "wrong_source" else request.source_identity,
@@ -150,6 +163,10 @@ CHECK_MANIFEST = load_plugin_manifest({
     "pluginId": "fixture.provider-plugin",
     "version": "1.0.0",
     "platformApiVersion": "1.0.0",
+    "compatibility": {
+        "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+        "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+    },
     "domains": ["fixture"],
     "subjectKinds": ["fixture_item"],
     "checks": [{
@@ -169,7 +186,6 @@ CHECK_MANIFEST = load_plugin_manifest({
         "decisionBatching": "forbidden",
         "parallelism": "forbidden",
         "cacheReuse": "allowed",
-        "checkpoint": "required",
     },
 })
 
@@ -282,6 +298,50 @@ class ProviderExecutionTests(unittest.TestCase):
         bound.close()
         self.assertEqual(provider.close_calls, 1)
 
+    def test_bound_provider_releases_an_explicit_runtime_lease_once(self):
+        provider = RecordingProvider(provider_descriptor())
+        releases = []
+        runtime = object()
+        lease = ProviderRuntimeLease(runtime, lambda: releases.append(runtime))
+        registration = ProviderRegistration(
+            provider.descriptor,
+            provider_factory=lambda injected: provider,
+        )
+        bound = BoundCapabilityProvider(
+            registration,
+            negotiate(registration),
+            run_id="run-provider",
+            scope={"source": "fixture"},
+            runtime=lease,
+        )
+
+        bound.close()
+        bound.close()
+        lease.close()
+
+        self.assertEqual(releases, [runtime])
+        self.assertTrue(lease.closed)
+
+    def test_bound_provider_does_not_close_a_bare_runtime(self):
+        provider = RecordingProvider(provider_descriptor())
+        runtime = SimpleNamespace(close_calls=0)
+        runtime.close = lambda: setattr(runtime, "close_calls", runtime.close_calls + 1)
+        registration = ProviderRegistration(
+            provider.descriptor,
+            provider_factory=lambda injected: provider,
+        )
+        bound = BoundCapabilityProvider(
+            registration,
+            negotiate(registration),
+            run_id="run-provider",
+            scope={"source": "fixture"},
+            runtime=runtime,
+        )
+
+        bound.close()
+
+        self.assertEqual(runtime.close_calls, 0)
+
     def test_host_creates_bounded_idempotent_request_and_evidence(self):
         provider = RecordingProvider(provider_descriptor())
         bound = self.bind(provider)
@@ -355,6 +415,20 @@ class ProviderExecutionTests(unittest.TestCase):
                 with self.assertRaises(PlatformContractError) as error:
                     bound.collect(item, check, "structured_read")
                 self.assertEqual(error.exception.code, code)
+
+    def test_published_provider_result_schema_is_enforced_before_evidence(self):
+        provider = RecordingProvider(provider_descriptor(
+            resultSchema={
+                "type": "object",
+                "required": ["content"],
+                "properties": {"content": {"const": "published"}},
+            },
+        ))
+        bound = self.bind(provider)
+        item = WorkItem("fixture-item", "fixture_item", "fixture-source", "fixture-state")
+        with self.assertRaises(PlatformContractError) as error:
+            bound.collect(item, CHECK_MANIFEST.checks[0], "structured_read")
+        self.assertEqual(error.exception.code, "PROVIDER_RESULT_INVALID")
 
     def test_byte_budget_returns_classified_failure_without_evidence(self):
         provider = RecordingProvider(provider_descriptor(max_bytes=10000), "large")
@@ -444,6 +518,15 @@ class ProviderExecutionTests(unittest.TestCase):
         with self.assertRaises(PlatformContractError) as error:
             bound.collect(item, CHECK_MANIFEST.checks[0], "structured_read")
         self.assertEqual(error.exception.code, "PROVIDER_FAILURE_UNCLASSIFIED")
+
+    def test_failed_response_without_failure_details_is_rejected(self):
+        provider = RecordingProvider(provider_descriptor(), "missing_failure")
+        bound = self.bind(provider)
+        item = WorkItem("fixture-item", "fixture_item", "fixture-source", "fixture-state")
+        bound._validator = SimpleNamespace(validate=lambda value: None)
+        with self.assertRaises(PlatformContractError) as error:
+            bound.collect(item, CHECK_MANIFEST.checks[0], "structured_read")
+        self.assertEqual(error.exception.code, "PROVIDER_RESPONSE_INVALID")
 
     def test_blocked_negotiation_constructs_neither_provider_nor_plugin(self):
         provider_calls = {"calls": 0}
@@ -568,11 +651,7 @@ class ProviderExecutionTests(unittest.TestCase):
         item = WorkItem("fixture-item", "fixture_item", "fixture-source", "fixture-state")
         bound.collect(item, CHECK_MANIFEST.checks[0], "structured_read")
         request = provider.requests[0][0]
-        schemas = {}
-        for path in SCHEMAS.glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
+        schemas = schema_store(SCHEMAS)
         schema = schemas["provider-execution.schema.json"]
         validator = Draft202012Validator(
             schema,

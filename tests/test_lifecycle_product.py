@@ -6,11 +6,9 @@ import threading
 import unittest
 from pathlib import Path
 
-from assayer_host import HostError
 from assayer_host.lifecycle_product import (
     LifecyclePlanStore,
     LifecycleProductController,
-    LifecycleProductToolTransport,
 )
 from assayer_host.lifecycle_transaction import LifecycleJournalStore, PluginLifecycleTransaction
 from assayer_host.release_lifecycle import PluginInstallation, PluginLifecyclePlanner
@@ -28,13 +26,6 @@ def controller_plan():
     return PluginLifecyclePlanner().build(
         "upgrade", CURRENT, target=TARGET, active_run=False,
         release_direction_verified=True,
-    )
-
-
-def blocked_controller_plan():
-    return PluginLifecyclePlanner().build(
-        "upgrade", CURRENT, target=None, active_run=False,
-        release_direction_verified=False,
     )
 
 
@@ -246,6 +237,9 @@ class LifecycleProductTests(unittest.TestCase):
             )
             planned = controller.plan("upgrade")
             claim = store.claim(planned["planToken"])
+            # Simulate a crash after the transaction journal becomes terminal
+            # but before the claimed authorization token is completed. This
+            # state cannot be produced through the public controller surface.
             transaction_id = controller._transaction_id(planned["planToken"])
             transaction = controller._transaction_factory().execute(
                 claim["plan"], confirmed=True, transaction_id=transaction_id,
@@ -261,69 +255,6 @@ class LifecycleProductTests(unittest.TestCase):
             controller, _ = self._controller(directory, client, lambda: 1000)
             with self.assertRaises(ValueError):
                 controller.execute("../../private", confirmed=True)
-
-    def test_tool_transport_separates_plan_and_destructive_execute_metadata(self):
-        class RecordingController:
-            def __init__(self):
-                self.calls = []
-
-            def plan(self, operation):
-                self.calls.append(("plan", operation))
-                return {
-                    "schemaVersion": "1.0.0", "phase": "planned",
-                    "plan": blocked_controller_plan(), "planToken": None, "expiresAt": None,
-                }
-
-            def execute(self, token, *, confirmed):
-                self.calls.append(("execute", token, confirmed))
-                return {
-                    "schemaVersion": "1.0.0", "phase": "authorization_required",
-                    "replayed": False,
-                    "result": {
-                        "code": "EXTERNAL_AUTHORIZATION_REQUIRED",
-                        "message": "Trusted external authorization is required.",
-                    },
-                }
-
-        controller = RecordingController()
-        transport = LifecycleProductToolTransport(controller)
-        tools = {item["name"]: item for item in transport.list_tools()}
-        self.assertFalse(tools["plan_plugin_change"]["annotations"]["destructiveHint"])
-        self.assertTrue(tools["execute_plugin_change"]["annotations"]["destructiveHint"])
-        token = "lifecycle-token-" + "a" * 64
-        planned = transport.call_tool("plan_plugin_change", {"operation": "upgrade"})
-        executed = transport.call_tool(
-            "execute_plugin_change", {"planToken": token, "confirmed": True},
-        )
-        self.assertEqual(planned["structuredContent"]["result"]["phase"], "planned")
-        self.assertEqual(executed["structuredContent"]["result"]["phase"], "authorization_required")
-        self.assertEqual(controller.calls, [("plan", "upgrade"), ("execute", token, True)])
-
-    def test_tool_transport_rejects_false_confirmation_and_extra_fields(self):
-        transport = LifecycleProductToolTransport(object())
-        with self.assertRaises(HostError) as false_confirmation:
-            transport.call_tool("execute_plugin_change", {
-                "planToken": "lifecycle-token-" + "a" * 64,
-                "confirmed": False,
-            })
-        self.assertEqual(false_confirmation.exception.code, "INVALID_REQUEST")
-        with self.assertRaises(HostError) as extra:
-            transport.call_tool("plan_plugin_change", {
-                "operation": "upgrade", "command": "arbitrary",
-            })
-        self.assertEqual(extra.exception.code, "INVALID_REQUEST")
-
-    def test_tool_transport_rejects_controller_output_outside_product_schema(self):
-        class InvalidController:
-            def plan(self, operation):
-                return {"phase": "planned", "privatePath": "/private/release"}
-
-        transport = LifecycleProductToolTransport(InvalidController())
-        with self.assertRaises(HostError) as error:
-            transport.call_tool("plan_plugin_change", {"operation": "upgrade"})
-        self.assertEqual(error.exception.code, "INTERNAL_FAILURE")
-        self.assertNotIn("private", error.exception.message)
-
 
 if __name__ == "__main__":
     unittest.main()

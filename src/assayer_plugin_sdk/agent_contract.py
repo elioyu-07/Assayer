@@ -14,8 +14,7 @@ from jsonschema import Draft202012Validator, SchemaError
 from .contract import PlatformContractError
 
 
-AGENT_CONTRACT_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
-AGENT_CONTRACT_CANONICALIZATION_VERSION = "1.0.0"
+DOMAIN_RESULT_CONTRACT_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION = "1.0.0"
 
 # These names belong to the Host protocol, never to a model-authored domain
@@ -24,9 +23,7 @@ DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION = "1.0.0"
 _PLATFORM_RESULT_FIELDS = frozenset({
     "runId", "run_id", "workItemId", "work_item_id", "collectionId",
     "collection_id", "itemIds", "item_ids", "taskDigest", "task_digest",
-    "contractDigest", "contract_digest", "checkpointId", "checkpoint_id",
-    "supersedesCheckpointId", "supersedes_checkpoint_id",
-    "reviewCheckpointIds", "review_checkpoint_ids", "finalization",
+    "contractDigest", "contract_digest", "finalization",
     "revision", "runRevision", "run_revision", "operationId", "operation_id",
     "checkId", "checkVersion",
 })
@@ -39,8 +36,8 @@ def _plain_json(value: Any, *, location: str) -> Any:
         for key, item in value.items():
             if not isinstance(key, str):
                 raise PlatformContractError(
-                    "INVALID_AGENT_CONTRACT_BUNDLE",
-                    f"Agent contract keys must be strings at {location}",
+                    "INVALID_DOMAIN_RESULT_CONTRACT",
+                    f"Domain result contract keys must be strings at {location}",
                 )
             result[key] = _plain_json(item, location=f"{location}/{key}")
         return result
@@ -54,8 +51,8 @@ def _plain_json(value: Any, *, location: str) -> Any:
     if isinstance(value, float) and math.isfinite(value):
         return value
     raise PlatformContractError(
-        "INVALID_AGENT_CONTRACT_BUNDLE",
-        f"Agent contract contains a non-JSON value at {location}",
+        "INVALID_DOMAIN_RESULT_CONTRACT",
+        f"Domain result contract contains a non-JSON value at {location}",
     )
 
 
@@ -64,178 +61,6 @@ def _canonical_json(value: Any) -> str:
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         allow_nan=False,
     )
-
-
-@dataclass(frozen=True, init=False)
-class AgentContractBundle:
-    """One immutable executable Agent contract bound to one plugin Check.
-
-    Schemas are stored as canonical JSON rather than caller-owned dictionaries,
-    so later mutation cannot change the bundle or its digest.
-    """
-
-    contract_id: str
-    contract_version: str
-    check_id: str
-    check_version: str
-    semantic_instructions_path: str
-    semantic_instructions_sha256: str
-    schema_dialect: str
-    _checkpoint_payload_schemas_json: str = field(repr=False)
-    _checkpoint_semantic_rules_json: str = field(repr=False)
-    _finalization_schema_json: str = field(repr=False)
-    _contract_digest: str = field(repr=False)
-
-    def __init__(
-        self,
-        contract_id: str,
-        contract_version: str,
-        check_id: str,
-        check_version: str,
-        checkpoint_payload_schemas: Mapping[str, Mapping[str, Any]],
-        finalization_schema: Mapping[str, Any] | None,
-        semantic_instructions_path: str,
-        semantic_instructions_sha256: str,
-        *,
-        checkpoint_semantic_rules: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
-        schema_dialect: str = AGENT_CONTRACT_SCHEMA_DIALECT,
-    ) -> None:
-        if not isinstance(checkpoint_payload_schemas, Mapping):
-            raise PlatformContractError(
-                "INVALID_AGENT_CONTRACT_BUNDLE",
-                "Agent contract checkpoint payload schemas must be an object",
-            )
-        checkpoint_schemas = _plain_json(
-            checkpoint_payload_schemas, location="/checkpointPayloadSchemas",
-        )
-        if checkpoint_semantic_rules is None:
-            checkpoint_semantic_rules = {}
-        if not isinstance(checkpoint_semantic_rules, Mapping):
-            raise PlatformContractError(
-                "INVALID_AGENT_CONTRACT_BUNDLE",
-                "Agent contract checkpoint semantic rules must be an object",
-            )
-        unknown_rule_collections = set(checkpoint_semantic_rules) - set(checkpoint_schemas)
-        if unknown_rule_collections:
-            raise PlatformContractError(
-                "INVALID_AGENT_CONTRACT_BUNDLE",
-                "Agent contract semantic rules reference an unknown checkpoint collection",
-            )
-        semantic_rules = _plain_json(
-            checkpoint_semantic_rules, location="/checkpointSemanticRules",
-        )
-        for collection_id, rules in semantic_rules.items():
-            if not isinstance(rules, list):
-                raise PlatformContractError(
-                    "INVALID_AGENT_CONTRACT_BUNDLE",
-                    f"Agent contract semantic rules for {collection_id} must be an array",
-                )
-            seen_rule_ids: set[str] = set()
-            for index, rule in enumerate(rules):
-                if not isinstance(rule, dict):
-                    raise PlatformContractError(
-                        "INVALID_AGENT_CONTRACT_BUNDLE",
-                        f"Agent contract semantic rule {collection_id}[{index}] must be an object",
-                    )
-                rule_id = rule.get("ruleId")
-                instruction = rule.get("instruction")
-                if not isinstance(rule_id, str) or not rule_id.strip():
-                    raise PlatformContractError(
-                        "INVALID_AGENT_CONTRACT_BUNDLE",
-                        f"Agent contract semantic rule {collection_id}[{index}] requires ruleId",
-                    )
-                if rule_id in seen_rule_ids:
-                    raise PlatformContractError(
-                        "INVALID_AGENT_CONTRACT_BUNDLE",
-                        f"Agent contract semantic ruleId must be unique: {rule_id}",
-                    )
-                seen_rule_ids.add(rule_id)
-                if not isinstance(instruction, str) or not instruction.strip():
-                    raise PlatformContractError(
-                        "INVALID_AGENT_CONTRACT_BUNDLE",
-                        f"Agent contract semantic rule {rule_id} requires instruction",
-                    )
-        if finalization_schema is not None and not isinstance(finalization_schema, Mapping):
-            raise PlatformContractError(
-                "INVALID_AGENT_CONTRACT_BUNDLE",
-                "Agent contract finalization schema must be an object or null",
-            )
-        finalization = _plain_json(
-            finalization_schema, location="/finalizationSchema",
-        )
-        values = {
-            "contract_id": contract_id,
-            "contract_version": contract_version,
-            "check_id": check_id,
-            "check_version": check_version,
-            "semantic_instructions_path": semantic_instructions_path,
-            "semantic_instructions_sha256": semantic_instructions_sha256,
-            "schema_dialect": schema_dialect,
-        }
-        for name, value in values.items():
-            if not isinstance(value, str):
-                raise PlatformContractError(
-                    "INVALID_AGENT_CONTRACT_BUNDLE",
-                    f"Agent contract {name} must be a string",
-                )
-            object.__setattr__(self, name, value)
-        object.__setattr__(
-            self, "_checkpoint_payload_schemas_json", _canonical_json(checkpoint_schemas),
-        )
-        object.__setattr__(
-            self, "_checkpoint_semantic_rules_json", _canonical_json(semantic_rules),
-        )
-        object.__setattr__(
-            self, "_finalization_schema_json", _canonical_json(finalization),
-        )
-        object.__setattr__(self, "_contract_digest", self._compute_digest())
-
-    @property
-    def check_ref(self) -> tuple[str, str]:
-        return self.check_id, self.check_version
-
-    @property
-    def checkpoint_payload_schemas(self) -> dict[str, dict[str, Any]]:
-        return json.loads(self._checkpoint_payload_schemas_json)
-
-    @property
-    def checkpoint_semantic_rules(self) -> dict[str, list[dict[str, Any]]]:
-        return json.loads(self._checkpoint_semantic_rules_json)
-
-    @property
-    def finalization_schema(self) -> dict[str, Any] | None:
-        return json.loads(self._finalization_schema_json)
-
-    @property
-    def contract_digest(self) -> str:
-        return self._contract_digest
-
-    def as_dict(self, *, include_digest: bool = False) -> dict[str, Any]:
-        value = {
-            "contractId": self.contract_id,
-            "contractVersion": self.contract_version,
-            "checkId": self.check_id,
-            "checkVersion": self.check_version,
-            "schemaDialect": self.schema_dialect,
-            "checkpointPayloadSchemas": self.checkpoint_payload_schemas,
-            "finalizationSchema": self.finalization_schema,
-            "semanticInstructions": {
-                "path": self.semantic_instructions_path,
-                "sha256": self.semantic_instructions_sha256,
-            },
-        }
-        if self.checkpoint_semantic_rules:
-            value["checkpointSemanticRules"] = self.checkpoint_semantic_rules
-        if include_digest:
-            value["contractDigest"] = self.contract_digest
-        return value
-
-    def _compute_digest(self) -> str:
-        preimage = {
-            "canonicalizationVersion": AGENT_CONTRACT_CANONICALIZATION_VERSION,
-            "bundle": self.as_dict(),
-        }
-        return "sha256:" + hashlib.sha256(_canonical_json(preimage).encode("utf-8")).hexdigest()
 
 
 def _reject_platform_result_fields(value: Any, *, location: str) -> None:
@@ -325,7 +150,7 @@ class DomainResultContract:
     """One executable, platform-envelope-free domain result contract.
 
     This is the target Agent-facing contract for SDK v2.  It describes only
-    the value the Agent is allowed to author; task identity, checkpoint state,
+    the value the Agent is allowed to author; task identity, lifecycle state,
     and persistence metadata remain Host-owned.
     """
 
@@ -351,7 +176,7 @@ class DomainResultContract:
         semantic_instructions_sha256: str,
         *,
         semantic_rules: Sequence[Mapping[str, Any]] = (),
-        schema_dialect: str = AGENT_CONTRACT_SCHEMA_DIALECT,
+        schema_dialect: str = DOMAIN_RESULT_CONTRACT_SCHEMA_DIALECT,
     ) -> None:
         if not isinstance(result_schema, Mapping):
             raise PlatformContractError(
@@ -475,9 +300,7 @@ class DomainResultContract:
 
 
 __all__ = [
-    "AGENT_CONTRACT_CANONICALIZATION_VERSION",
-    "AGENT_CONTRACT_SCHEMA_DIALECT",
-    "AgentContractBundle",
+    "DOMAIN_RESULT_CONTRACT_SCHEMA_DIALECT",
     "DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION",
     "DomainResultContract",
 ]

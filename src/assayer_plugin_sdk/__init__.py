@@ -18,6 +18,7 @@ from .actionable_result import (  # noqa: F401
     extract_result_delivery_bundle,
     validate_result_delivery,
 )
+from .browser import BrowserSnapshot, BrowserSnapshotSource  # noqa: F401
 from .contract import *  # noqa: F401,F403
 from .contract import (  # noqa: F401
     DECISION_STATES,
@@ -35,7 +36,8 @@ from .contract import (  # noqa: F401
     PlatformContext,
     PlatformContractError,
     PluginManifest,
-    ReviewCheckpoint,
+    ProviderSourceDiscovery,
+    ProviderSourceSnapshot,
     WorkItem,
 )
 from .evidence_graph import (  # noqa: F401
@@ -76,7 +78,6 @@ from .plugin_compatibility import (  # noqa: F401
     HOST_PROTOCOL_CAPABILITIES,
     HOST_PROTOCOL_VERSION,
     HOST_SDK_VERSION,
-    HOST_SUPPORTED_PROTOCOL_VERSIONS,
     CompatibilityResult,
     PluginCompatibility,
     negotiate_plugin_compatibility,
@@ -96,11 +97,6 @@ from .provider import (  # noqa: F401
     validate_provider_descriptor,
 )
 from .registration import PluginRegistration  # noqa: F401
-from .review_protocol import (  # noqa: F401
-    REVIEW_DISPOSITIONS,
-    build_review_task,
-    validate_review_submission,
-)
 from .source_chunking import (  # noqa: F401
     SOURCE_CHUNK_LIMIT,
     build_source_chunks,

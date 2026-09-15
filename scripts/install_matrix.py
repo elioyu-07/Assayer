@@ -1,6 +1,6 @@
 """Clean-venv install matrix for the split Assayer distributions.
 
-Phase 2 of the A-plan proves that the four independent wheels install in
+Phase 2 of the A-plan proves that the six independent wheels install in
 isolation without duplicating modules or ``assayer.*`` entry points.  For each
 combination the harness builds a fresh virtual environment, installs only from
 a local wheelhouse, and asserts:
@@ -61,11 +61,14 @@ class Case:
     plugins: int
     providers: int
     conflict: str | None = None
+    agent: bool = False
+    platform: bool = True
 
 
 CASES = (
     Case("platform-only", ("assayer-platform",), 0, 0),
     Case("platform+sdk", ("assayer-platform", "assayer-plugin-sdk"), 0, 0),
+    Case("agent-only", ("assayer-agent",), 0, 0, agent=True, platform=False),
     Case(
         "platform+sdk+plugin",
         ("assayer-platform", "assayer-plugin-sdk", "assayer-plugin-frontend-audit"),
@@ -75,9 +78,11 @@ CASES = (
         "all-split",
         (
             "assayer-platform", "assayer-plugin-sdk",
+            "assayer-agent",
             "assayer-plugin-frontend-audit", "assayer-provider-markdown",
+            "assayer-provider-browser",
         ),
-        1, 1,
+        1, 2, agent=True,
     ),
     Case("root-meta", ("assayer",), 0, 0),
     Case(
@@ -96,6 +101,7 @@ import importlib.util
 import json
 import sysconfig
 from importlib import metadata
+from assayer_plugin_sdk.resources import schema_root as sdk_schema_root
 
 
 def _eps(group):
@@ -108,6 +114,21 @@ def _eps(group):
 plugins = _eps("assayer.plugins")
 providers = _eps("assayer.providers")
 
+expected_sdk_schemas = {
+    "actionable-result.schema.json",
+    "capability-provider.schema.json",
+    "common.schema.json",
+    "evaluation-corpus.schema.json",
+    "evidence-claim.schema.json",
+    "plugin-manifest.schema.json",
+}
+installed_sdk_schemas = {path.name for path in sdk_schema_root().glob("*.schema.json")}
+if installed_sdk_schemas != expected_sdk_schemas:
+    raise SystemExit(
+        f"SDK schema ownership mismatch: expected {sorted(expected_sdk_schemas)}, "
+        f"found {sorted(installed_sdk_schemas)}"
+    )
+
 origins = {}
 for entry in plugins + providers:
     module = entry.value.split(":", 1)[0].split(".", 1)[0]
@@ -116,11 +137,26 @@ for entry in plugins + providers:
 
 conflict = None
 plugin_count = None
-try:
-    from assayer_platform import installed_plugin_registry
-    plugin_count = len(installed_plugin_registry().list())
-except Exception as error:
-    conflict = getattr(error, "code", error.__class__.__name__)
+agent = importlib.util.find_spec("assayer_agent") is not None
+platform = importlib.util.find_spec("assayer_platform") is not None
+if platform:
+    try:
+        from assayer_platform import installed_plugin_registry
+        from assayer_platform.registry import schema_store
+        platform_schemas = schema_store()
+        for required in (
+            "common.schema.json",
+            "plugin-manifest.schema.json",
+            "platform-ledger.schema.json",
+            "canonical-result.schema.json",
+        ):
+            if required not in platform_schemas:
+                raise RuntimeError(f"combined platform schema store is missing {required}")
+        plugin_count = len(installed_plugin_registry().list())
+    except Exception as error:
+        conflict = getattr(error, "code", error.__class__.__name__)
+else:
+    plugin_count = 0
 
 print(json.dumps({
     "plugins": [entry.name for entry in plugins],
@@ -129,6 +165,8 @@ print(json.dumps({
     "purelib": sysconfig.get_paths()["purelib"],
     "plugin_count": plugin_count,
     "conflict": conflict,
+    "agent": agent,
+    "platform": platform,
 }))
 """
 
@@ -173,7 +211,27 @@ def build_duplicate_plugin_wheel(wheelhouse: Path) -> Path:
     return wheel
 
 
-PLATFORM_TOP_LEVEL = frozenset({"assayer_platform", "assayer_host", "assayer_agent"})
+PLATFORM_TOP_LEVEL = frozenset({"assayer_platform", "assayer_host"})
+SDK_OWNED_SCHEMAS = frozenset({
+    "actionable-result.schema.json",
+    "capability-provider.schema.json",
+    "common.schema.json",
+    "evaluation-corpus.schema.json",
+    "evidence-claim.schema.json",
+    "plugin-manifest.schema.json",
+})
+
+
+def _assert_no_sdk_schema_leak(wheel: Path) -> None:
+    with zipfile.ZipFile(wheel) as archive:
+        leaked = {
+            Path(name).name for name in archive.namelist()
+            if Path(name).name in SDK_OWNED_SCHEMAS
+        }
+    if leaked:
+        raise SystemExit(
+            f"{wheel.name} leaks SDK-owned schemas: {sorted(leaked)}"
+        )
 
 
 def assert_root_wheel_is_platform_only(wheelhouse: Path) -> None:
@@ -195,6 +253,16 @@ def assert_root_wheel_is_platform_only(wheelhouse: Path) -> None:
         raise SystemExit(
             f"{wheel.name} leaks non-platform top-level modules: {sorted(leaked)}"
         )
+    _assert_no_sdk_schema_leak(wheel)
+
+
+def assert_platform_wheel_owns_only_platform_schemas(wheelhouse: Path) -> None:
+    matches = sorted(wheelhouse.glob("assayer_platform-*.whl"))
+    if len(matches) != 1:
+        raise SystemExit(
+            f"expected exactly one assayer-platform wheel in {wheelhouse}, found {matches}"
+        )
+    _assert_no_sdk_schema_leak(matches[0])
 
 
 def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
@@ -202,6 +270,7 @@ def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
     build_split(wheelhouse, python=python, isolated=False)
     build_root(wheelhouse, python=python, isolated=False, no_deps=True)
     assert_root_wheel_is_platform_only(wheelhouse)
+    assert_platform_wheel_owns_only_platform_schemas(wheelhouse)
     _run([python, "-m", "pip", "download", "--dest", str(wheelhouse), *THIRD_PARTY])
     build_duplicate_plugin_wheel(wheelhouse)
 
@@ -249,6 +318,14 @@ def _assert_case(case: Case, observed: dict) -> None:
             raise SystemExit(
                 f"{case.name}: expected {case.conflict}, observed {observed['conflict']}"
             )
+    if bool(observed.get("agent")) != case.agent:
+        raise SystemExit(
+            f"{case.name}: expected agent package={case.agent}, observed {observed.get('agent')}"
+        )
+    if bool(observed.get("platform", True)) != case.platform:
+        raise SystemExit(
+            f"{case.name}: expected platform package={case.platform}, observed {observed.get('platform')}"
+        )
     purelib = observed.get("purelib") or ""
     for name, origin in observed["origins"].items():
         if not origin:

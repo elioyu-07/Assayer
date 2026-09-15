@@ -17,12 +17,6 @@ class BoundaryErrorPolicy:
 
 
 _POLICIES = {
-    "AGENT_CONTRACT_ENVELOPE_INVALID": BoundaryErrorPolicy(
-        "agent_input", "agent_correction", "correct_agent_input",
-    ),
-    "AGENT_CONTRACT_INPUT_INVALID": BoundaryErrorPolicy(
-        "agent_input", "agent_correction", "correct_agent_input",
-    ),
     "DOMAIN_RESULT_INVALID": BoundaryErrorPolicy(
         "agent_input", "agent_correction", "correct_domain_result",
     ),
@@ -32,14 +26,23 @@ _POLICIES = {
     "PLUGIN_SEMANTIC_INPUT_INVALID": BoundaryErrorPolicy(
         "agent_input", "agent_correction", "correct_agent_input",
     ),
-    "AGENT_CHECKPOINT_PREFLIGHT_REQUIRED": BoundaryErrorPolicy(
-        "agent_input", "none", "validate_checkpoint_draft", True,
+    "INVALID_COMMON_REVIEW": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
     ),
-    "AGENT_CHECKPOINT_PREFLIGHT_STALE": BoundaryErrorPolicy(
-        "agent_input", "none", "validate_checkpoint_draft", True,
+    "DOMAIN_INVARIANT_VIOLATION": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
     ),
-    "AGENT_CONTRACT_STALE": BoundaryErrorPolicy(
-        "contract_state", "refresh_boundary", "refresh_semantic_boundary",
+    "INCOMPLETE_REVIEW_SUBMISSION": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
+    ),
+    "UNKNOWN_REVIEW_ITEM": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
+    ),
+    "UNKNOWN_REVIEW_EVIDENCE": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
+    ),
+    "REVIEW_KIND_MISMATCH": BoundaryErrorPolicy(
+        "agent_input", "agent_correction", "correct_common_review",
     ),
     "AGENT_SEMANTIC_TASK_STALE": BoundaryErrorPolicy(
         "contract_state", "refresh_boundary", "refresh_semantic_boundary",
@@ -59,6 +62,18 @@ _POLICIES = {
     "PLUGIN_RUNTIME_FAILURE": BoundaryErrorPolicy(
         "plugin", "none", "read_terminal_result", True,
     ),
+    "INVARIANT_EXECUTION_FAILED": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
+    "INVALID_INVARIANT_RESULT": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
+    "INVALID_COMPILED_REVIEW_PLAN": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
+    "COMPILED_REVIEW_EVIDENCE_OUT_OF_SCOPE": BoundaryErrorPolicy(
+        "plugin", "none", "read_terminal_result", True,
+    ),
     "PLUGIN_REPORT_FAILED": BoundaryErrorPolicy(
         "plugin", "none", "read_terminal_result", True,
     ),
@@ -69,6 +84,21 @@ _POLICIES = {
         "platform", "none", "read_terminal_result", True,
     ),
     "PLATFORM_INTERNAL_ERROR": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
+    "INVALID_COMMON_REVIEW_TASK": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
+    "INVALID_REVIEW_BINDING": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
+    "INVALID_BATCH_VERDICT": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
+    "UNKNOWN_REVIEW_ATOM": BoundaryErrorPolicy(
+        "platform", "none", "read_terminal_result", True,
+    ),
+    "UNKNOWN_REVIEW_BATCH": BoundaryErrorPolicy(
         "platform", "none", "read_terminal_result", True,
     ),
     "AGENT_CORRECTION_BUDGET_EXHAUSTED": BoundaryErrorPolicy(

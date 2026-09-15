@@ -32,6 +32,11 @@ def _version_core(value: str) -> tuple[int, int, int]:
 
 
 def validate_plugin_manifest(value: Mapping[str, Any]) -> None:
+    if "compatibility" not in value:
+        raise PlatformContractError(
+            "PLUGIN_COMPATIBILITY_REQUIRED",
+            "Plugin manifest must declare the exact current protocol and SDK contract",
+        )
     root = schema_root()
     schema = json.loads((root / "plugin-manifest.schema.json").read_text(encoding="utf-8"))
     common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
@@ -85,7 +90,7 @@ def load_plugin_manifest(source: str | Path | Mapping[str, Any]) -> PluginManife
     execution = ExecutionProfile(
         discover_batching=profile["discoverBatching"], inspect_batching=profile["inspectBatching"],
         decision_batching=profile["decisionBatching"], parallelism=profile["parallelism"],
-        cache_reuse=profile["cacheReuse"], checkpoint=profile["checkpoint"],
+        cache_reuse=profile["cacheReuse"],
         max_batch_size=profile.get("maxBatchSize", 1), ordering=profile.get("ordering", "independent"),
         failure_splitting=profile.get("failureSplitting", "forbidden"),
     )
@@ -94,13 +99,13 @@ def load_plugin_manifest(source: str | Path | Mapping[str, Any]) -> PluginManife
         platform_api_version=value["platformApiVersion"], domains=tuple(value["domains"]),
         subject_kinds=tuple(value["subjectKinds"]), checks=checks, execution_profile=execution,
         compatibility=(PluginCompatibility(
-            protocol_min_version=value.get("compatibility", {}).get("protocolMinVersion", "1.0.0"),
-            protocol_max_version=value.get("compatibility", {}).get("protocolMaxVersion", "1.2.0"),
-            sdk_min_version=value.get("compatibility", {}).get("sdkMinVersion", "0.1.0"),
-            sdk_max_version=value.get("compatibility", {}).get("sdkMaxVersion", "0.1.2"),
-            capabilities=frozenset(value.get("compatibility", {}).get("capabilities", ())),
-            domain_contract_version=value.get("compatibility", {}).get("domainContractVersion"),
-        ) if value.get("compatibility") is not None else None),
+            protocol_min_version=value["compatibility"]["protocolMinVersion"],
+            protocol_max_version=value["compatibility"]["protocolMaxVersion"],
+            sdk_min_version=value["compatibility"]["sdkMinVersion"],
+            sdk_max_version=value["compatibility"]["sdkMaxVersion"],
+            capabilities=frozenset(value["compatibility"].get("capabilities", ())),
+            domain_contract_version=value["compatibility"].get("domainContractVersion"),
+        )),
     )
 
 

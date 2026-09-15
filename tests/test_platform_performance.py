@@ -14,6 +14,7 @@ from assayer_platform import (
     render_platform_performance_bill,
 )
 from assayer_platform.ledger import write_platform_artifacts
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,10 +76,9 @@ def ledger(*, mode="serial", reason="plugin_forbidden", metrics=None):
 class PlatformPerformanceBillTest(unittest.TestCase):
     def validator(self):
         schema_root = ROOT / "schemas"
-        schema = json.loads(
-            (schema_root / "platform-performance-bill.schema.json").read_text(encoding="utf-8")
-        )
-        common = json.loads((schema_root / "common.schema.json").read_text(encoding="utf-8"))
+        schemas = schema_store(schema_root)
+        schema = schemas["platform-performance-bill.schema.json"]
+        common = schemas["common.schema.json"]
         return Draft202012Validator(
             schema,
             resolver=RefResolver(

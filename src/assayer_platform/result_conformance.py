@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from functools import lru_cache
@@ -11,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator, RefResolver
 
 from .contract import PlatformLedger, PlatformRunResult
-from .registry import _schema_root
+from .registry import schema_store
 
 
 @dataclass(frozen=True)
@@ -68,12 +67,7 @@ def _plain(value: Any) -> Any:
 
 @lru_cache(maxsize=1)
 def _ledger_validator() -> Draft202012Validator:
-    root = _schema_root()
-    schemas: dict[str, Any] = {}
-    for path in root.glob("*.schema.json"):
-        schema = json.loads(path.read_text(encoding="utf-8"))
-        schemas[path.name] = schema
-        schemas[schema["$id"]] = schema
+    schemas = schema_store()
     schema = schemas["platform-ledger.schema.json"]
     return Draft202012Validator(
         schema,

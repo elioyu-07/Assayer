@@ -10,12 +10,14 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+from importlib import resources as importlib_resources
 import inspect
 import json
 import logging
 import re
 import sys
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
@@ -29,6 +31,8 @@ from .errors import HostError
 from .plugin_lifecycle_mcp import PluginLifecycleMcpToolTransport
 from .plugin_store_registry import default_store_root, store_backed_plugin_registry
 from .resources import default_schema_root
+from .browser_runtime import browser_provider_runtime_resolver
+from assayer_platform.registry import schema_store
 from assayer_platform import (
     PlatformRunner, PlatformContractError, PluginRegistry, InteractivePluginController,
     CapabilityProfile, ProviderRegistry,
@@ -75,10 +79,10 @@ def _protocol_tool_schemas() -> dict[str, dict]:
     truth and inline their small shared references for MCP clients that do not
     resolve external JSON Schema URLs.
     """
-    root = default_schema_root()
-    contracts = json.loads((root / "protocol" / "tool-contracts.schema.json").read_text())
-    common = json.loads((root / "common.schema.json").read_text())
-    envelope = json.loads((root / "protocol" / "envelope.schema.json").read_text())
+    schemas = schema_store(default_schema_root())
+    contracts = schemas["tool-contracts.schema.json"]
+    common = schemas["common.schema.json"]
+    envelope = schemas["envelope.schema.json"]
 
     def resolve(value: object, seen: frozenset[str] = frozenset()) -> object:
         if isinstance(value, list):
@@ -440,14 +444,6 @@ class InteractivePlatformMcpToolTransport:
     an external runtime; this transport never starts a browser implicitly.
     """
 
-    # Private Host methods remain available for migration and recovery, but
-    # these legacy Agent operations are deliberately not part of the normal
-    # model-facing catalog.
-    _LEGACY_AGENT_OPERATIONS = frozenset({
-        "checkpoint_review", "validate_checkpoint_draft",
-        "submit_decisions", "finish_plugin_run",
-    })
-
     _SCHEMAS = {
         "start_plugin_run": {
             "type": "object", "additionalProperties": False,
@@ -482,6 +478,7 @@ class InteractivePlatformMcpToolTransport:
             "properties": {
                 "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
                 "domainResult": {"type": "object"},
+                "reviewSubmission": {"type": "object"},
             },
         },
         "get_plugin_result": {
@@ -525,6 +522,13 @@ class InteractivePlatformMcpToolTransport:
                 "groupKey": {"type": "string", "minLength": 1},
             },
         },
+        "expand_semantic_evidence": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "cursor": {"type": "string", "minLength": 1},
+                "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+        },
         "recover_work_item": {
             "type": "object", "additionalProperties": False,
             "required": ["workItemId"], "properties": {
@@ -541,6 +545,8 @@ class InteractivePlatformMcpToolTransport:
     def __init__(self, output_root: str | Path = "./assayer-output",
                  *, plugin_registry: PluginRegistry | None = None,
                  runtime_resolver: Any = None,
+                 provider_runtime: Any = None,
+                 provider_runtime_resolver: Any = None,
                  capabilities_resolver: Any = None,
                  provider_registry: ProviderRegistry | None = None,
                  platform_profile: CapabilityProfile | None = None,
@@ -551,6 +557,8 @@ class InteractivePlatformMcpToolTransport:
         self._controller = InteractivePluginController(
             plugin_registry or installed_plugin_registry(), output_root,
             runtime_resolver=runtime_resolver,
+            provider_runtime=provider_runtime,
+            provider_runtime_resolver=provider_runtime_resolver,
             capabilities_resolver=capabilities_resolver,
             provider_registry=provider_registry,
             platform_profile=platform_profile,
@@ -627,12 +635,13 @@ class InteractivePlatformMcpToolTransport:
         descriptions = {
             "start_plugin_run": "Start one domain-neutral interactive plugin Run using only plugin, Check, and business scope. Compatibility is negotiated before Run creation; unsupported protocol/SDK combinations fail without partial state. If this MCP session already has a terminal Run, do not start another until the user explicitly confirms it; then include rerunAuthorization with that previousRunId and userConfirmed=true. The response reports the resolved plugin identity and negotiated compatibility.",
             "resume_plugin_run": "Explicitly resume one durable plugin Run by the Run ID returned when it started; Host startup never resumes a Run implicitly.",
-            "advance_plugin_run": "Drive Host-owned discovery, inspection, domain-result binding, checkpoint persistence, decision assembly, and eligible closeout until semantic input is required or the Run is terminal. For a v2 domain-result Check, submit only domainResult; the Host binds the current task and all platform identity internally.",
+            "advance_plugin_run": "Drive Host-owned discovery, inspection, and semantic review until input is required or the Run is terminal. Submit the current common review batch or a legacy DomainResult as requested; the Host binds all platform identity internally.",
             "get_plugin_result": "Read one bounded page from a terminal result; the complete result remains durably stored.",
             "discover_work_items": "Discover logical WorkItems for an active plugin Run.",
             "inspect_work_items": "Inspect selected WorkItems and return summary-first InvestigationPackets; set includeEvidence=true only when full payloads are required.",
             "expand_investigation": "Expand selected immutable Evidence for an inspected WorkItem when the indexed payload is required in full.",
             "expand_evidence_collection": "Read one bounded page from a plugin-declared immutable Evidence collection, with stable item IDs and optional mechanical groups; this never advances or mutates the Run.",
+            "expand_semantic_evidence": "Read one bounded page from the active semantic task's opaque evidence handles; the Host owns pagination and lineage, and this never advances or mutates the Run.",
             "recover_work_item": "Record plugin/runtime recovery for one WorkItem.",
             "get_plugin_progress": "Return progress for an active plugin Run, including the resolved plugin identity (pluginId, version).",
         }
@@ -710,48 +719,12 @@ class InteractivePlatformMcpToolTransport:
         ) from (cause or error)
 
     def call_tool(self, name: str, arguments: object) -> dict:
-        if name in self._LEGACY_AGENT_OPERATIONS:
-            raise HostError(
-                "UNSUPPORTED_PROTOCOL",
-                f"Interactive operation {name} belongs to the removed legacy Agent protocol; use advance_plugin_run with domainResult",
-            )
         if name not in self._SCHEMAS:
             raise HostError("UNKNOWN_TOOL", f"Tool {name} does not exist")
         if not isinstance(arguments, dict):
             raise HostError("INVALID_REQUEST", f"{name} arguments must be an object")
-        if name == "advance_plugin_run" and any(
-            key in arguments for key in ("reviewCheckpoint", "decision", "closeout")
-        ):
-            raise HostError(
-                "UNSUPPORTED_PROTOCOL",
-                "The legacy checkpoint/decision/closeout envelope is removed; submit only domainResult",
-            )
         error = next(Draft202012Validator(self._SCHEMAS[name]).iter_errors(arguments), None)
         if error is not None:
-            if (
-                self._active_run_id is not None
-                and name == "advance_plugin_run"
-                and self._controller.uses_agent_contract(self._active_run_id)
-            ):
-                pointer = "/" + "/".join(
-                    str(part).replace("~", "~0").replace("/", "~1")
-                    for part in error.absolute_path
-                ) if error.absolute_path else "/"
-                self._raise_contract_error(
-                    name, arguments,
-                    PlatformContractError(
-                        "AGENT_CONTRACT_ENVELOPE_INVALID",
-                        "Agent input does not satisfy the interactive platform envelope; correct the reported fields",
-                        errors=({
-                            "pointer": pointer,
-                            "keyword": str(error.validator or "schema"),
-                            "message": (
-                                "Value does not satisfy the declared "
-                                f"{error.validator or 'schema'} constraint"
-                            ),
-                        },),
-                    ),
-                )
             raise HostError("INVALID_REQUEST", f"{name} arguments do not satisfy the platform schema")
         try:
             if name == "start_plugin_run":
@@ -794,8 +767,9 @@ class InteractivePlatformMcpToolTransport:
                     cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
                 )
             elif name == "advance_plugin_run":
+                transport_started_ns = time.monotonic_ns()
                 if self._active_run_id is None and self._terminal_run_id is not None:
-                    if "domainResult" in arguments:
+                    if "domainResult" in arguments or "reviewSubmission" in arguments:
                         raise PlatformContractError(
                             "RUN_TERMINAL", "The latest plugin Run is terminal and cannot accept more semantic input",
                         )
@@ -803,7 +777,9 @@ class InteractivePlatformMcpToolTransport:
                 else:
                     result = self._controller.advance(
                         self._active_run(), domain_result=arguments.get("domainResult"),
+                        review_submission=arguments.get("reviewSubmission"),
                         page_size=arguments.get("pageSize"),
+                        transport_started_ns=transport_started_ns,
                     )
             elif name == "discover_work_items":
                 result = self._controller.discover(self._active_run())
@@ -822,6 +798,11 @@ class InteractivePlatformMcpToolTransport:
                     self._active_run(), arguments["workItemId"], arguments["collectionId"],
                     cursor=arguments.get("cursor"), page_size=arguments.get("pageSize"),
                     group_key=arguments.get("groupKey"),
+                )
+            elif name == "expand_semantic_evidence":
+                result = self._controller.expand_semantic_evidence(
+                    self._active_run(), cursor=arguments.get("cursor"),
+                    page_size=arguments.get("pageSize"),
                 )
             elif name == "recover_work_item":
                 result = self._controller.recover(self._active_run(), arguments["workItemId"], arguments.get("payload"))
@@ -913,6 +894,15 @@ def _load_fast_mcp():
     return FastMCP
 
 
+def _mcp_tool_annotations(item: Mapping[str, Any]):
+    """Convert transport metadata to the SDK type without requiring MCP at import time."""
+    annotations = item.get("annotations")
+    if annotations is None:
+        return None
+    from mcp.types import ToolAnnotations
+    return ToolAnnotations(**annotations)
+
+
 def create_mcp_server(core: HostCore):
     """Create an optional official-SDK stdio server without making MCP required."""
     FastMCP = _load_fast_mcp()
@@ -930,7 +920,11 @@ def create_mcp_server(core: HostCore):
 
     for item in adapter.list_tools():
         name = item["name"]
-        server.tool(name=name, description=item["description"])(make_invoke(name))
+        server.tool(
+            name=name,
+            description=item["description"],
+            annotations=_mcp_tool_annotations(item),
+        )(make_invoke(name))
         # FastMCP derives parameters from ``request: dict`` above.  Replace
         # that opaque generated schema with the checked-in protocol contract;
         # invocation still receives the same complete request dictionary.
@@ -944,6 +938,8 @@ def create_interactive_mcp_server(
     *, output_root: str | Path = "./assayer-output",
     plugin_registry: PluginRegistry | None = None,
     runtime_resolver: Any = None,
+    provider_runtime: Any = None,
+    provider_runtime_resolver: Any = None,
     capabilities_resolver: Any = None,
     provider_registry: ProviderRegistry | None = None,
     platform_profile: CapabilityProfile | None = None,
@@ -954,16 +950,24 @@ def create_interactive_mcp_server(
 
     Runtime adapters are intentionally injected by the embedding product.  A
     plain server created here can run non-browser interactive fixtures and will
-    never start Chromium as a side effect of tool discovery.  Plugin lifecycle
-    management tools (install/upgrade/uninstall/list/info/downgrade/rollback)
-    are registered alongside the interactive Run tools so a single ``assayer-mcp``
-    process serves the full natural-language plugin journey.
+    never start Chromium as a side effect of tool discovery.  Embeddings that
+    need a per-Run source (for example a browser snapshot source) may provide
+    ``provider_runtime_resolver(registration, check, scope)``. A plain returned
+    object remains embedding-owned; an explicit ``ProviderRuntimeLease`` is
+    released by the Host when the Run terminates or the controller closes.
+    Plugin lifecycle
+    development and lifecycle tools (verify/install/upgrade/uninstall/list/info/
+    downgrade/rollback) are registered alongside the interactive Run tools so
+    a single ``assayer-mcp`` process serves the full natural-language plugin
+    journey.
     """
     FastMCP = _load_fast_mcp()
     server = FastMCP("Assayer Interactive Plugins")
     adapter = InteractivePlatformMcpToolTransport(
         output_root, plugin_registry=plugin_registry,
         runtime_resolver=runtime_resolver,
+        provider_runtime=provider_runtime,
+        provider_runtime_resolver=provider_runtime_resolver,
         capabilities_resolver=capabilities_resolver,
         provider_registry=provider_registry,
         platform_profile=platform_profile,
@@ -971,6 +975,66 @@ def create_interactive_mcp_server(
         store_root=store_root,
     )
     server._assayer_transport = adapter
+
+    def read_plugin_semantic_instructions(
+        plugin_id: str, check_id: str, check_version: str,
+    ) -> str:
+        """Resolve one installed plugin's frozen semantic contract resource."""
+        adapter._refresh_registry()
+        registration = adapter._controller.registry.select(
+            plugin_id=plugin_id,
+            check_ref=(check_id, check_version),
+        )
+        contract = registration.domain_result_contract_for((check_id, check_version))
+        if contract is not None:
+            semantic_path = contract.semantic_instructions_path
+            semantic_digest = contract.semantic_instructions_sha256
+        else:
+            semantic_path = registration.semantic_instructions_path
+            semantic_digest = registration.semantic_instructions_sha256
+        if semantic_path is None or semantic_digest is None:
+            raise PlatformContractError(
+                "DOMAIN_RESULT_CONTRACT_UNAVAILABLE",
+                "The selected Check does not expose semantic instructions",
+            )
+        parts = semantic_path.split("/")
+        if not parts or any(not part or part in {".", ".."} for part in parts):
+            raise PlatformContractError(
+                "RESOURCE_UNAVAILABLE",
+                "The plugin semantic instruction path is invalid",
+            )
+        try:
+            target = importlib_resources.files(parts[0]).joinpath(*parts[1:])
+            payload = target.read_bytes()
+        except (ImportError, FileNotFoundError, ModuleNotFoundError, OSError) as error:
+            raise PlatformContractError(
+                "RESOURCE_UNAVAILABLE",
+                "The plugin semantic instructions are unavailable",
+            ) from error
+        if hashlib.sha256(payload).hexdigest() != semantic_digest:
+            raise PlatformContractError(
+                "RESOURCE_INTEGRITY_INVALID",
+                "The plugin semantic instructions do not match the frozen contract",
+            )
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise PlatformContractError(
+                "RESOURCE_UNAVAILABLE",
+                "The plugin semantic instructions are not valid UTF-8",
+            ) from error
+
+    server.resource(
+        "assayer://plugins/{plugin_id}/checks/{check_id}/{check_version}/semantic-instructions",
+        name="plugin-semantic-instructions",
+        title="Installed plugin semantic instructions",
+        description=(
+            "Read the exact Run-frozen semantic instructions referenced by a "
+            "semantic review task. Use the URI returned by the task; do not "
+            "search plugin files or temporary stores."
+        ),
+        mime_type="text/markdown",
+    )(read_plugin_semantic_instructions)
 
     def make_invoke(transport, tool_name: str, input_schema: dict):
         def invoke(**kwargs: Any) -> dict:
@@ -993,7 +1057,11 @@ def create_interactive_mcp_server(
     def register(transport):
         for item in transport.list_tools():
             name = item["name"]
-            server.tool(name=name, description=item["description"])(
+            server.tool(
+                name=name,
+                description=item["description"],
+                annotations=_mcp_tool_annotations(item),
+            )(
                 make_invoke(transport, name, item["inputSchema"])
             )
             registered = server._tool_manager.get_tool(name)
@@ -1026,6 +1094,7 @@ def mcp_main(argv: list[str] | None = None) -> int:
         # unconfigured entry would be broken at inspect time instead of at
         # install time.
         provider_registry=installed_provider_registry(),
+        provider_runtime_resolver=browser_provider_runtime_resolver,
         platform_profile=grant_check_capabilities,
         user_profile=grant_check_capabilities,
     )

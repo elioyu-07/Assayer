@@ -1,9 +1,10 @@
-import json
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, RefResolver
+
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,11 +12,7 @@ SCHEMA_ROOT = ROOT / "schemas"
 
 
 def load_validator(filename):
-    schemas = {}
-    for path in SCHEMA_ROOT.rglob("*.schema.json"):
-        schema = json.loads(path.read_text(encoding="utf-8"))
-        schemas[schema["$id"]] = schema
-        schemas[path.name] = schema
+    schemas = schema_store(SCHEMA_ROOT)
     schema = schemas[filename]
     return Draft202012Validator(schema, resolver=RefResolver(schema["$id"], schema, store=schemas))
 
@@ -141,6 +138,7 @@ class ObservabilitySchemaTest(unittest.TestCase):
         validator = load_validator("plugin-manifest.schema.json")
         manifest = {
             "pluginId": "example.config-quality", "version": "1.0.0", "platformApiVersion": "1.0.0",
+            "compatibility": {"protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0", "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2"},
             "domains": ["configuration-quality"],
             "subjectKinds": ["configuration_file"],
             "checks": [{
@@ -156,7 +154,7 @@ class ObservabilitySchemaTest(unittest.TestCase):
             "executionProfile": {
                 "discoverBatching": "allowed", "inspectBatching": "allowed",
                 "decisionBatching": "allowed", "parallelism": "forbidden",
-                "cacheReuse": "allowed", "checkpoint": "required",
+                "cacheReuse": "allowed",
             },
         }
         validator.validate(manifest)

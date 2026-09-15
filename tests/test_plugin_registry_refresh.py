@@ -19,49 +19,30 @@ PLUGIN_ID = "test-minimal"
 
 
 class PluginRegistryRefreshTest(unittest.TestCase):
-    def _installed_ids(self, transport):
-        return [r.manifest.plugin_id for r in transport._controller.registry.list()]
-
     def test_start_plugin_run_refreshes_registry_after_install(self):
         with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.json"
+            source.write_text('{}', encoding="utf-8")
+            scope = {"files": [{"path": str(source)}]}
             store = PluginInstallationStore(Path(directory))
             transport = InteractivePlatformMcpToolTransport(
                 output_root=Path(directory) / "out",
                 store_root=store.root,
             )
-            self.assertNotIn(PLUGIN_ID, self._installed_ids(transport))
-
-            PluginLifecycleManager(store).install(PACKAGE)
-
-            # start_plugin_run refreshes before selection; the non-interactive
-            # fixture then fails on execution mode, but only after the freshly
-            # installed plugin has become selectable in the same process.
-            with self.assertRaises(HostError):
+            with self.assertRaises(HostError) as missing:
                 transport.call_tool("start_plugin_run", {
-                    "pluginId": PLUGIN_ID, "checkId": "TST-001", "scope": {},
+                    "pluginId": PLUGIN_ID, "checkId": "TST-001", "scope": scope,
                 })
+            self.assertEqual(missing.exception.code, "UNKNOWN_PLUGIN")
 
-            self.assertIn(PLUGIN_ID, self._installed_ids(transport))
-
-    def test_refresh_is_noop_without_store_root(self):
-        transport = InteractivePlatformMcpToolTransport(
-            output_root=tempfile.mkdtemp(),
-        )
-        before = self._installed_ids(transport)
-        transport._refresh_registry()
-        self.assertEqual(self._installed_ids(transport), before)
-
-    def test_refresh_keeps_controller_run_state(self):
-        with tempfile.TemporaryDirectory() as directory:
-            store = PluginInstallationStore(Path(directory))
-            transport = InteractivePlatformMcpToolTransport(
-                output_root=Path(directory) / "out",
-                store_root=store.root,
-            )
             PluginLifecycleManager(store).install(PACKAGE)
-            transport._refresh_registry()
-            self.assertIsNone(transport._active_run_id)
-            self.assertIn(PLUGIN_ID, self._installed_ids(transport))
+
+            started = transport.call_tool("start_plugin_run", {
+                "pluginId": PLUGIN_ID, "checkId": "TST-001", "scope": scope,
+            })["structuredContent"]["result"]
+            self.assertEqual(started["status"], "started")
+            self.assertEqual(started["result"]["plugin"]["pluginId"], PLUGIN_ID)
+            transport.close()
 
     def test_start_plugin_run_rejects_tampered_package(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -71,8 +52,6 @@ class PluginRegistryRefreshTest(unittest.TestCase):
                 store_root=store.root,
             )
             PluginLifecycleManager(store).install(PACKAGE)
-            transport._refresh_registry()
-            self.assertIn(PLUGIN_ID, self._installed_ids(transport))
 
             # Modify a package file without touching index.json: the store
             # digest now covers package content, so the next start must refuse
@@ -80,11 +59,12 @@ class PluginRegistryRefreshTest(unittest.TestCase):
             package_dir = Path(directory) / "packages" / PLUGIN_ID / "1.0.0"
             (package_dir / "semantic-review.md").write_text("# tampered", encoding="utf-8")
 
-            with self.assertRaises(HostError):
+            with self.assertRaises(HostError) as rejected:
                 transport.call_tool("start_plugin_run", {
                     "pluginId": PLUGIN_ID, "checkId": "TST-001", "scope": {},
                 })
-            self.assertNotIn(PLUGIN_ID, self._installed_ids(transport))
+            self.assertEqual(rejected.exception.code, "UNKNOWN_PLUGIN")
+            transport.close()
 
 
 if __name__ == "__main__":

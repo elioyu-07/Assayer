@@ -29,7 +29,7 @@
                 "code": { "type": "string", "minLength": 1 },
                 "invariant": {
                   "type": "string",
-                  "pattern": "^(?:PCV1|PDSV1|PBV1)-[A-Z0-9-]+$"
+                  "pattern": "^(?:PCV1|PDSV1|PDSV2|PBV1)-[A-Z0-9-]+$"
                 },
                 "message": { "type": "string", "minLength": 1 },
                 "nextAction": { "type": "string", "minLength": 1 }

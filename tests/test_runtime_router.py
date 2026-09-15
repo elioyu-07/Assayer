@@ -9,6 +9,7 @@ from assayer_host import (
     HostCore,
     HostError,
     RuntimeRouter,
+    SQLiteStore,
 )
 
 
@@ -315,7 +316,8 @@ class RuntimeRouterTest(unittest.TestCase):
             self.assertEqual(runtime.close_calls, 1)
 
     def test_core_supervision_failure_invalidates_active_case(self):
-        core = HostCore(login_adapter=DeterministicLoginAdapter(), page_adapter=DeterministicPageAdapter(),
+        store = SQLiteStore()
+        core = HostCore(store=store, login_adapter=DeterministicLoginAdapter(), page_adapter=DeterministicPageAdapter(),
                         object_identity_adapter=DeterministicObjectIdentityAdapter())
         self.addCleanup(core.close)
         started_response = core.handle(start_request("core-start"))
@@ -335,10 +337,10 @@ class RuntimeRouterTest(unittest.TestCase):
                                 "AGENT_RUNTIME_EXITED", "Agent runtime exited")
         self.assertEqual(failed["scanStatus"], "failed")
         self.assertEqual(failed["runRevision"], case["runRevision"] + 1)
-        stored = core._store.get_case(case["caseId"])
+        stored = store.get_case(case["caseId"])
         self.assertEqual(stored["status"], "invalidated")
         self.assertEqual(stored["restoreReason"]["code"], "AGENT_RUNTIME_EXITED")
-        operation = core._store.get_operation(failed["failureEventId"])
+        operation = store.get_operation(failed["failureEventId"])
         self.assertEqual(operation["tool"], "agent_supervision")
         self.assertEqual(operation["status"], "failed_known")
 

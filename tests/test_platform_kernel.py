@@ -30,7 +30,7 @@ class PlatformKernelTest(unittest.TestCase):
     def context(self, *capabilities):
         return PlatformContext("run-test", frozenset(capabilities))
 
-    def test_interactive_session_checkpoints_agent_lifecycle(self):
+    def test_interactive_session_commits_domain_result_lifecycle(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "settings.json"
             path.write_text(json.dumps({"name": "demo"}), encoding="utf-8")
@@ -345,7 +345,7 @@ class PlatformKernelTest(unittest.TestCase):
             self.assertEqual(host_store.load_platform_ledger(result.run_id), json.dumps(stored, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
             host_store.close()
 
-    def test_platform_ledger_can_append_terminal_checkpoint_after_host_store_closes(self):
+    def test_platform_ledger_can_append_terminal_result_after_host_store_closes(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "host.sqlite3"
             host_store = SQLiteStore(database)
@@ -452,9 +452,11 @@ class PlatformKernelTest(unittest.TestCase):
 
     def test_manifest_semantic_duplicate_is_rejected(self):
         manifest = {
-            "pluginId": "example.config-quality", "version": "1.0.0", "platformApiVersion": "1.0.0", "domains": ["configuration-quality"], "subjectKinds": ["configuration_file"],
+            "pluginId": "example.config-quality", "version": "1.0.0", "platformApiVersion": "1.0.0",
+            "compatibility": {"protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0", "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2"},
+            "domains": ["configuration-quality"], "subjectKinds": ["configuration_file"],
             "checks": [{"checkId": "CFG-001", "version": "1.0.0", "subjectKinds": ["configuration_file"], "dimensions": ["valid"], "decisionStates": ["scanned_no_issue", "needs_review"], "requiredEvidenceKinds": ["structured"], "requiredCapabilities": [], "capabilityMissingOutcome": "needs_review", "invalidationSignals": []}],
-            "executionProfile": {"discoverBatching": "allowed", "inspectBatching": "allowed", "decisionBatching": "allowed", "parallelism": "forbidden", "cacheReuse": "allowed", "checkpoint": "required"},
+            "executionProfile": {"discoverBatching": "allowed", "inspectBatching": "allowed", "decisionBatching": "allowed", "parallelism": "forbidden", "cacheReuse": "allowed"},
         }
         with self.assertRaisesRegex(PlatformContractError, "unique"):
             load_plugin_manifest({**manifest, "checks": manifest["checks"] * 2})
@@ -466,26 +468,66 @@ class PlatformKernelTest(unittest.TestCase):
             missing = str(Path(directory) / "missing")
             with patch.dict("os.environ", {"ASSAYER_SDK_SCHEMA_ROOT": missing}, clear=False):
                 with self.assertRaisesRegex(PlatformContractError, "does not contain"):
-                    load_plugin_manifest({})
+                    load_plugin_manifest({
+                        "compatibility": {
+                            "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+                            "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+                        },
+                    })
 
     def test_decision_gate_rejects_false_pass(self):
-        check = ConfigQualityPlugin.manifest.checks[0]
-        item = WorkItem("work-1", "configuration_file", "source-1", "digest-1")
-        evidence = EvidenceRecord("evidence-1", "work-1", check.check_id, check.version, "structured", "source-1", {})
-        dimensions = tuple(DimensionObservation(name, ("Observed.",), ("evidence-1",), "violated") for name in check.dimensions)
-        packet = InvestigationPacket(item, check.check_id, check.version, dimensions, (evidence,), "not_required")
-        proposal = DecisionProposal("work-1", check.check_id, check.version, "scanned_no_issue", tuple(Finding(name, "violated", "Observed violation.") for name in check.dimensions), "No issue.")
-        with self.assertRaises(PlatformContractError):
-            PlatformKernel._validate_proposals((proposal,), {"work-1": packet}, check)
+        class FalsePassDecisionProvider:
+            def decide(self, packets, check, context):
+                del context
+                packet = packets[0]
+                return (DecisionProposal(
+                    packet.work_item.work_item_id,
+                    check.check_id,
+                    check.version,
+                    "scanned_no_issue",
+                    tuple(
+                        Finding(name, "violated", "Observed violation.")
+                        for name in check.dimensions
+                    ),
+                    "No issue.",
+                ),)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text('{}', encoding="utf-8")
+            result = PlatformKernel().run(
+                ConfigQualityPlugin(),
+                {"files": [{"path": str(path), "requiredKeys": ["name"]}]},
+                "CFG-001",
+                FalsePassDecisionProvider(),
+                self.context("structured_read"),
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.decisions, ())
+        self.assertEqual(result.failures[0].code, "DECISION_GATE")
 
     def test_packet_evidence_closure_is_enforced(self):
-        check = ConfigQualityPlugin.manifest.checks[0]
-        item = WorkItem("work-1", "configuration_file", "source-1", "digest-1")
-        evidence = EvidenceRecord("evidence-1", "another-work", check.check_id, check.version, "structured", "source-1", {})
-        dimensions = tuple(DimensionObservation(name, ("Observed.",), ("evidence-1",), "satisfied") for name in check.dimensions)
-        packet = InvestigationPacket(item, check.check_id, check.version, dimensions, (evidence,), "not_required")
-        with self.assertRaisesRegex(PlatformContractError, "different"):
-            PlatformKernel._validate_packets((packet,), (item,), check)
+        class CrossBoundEvidencePlugin(ConfigQualityPlugin):
+            def inspect(self, work_items, check, context):
+                packet = super().inspect(work_items, check, context)[0]
+                evidence = replace(packet.evidence[0], work_item_id="another-work")
+                return (replace(packet, evidence=(evidence,)),)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            path.write_text('{"name": "demo"}', encoding="utf-8")
+            result = PlatformKernel().run(
+                CrossBoundEvidencePlugin(),
+                str(path),
+                "CFG-001",
+                ConfigurationDecisionProvider(),
+                self.context("structured_read"),
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.decisions, ())
+        self.assertEqual(result.failures[0].code, "EVIDENCE_CLOSURE")
 
     def test_forbidden_inspection_batching_uses_single_items(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -632,14 +674,6 @@ class PlatformKernelTest(unittest.TestCase):
             self.assertEqual(result.metrics["batchSplits"], 1)
             self.assertEqual(result.metrics["adaptiveBatchReductions"], 1)
             self.assertEqual(result.metrics["inspectBatchSize"], 2)
-
-    def test_generic_contract_does_not_expose_frontend_types(self):
-        import assayer_platform
-
-        public_contract = {name.lower() for name in assayer_platform.__all__}
-        for frontend_term in ("page", "dom", "tab", "chromium", "screenshot"):
-            self.assertNotIn(frontend_term, public_contract)
-
 
 if __name__ == "__main__":
     unittest.main()

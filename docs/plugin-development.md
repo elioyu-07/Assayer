@@ -1,422 +1,254 @@
 # Assayer Plugin Development Guide
 
+> **Authoring guide.** The Policy Pack/Simple SDK compiler and
+> `assayer plugin verify` command are implemented. The current
+> `PluginRegistration` and `DomainResultContract` flow remains an Advanced SPI
+> migration path for legacy plugins; do not use it as the scaffold for a new
+> ordinary plugin.
+
 The normative contract is [Audit Plugin Contract v1](plugin-contract-v1.md),
-governed by the [Platform Constitution v1](platform-constitution-v1.md).
-Interactive Agent inputs, fail-fast validation, error ownership, and release
-gates are governed by the
-[Plugin Development Standard v1](plugin-development-standard-v1.md). This
-document is the implementation guide for the current Python registration and
-interactive lifecycle; where current behavior differs from that standard, the
-standard defines the target and the difference is migration debt, not a plugin
-permission.
+governed by [Platform Constitution v1](platform-constitution-v1.md). The target
+architecture and migration sequence are in
+[Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).
 
-This document defines how an independently packaged plugin is discovered and
-run by the Assayer platform.  A plugin owns domain facts and semantic rules;
-the Platform Kernel owns lifecycle, safety, evidence closure, decision gates,
-receipts, persistence, and observability.
+## Choose the authoring level
 
-## Registration
+Use the lowest level that can express the domain:
 
-An installed Python distribution exports one entry point in the
-`assayer.plugins` group.  The entry point resolves to either a
-`PluginRegistration`, a zero-argument callable returning one, or an object
-with a `registration` attribute containing one.
+| Level | Use when | Author maintains |
+|---|---|---|
+| Policy Pack | Rules and recognizers are declarative | metadata, Checks, instructions, cases |
+| Simple SDK | Deterministic domain scanning needs Python | the Policy Pack plus `scan` logic |
+| Advanced SPI | A custom provider, external effect, non-standard workflow, or irreducible result model is required | reviewed low-level contract and its conformance suite |
 
-```toml
-[project.entry-points."assayer.plugins"]
-my_quality = "my_package.plugin:registration"
+Batching, caching, pagination, reporting, packaging, or a missing convenience
+helper are not reasons to use Advanced SPI.
+
+## Create an ordinary plugin
+
+The ordinary source tree is:
+
+```text
+my-plugin/
+├── plugin.yaml
+├── checks.yaml
+├── semantic-review.md
+├── cases/
+│   ├── pass.yaml
+│   └── issue.yaml
+└── plugin.py                 # optional
 ```
 
-The registration must provide a validated `PluginManifest` and a plugin
-factory. Interactive DomainResult plugins implement the domain validator and
-mapper on that plugin object; the Host invokes them after validating the
-published contract. A committer factory is optional for in-memory or
-caller-owned durable commit paths.
+### Plugin declaration
 
-Registrations must also publish a JSON-compatible `scope_schema`. The generic
-`list_plugins` MCP tool exposes this schema before `run_plugin` is called, so
-an Agent can discover required business inputs instead of guessing them.
+`plugin.yaml` contains only business-owned metadata:
 
-Each interactive Check that accepts Agent input must publish a versioned
-`DomainResultContract`. It contains the executable domain-result Schema and
-semantic rules; the Host binds Run, WorkItem, Evidence, paging, checkpoint,
-Decision, and finalization state internally. A prompt, example, or Python
-validator cannot introduce a field absent from this contract. The legacy
-`AgentContractBundle` checkpoint envelope is not an Agent-facing fallback and
-is rejected at the hard-cut transport boundary.
+```yaml
+id: dev.example.spec-quality
+name: Spec quality
+description: Reviews Markdown specifications for delivery risk.
+version: 1.0.0
+input: markdown
+checks: checks.yaml
+instructions: semantic-review.md
+```
+
+Do not add a platform API version, protocol range, SDK range, capability list,
+execution mode, entry point, scope Schema, or release descriptor. The compiler
+derives them from the input kind and compiler identity.
+
+### Checks
+
+`checks.yaml` owns domain meaning:
+
+```yaml
+checks:
+  - id: PERM-001
+    title: Permission denial behavior
+    description: Permission requirements define roles, data scope, and denial responses.
+    applicability: Documents that define protected operations or data.
+    default_severity: P2
+    recommendation: Define roles, data scope, and denial responses.
+    unknown_when: The relevant section or referenced authority is unavailable.
+    detect:
+      contains_all: [permission]
+      absent_all: [denied, unauthorized, data scope]
+```
+
+Check and rule IDs are stable domain identities. The plugin has one author-owned
+business version; the compiler records the distinct generated Check and
+contract identities needed by the Host.
+
+`detect` is optional. It supports deterministic `contains_all`, `contains_any`,
+and `absent_all` predicates over the frozen document. Without `detect`, the
+Check still becomes a semantic review dimension. A Policy Pack containing only
+these declarations, Markdown instructions, and cases needs no `plugin.py`.
+
+### Business cases
+
+Each Check must be covered by at least one `cases/*.yaml` file. Inputs are
+resolved relative to that case file:
+
+```yaml
+input: weak-spec.md
+expect:
+  candidate_rules: [PERM-001]
+  final: rework
+```
+
+`final` is one of `ready`, `rework`, `needs_review`, or `not_applicable`.
+The compiler turns these expectations into installed lifecycle acceptance;
+authors do not write start, resume, pagination, replay, or publication code.
+
+### Optional deterministic scanning
+
+Use `plugin.py` only when declarations cannot recognize the candidate:
 
 ```python
-from assayer_platform import DomainResultContract, PluginRegistration
+from assayer_plugin_sdk.simple import Candidate, Document, policy_plugin
 
-review_contract = DomainResultContract(
-    contract_id="dev.example.my-quality.review",
-    contract_version="1.0.0",
-    check_id="MY-001",
-    check_version="1.0.0",
-    result_schema={
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["findings"],
-        "properties": {"findings": {"type": "array", "minItems": 1}},
-    },
-    semantic_instructions_path="semantic-review.md",
-    semantic_instructions_sha256="<64 lowercase hex characters>",
+
+@policy_plugin(
+    id="dev.example.spec-quality",
+    version="1.0.0",
+    input="markdown",
+    checks="checks.yaml",
+    instructions="semantic-review.md",
 )
-
-registration = PluginRegistration(
-    manifest=MyPlugin.manifest,
-    plugin_factory=lambda runtime=None: MyPlugin(runtime),
-    execution_modes=frozenset({"interactive"}),
-    scope_schema={"type": "object"},
-    domain_result_contracts=(review_contract,),
-)
+class SpecQuality:
+    def scan(self, document: Document):
+        if document.contains("permission") and not document.contains_any(
+            "denied", "unauthorized", "data scope",
+        ):
+            yield Candidate(
+                rule="PERM-001",
+                subject="permission behavior",
+                message="Permission behavior lacks denial and data-scope rules.",
+                support=document.absence(
+                    ["denied", "unauthorized", "data scope"],
+                    scope=document.full_scope,
+                ),
+                severity="P2",
+                recommendation="Define roles, data scope, and denial responses.",
+            )
 ```
 
-Registration copies the schema into canonical JSON and computes an immutable
-`sha256:` contract digest. An interactive Check that accepts Agent input MUST
-publish a domain-result contract; a registration without one is non-conformant
-and must not be used for a production Run.
+The scanner receives a frozen typed document. It does not read a path, calculate
+a digest, call a provider, create Evidence, or construct a platform result.
 
-The semantic task publishes `domainContract` and a minimal `agentView` with
-bounded domain data and task-local handles. Explicitly negotiated plugins do
-not receive the legacy `investigation` or top-level `evidenceHandles` views.
-The submission contains only `domainResult`; new findings cite `supportedBy`
-handles while the Host retains all platform identity, Evidence lineage,
-checkpoint state, and Decision metadata.
+Only these ordinary concepts are public: `policy_plugin`, `Document`,
+`Candidate`, `Fact`, `Relation`, `Support`, `Unknown`, and `invariant`.
 
-Strict-boundary errors follow
-[`plugin-agent-error.schema.json`](../schemas/plugin-agent-error.schema.json).
-They identify the error owner and retry disposition, remain non-automatically
-retryable, and permit at most one explicit Agent correction per durable
-WorkItem semantic boundary. A second rejection closes the Run `partial` and
-places the WorkItem in the terminal review queue without manufacturing a
-`needs_review` Decision. Plugin and platform contract defects have zero Agent
-correction budget.
+### Semantic instructions
 
-Every manifest declares `platformApiVersion`. Assayer rejects a plugin that
-requires another platform major version or a newer unsupported minor version
-before discovery starts.
+`semantic-review.md` explains domain judgment: what confirms or suppresses a
+Candidate, what is unknown or not applicable, what evidence distinguishes the
+outcomes, and how domain relationships affect the conclusion.
 
-```python
-from assayer_platform import PluginRegistration
+Do not describe JSON fields, platform IDs, cursors, checkpoints, digests,
+recovery, replay, or finalization. The compiler generates the Agent result shape
+from the common review model and typed invariants.
 
-registration = PluginRegistration(
-    manifest=MyPlugin.manifest,
-    plugin_factory=lambda runtime=None: MyPlugin(runtime),
-    decision_provider_factory=lambda runtime=None: MyDecisionProvider(runtime),
-    committer_factory=lambda runtime=None: MyCommitter(runtime),
-    execution_modes=frozenset({"batch"}),
-)
-```
-
-The registry rejects duplicate plugin IDs, ambiguous selections, malformed
-entry points, and checks that are not declared by the selected manifest.
-There is no implicit fallback to another plugin.
-
-## Conformance before release
-
-Validate a source-tree registration before building or publishing its package:
-
-```text
-assayer-plugin-check my_package.plugin:registration
-```
-
-The target may also be a zero-argument factory that returns a `PluginRegistry`.
-The command emits a versioned JSON report and exits nonzero when the manifest,
-runtime factory, batch decision provider, capability declaration, scope schema,
-or safe execution profile is incomplete. Every issue names a stable `PCV1-*`
-contract identifier and a required next action.
-
-Registration discovery applies the same side-effect-free structural gate. The
-release command additionally constructs the plugin and batch decision provider
-and verifies their required interfaces. Construction must not contact a live
-browser, repository, API, database, or other provider; live access begins only
-after the platform starts an authorized Run.
-
-The Assayer bundle builder applies this release gate to every bundled reference
-plugin before creating wheels. This is the first package-time M3 gate. Package
-content is checked separately before any plugin code is imported:
-
-```text
-assayer-plugin-package-check ./my-plugin-release
-```
-
-An independent package contains `assayer-plugin-release.json`. The descriptor
-binds one plugin ID and version to its manifest, top-level scope schema, Python
-runtime source, Markdown semantic-review contract, deterministic JSON fixtures,
-and `pyproject.toml` entry point. All paths must remain inside the package and
-must not traverse symbolic links. The static gate validates cross-file identity,
-fixture Check references, and package metadata without executing plugin code.
-
-Passing both checks proves static release completeness and constructable
-interfaces. It does not yet install the distribution, execute its fixtures,
-verify upgrade/rollback, sign it, or publish it. Those remain later M3/M4 gates.
-
-The isolated release gate performs the remaining installation and fixture
-checks without changing the user's environment:
-
-```text
-assayer-plugin-install-check ./my-plugin-release
-```
-
-It installs the local package into a temporary target with dependency download
-disabled, launches a new Python worker, discovers exactly one matching
-`assayer.plugins` entry point from that target, reruns registration conformance,
-and reconciles runtime manifest and scope schema with the statically checked
-files. It then runs every declared deterministic fixture through
-`PlatformKernel` and compares exact terminal status and decision/failure
-multisets.
-
-Installation and fixture-worker budgets are release-test safeguards, not audit
-Run timeouts. They are independently configurable with
-`--install-timeout-seconds` and `--fixture-timeout-seconds`. The command does
-not permanently install, upgrade, roll back, sign, or publish a plugin. It is
-also process isolation for reproducibility, not an operating-system sandbox for
-hostile code; only reviewed source packages should enter this developer gate.
-
-The release-facing CI entry point is the single complete command, run against
-the exact wheel that would be published:
-
-```text
-assayer-plugin-release-check --source ./my-plugin-release \
-  ./dist/my_plugin-1.0.0-py3-none-any.whl
-```
-
-Under the Plugin Development Standard, this command must compose static,
-installed-artifact, public-surface, executable Agent-contract, full interactive
-lifecycle, and fail-fast error-path gates. Its report names each executed stage
-and the exact artifact SHA-256. An interactive plugin with an executable Agent
-contract must also declare `releaseAcceptance` and export the same callable in
-the `assayer.release_acceptance` entry-point group. The callable supplies only
-domain-valid Agent proposals through a platform-owned transport; the platform
-validates its collection coverage, terminal ledgers, resume, replay, and result
-publication evidence.
-
-## Runtime boundary
-
-The plugin implements only domain operations:
-
-```text
-discover(scope, context) -> WorkItemSet
-inspect(workItems, check, context) -> InvestigationPacketSet
-```
-
-The runtime adapter may use a browser, API, repository, file, database, or log
-source.  It must not bypass Host safety or write directly to platform ledger
-storage.
-
-## Interactive plugin lifecycle
-
-Plugins that need Agent-guided work declare `interactive` in their registration
-and use the same domain-neutral lifecycle as every other interactive plugin:
-
-```text
-start_plugin_run -> advance_plugin_run
-                  -> (semantic input + advance_plugin_run)*
-                  -> formal summary
-                  -> get_plugin_result(sectionId, cursor)* when detail is needed
-
-resume_plugin_run(runId) -> advance_plugin_run* after Host interruption
-```
-
-The `advance_plugin_run` operation is the normal Host-driven product path. It
-performs deterministic discovery and inspection, then pauses at an explicit
-domain-result boundary. The Agent returns only `domainResult`; the Host owns
-paging, Evidence resolution, checkpointing, Decision assembly, and eligible
-closeout. The normal product MCP catalog exposes
-`start_plugin_run`, `resume_plugin_run`, `advance_plugin_run`,
-`expand_evidence_collection`, `get_plugin_result`, `recover_work_item`, and
-`get_plugin_progress`. Evidence expansion is bounded and read-only; normal
-state changes still go exclusively through `advance_plugin_run`. Resume uses
-the opaque Run ID retained from start; Host startup never resumes implicitly.
-The old checkpoint, preflight, Decision, and finish operations are private Host
-migration primitives and return `UNSUPPORTED_PROTOCOL` at the Agent boundary.
-
-Terminal delivery is summary-first for every plugin. The platform recursively
-replaces non-empty arrays and oversized text in the Agent response with stable
-section references. `get_plugin_result` returns only the requested next page
-and an opaque cursor; it never repeats earlier pages. The original unabridged
-terminal JSON is written to `result-summary.json`, while the ledger continues
-to retain canonical Evidence and decisions. Plugins do not implement cursors,
-chat-sized truncation, or result pagination themselves.
-
-Every terminal response starts with a platform-owned `resultOverview`. It
-states conclusion validity, coverage, outcome counts, review and failure
-counts, and a plain-language next action. Decision detail pages retain the
-committed decision reason and each dimension's status and reason.
-`needs_review` decisions also produce platform-derived review items naming the
-unresolved, blocked, or conflicting dimensions and the next evidence action.
-A failed Run reports invalidated conclusions and does not expose earlier
-decisions or optional plugin summary data as formal results; those records
-remain available only in the canonical ledger for diagnosis.
-
-Terminal publication stages `result-summary.pending.json` before the terminal
-ledger transition and atomically promotes it to `result-summary.json` after
-the ledger succeeds. The Host then publishes its latest-terminal pointer and
-only afterward removes active resume metadata. These files are Host-owned
-recovery state; plugins must not create, edit, or delete them.
-
-The public payload contains only plugin/check identity, business scope, WorkItem
-references, InvestigationPackets, and semantic DecisionProposals.  The platform
-generates Run IDs, protocol versions, output paths, ledger entries, and commit
-receipts.  A frontend plugin may continue to expose the historical
-`start_audit`, `discover_scope`, and `investigate_object` names as compatibility
-aliases, but new plugins must not copy browser-specific vocabulary into their
-contract.
-
-`inspect_work_items` is summary-first at the Agent-facing transport. A plugin
-can declare large arrays through `InvestigationPacket.metadata.evidenceCollections`;
-the platform then exposes stable group summaries and bounded collection pages.
-Plugins must supply stable unique item IDs and may declare only mechanical
-grouping fields. They must not implement their own transport cursor or treat a
-mechanical group as a semantic decision.
-
-Set `reviewRequired=false` for a collection that provides pageable reference
-context but is not itself a queue of items that must receive durable semantic
-review checkpoints. Reference collections never contribute to completion
-coverage and cannot be checkpointed.
-
-An interactive plugin may implement
-`assemble_review_checkpoints(checkpoints, finalization, packet, check, context)`
-to support incremental semantic review. The platform treats each checkpoint
-payload's domain meaning as plugin-owned, but its structure is not opaque. The
-Host must validate the payload against the Run-frozen schema selected by the
-current `collectionId`, then validate WorkItem, Check, stable item IDs, replay
-identity, and non-overlapping coverage before calling plugin code. Before
-assembly it validates the declared finalization schema and requires the
-referenced checkpoints to cover every non-empty `reviewRequired=true`
-collection exactly once. This lets a plugin declare separate required queues,
-such as candidate dispositions and final dimension reviews, without allowing
-either queue to be bypassed. The plugin hook returns ordinary Decision
-`details`; existing decision and committer gates remain authoritative.
-
-Malformed envelopes, stale contract digests, and schema-invalid payloads fail
-before a plugin hook or ledger write. A schema-valid payload that a plugin
-rejects because it expects undeclared structure is
-`PLUGIN_CONTRACT_IMPLEMENTATION_MISMATCH`: the WorkItem is blocked and the
-plugin must be fixed. It is not an instruction for the Agent to keep guessing.
-Only an error explicitly classified as `agent_correction` may receive one
-bounded correction attempt; deterministic contract, platform, and plugin
-errors are never automatically retried.
-
-The transport-independent reference implementation is
-`InteractivePluginController`.  MCP and CLI adapters should delegate to it
-instead of reimplementing lifecycle or validation rules.  A plugin may expose a
-`restore(work_item_id, payload, context)` hook; when absent, the platform records
-recovery as `not_required`.  Recovery status is diagnostic state and does not
-replace the evidence and decision gates.
-
-## Kernel entry point
-
-Callers select a registered plugin by ID and Check.  Selection occurs before
-discovery and failures are returned as a failed platform Run:
-
-```python
-result = PlatformKernel().run_registered(
-    registry,
-    scope,
-    "CFG-001",
-    context,
-    plugin_id="my.quality-plugin",
-)
-```
-
-The same kernel conformance gates apply to built-in and external plugins:
-
-- WorkItem identity and duplicate handling;
-- required evidence and dimension closure;
-- capability negotiation and fail-closed behavior;
-- declared batching, ordering, caching, and parallelism;
-- recovery and checkpoint semantics;
-- receipt-bound decision commits;
-- terminal status, diagnostics, performance, and artifact publication.
-
-Parallel inspection is opt-in. A plugin must declare both
-`parallelism=allowed` and `ordering=independent`; the caller must also provide a
-negotiated positive `maxConcurrency`. Otherwise the Kernel stays serial. Only
-independent inspection is parallelized: semantic decision and commit remain
-ordered, and packets are merged by original WorkItem order. Plugins must not
-create their own unbounded executor. Persistent or cross-process platform caching
-is not part of the current roadmap.
-
-If a plugin commits through a domain system, its committer may delegate only a
-narrow domain persistence callback. It must return a `CommitReceipt` with
-`authority="platform"`; domain-side IDs belong in receipt metadata and never
-replace the Platform `commit_id`. This keeps reports attributable to one
-Platform decision while still allowing a browser, API, or repository ledger to
-hold a compatibility projection.
-
-## Product compatibility
-
-### Protocol and SDK compatibility declaration
-
-Interactive registrations may declare a `PluginCompatibility` object with
-independent protocol and SDK min/max versions plus protocol capabilities. The
-Host negotiates this declaration before plugin initialization or Run creation;
-unsupported combinations fail with a stable compatibility error and produce
-no partial Run state. Registrations created before this handshake use the
-documented legacy window while they migrate. A declaration can be embedded in
-`manifest.json` under `compatibility` or supplied directly on
-`PluginRegistration`.
-
-The current frontend MCP names (`discover_scope`, `investigate_object`, and
-`prepare_decision`) remain a compatibility surface for the first browser
-plugin. They are routed through the registry and must not be copied into a
-new plugin. The product MCP also exposes the domain-neutral `list_plugins` and
-`run_plugin` entrypoints for registered batch plugins; they accept only
-plugin/check identity and business scope while preserving the same ledger
-invariants.
-
-The `ass-spec` plugin (now an independently installed distribution
-rather than a built-in) is the first cross-domain interactive reference for
-Markdown requirements. Its deterministic runtime owns only read-only Markdown
-parsing and bounded candidate excerpts; an Agent must review that evidence and
-submit the semantic decision. The platform still owns evidence closure, decision
-gates, receipts, and publication. Scanner hits are therefore never promoted into
-final Spec findings by the runtime alone.
-
-## Capability provider registration
-
-A reusable source adapter is registered separately from an audit plugin. Its
-descriptor declares capabilities, scope, authorization, limits, failure
-semantics, Evidence kinds, and algorithm versions. The Python distribution
-exports a `ProviderRegistration` through `assayer.providers`; it does not add
-provider code to the platform package or the plugin registry.
-
-Before packaging, run:
+Run the complete gate with:
 
 ```bash
-assayer-provider-check my_provider.registration:registration
+assayer plugin verify . --output-dir .assayer/verified
 ```
 
-The command constructs the provider without calling its live `collect`
-operation. Then validate the independent source package without importing its
-code, followed by temporary installation and deterministic fixture execution:
+The command compiles into a temporary tree, builds one isolated wheel, installs
+and exercises that exact wheel, and publishes it only after all gates pass.
 
-```bash
-assayer-provider-package-check ./my-provider-release
-assayer-provider-install-check ./my-provider-release
+Inside Codex, the equivalent developer entry is natural language: “verify this
+local Assayer plugin source.” The `assayer-plugin-development` Skill calls the
+Host-owned `verify_plugin_source` MCP tool with the absolute project directory.
+The tool writes a passed artifact under `.assayer/verified` and returns its
+plugin identity, exact path, SHA-256, and stage results. Codex does not recreate
+the compiler, build, installation, or lifecycle checks and verification alone
+does not install or publish the plugin.
+
+### Business cases
+
+Cases contain business inputs and expected domain meaning:
+
+```yaml
+input: fixtures/weak-spec.md
+expect:
+  candidate_rules: [PERM-001]
+  final: rework
 ```
 
-The package root contains `assayer-provider-release.json`, a provider
-descriptor, Python runtime source, `pyproject.toml`, and deterministic JSON
-fixtures. Every declared capability needs a successful fact fixture, and the
-release needs at least one classified-failure fixture. The isolated gate loads
-exactly one `assayer.providers` entry point, reconciles the installed descriptor
-with static package data, and runs fixtures through negotiated provider
-requests. Release-test time budgets do not limit user audit Run duration.
+Do not call `start_plugin_run`, `advance_plugin_run`, `resume_plugin_run`, or
+result paging tools in a case. The platform generates those lifecycle journeys.
 
-These commands prove metadata, packaging, interface, and deterministic runtime
-conformance. They do not access a production source, persistently install the
-provider, or provide an operating-system sandbox for untrusted code. Real
-adapter acceptance remains a distinct gate.
+## Evidence and large documents
 
-## Current migration boundary
+Use only Supports returned by the frozen document API:
 
-The generic registry and batch Kernel path are implementation-ready. The first
-browser plugin remains a compatibility adapter: its interactive MCP calls still
-write a browser-shaped Host Assessment projection. The plugin translates that
-atomic domain write into a distinct Platform receipt, and the interactive Run
-persists it with `decision_authority=platform`. Receipt metadata identifies the
-exact Host Assessment projection; the projection is not a second authority.
+```python
+document.lines(10, 14)
+document.search("permission")
+document.section("Authorization")
+document.absence(["denied", "unauthorized"], scope=document.full_scope)
+```
+
+The Host resolves Support into canonical Evidence, builds lineage and Evidence
+graphs, and rejects stale or out-of-scope references. `absence` returns Unknown
+unless the provider can prove a complete closed search scope.
+
+The Host divides large reviews into bounded batches and persists each accepted
+batch. Plugin code and Agent output never maintain cursors, coverage state, or a
+complete document result.
+
+## Verify
+
+Run the single deterministic gate:
+
+```text
+assayer plugin verify
+```
+
+The command will:
+
+1. validate the domain declarations and Simple imports;
+2. compile manifest, Schemas, registration, compatibility, and release data;
+3. build an isolated wheel;
+4. validate and install that exact wheel;
+5. derive lifecycle tests from the business cases; and
+6. verify Evidence, incremental coverage, resume, replay, correction,
+   pagination, canonical result, and artifact integrity.
+
+Local installation also consumes this wheel. It never copies `.git`, `.venv`,
+tests, `build`, `dist`, or other repository content into the plugin store.
+
+## What the platform owns
+
+Ordinary plugins do not implement or maintain:
+
+- WorkItems, InvestigationPackets, EvidenceRecords, Evidence Graphs, or IDs;
+- manifests, JSON Schemas, semantic digests, registrations, entry points, or
+  compatibility matrices;
+- provider capabilities, authorization scopes, source freezing, or caching;
+- Agent projection, batching, coverage, validation, or DomainResult mapping;
+- committers, receipts, summaries, finalizers, pagination, recovery, or replay;
+- release descriptors, acceptance drivers, catalog checksums, or installation
+  store state; or
+- MCP, Codex Skill, CLI, or other product transport names.
+
+If an ordinary plugin appears to need one of these, treat it as a missing
+platform/compiler capability. Move to Advanced SPI only when the admission
+criteria in the boundary contract are actually met.
+
+## Current migration
+
+Existing Advanced SPI plugins remain supported only when they independently
+satisfy Advanced admission. They are not templates or compatibility fallbacks
+for ordinary plugin development.
+
+Migration completes first for `minimal`, then for `ass-spec`. Each migration
+must prove equivalent domain conclusions before old author-maintained mechanical
+files or hooks are removed.
+
+Frontend has completed the hard cut. `plugins/frontend-audit/` is its only
+author source, and the aggregate distribution build compiles that Policy Pack
+into the Simple SDK/common-review registration. No historical FUA-10 runtime
+adapter or direct build path remains.

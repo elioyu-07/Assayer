@@ -164,7 +164,7 @@ checkpoint、恢复、coverage 和 canonical result。无法唯一确定插件�
 验收：
 
 ```text
-同一个 MCP 进程：install_plugin -> list_plugins -> start_plugin_run
+同一个 MCP 进程：apply_plugin_change -> list_plugins -> start_plugin_run
 ```
 
 上述三个调用必须连续成功，且第二步能看到新插件，第三步能真正加载新插件。
@@ -184,7 +184,7 @@ checkpoint、恢复、coverage 和 canonical result。无法唯一确定插件�
 确保以下调用真正安装指定版本：
 
 ```text
-install_plugin(plugin="ass-spec", version="0.9.0")
+apply_plugin_change(operation="install", plugin="ass-spec", version="0.9.0")
 ```
 
 需要贯通：
@@ -435,7 +435,7 @@ list_plugins
 plan_plugin_change(install) -> execute_plugin_change(token, confirmed=true)
 list_plugins
 start_plugin_run
-advance_plugin_run(domainResult)
+advance_plugin_run(reviewSubmission)
 plan_plugin_change(uninstall) -> execute_plugin_change(token, confirmed=true)
 list_plugins
 start_plugin_run
@@ -448,9 +448,9 @@ start_plugin_run
 - 卸载成功后同一 MCP 连接不再允许运行插件；
 - 失败操作不会破坏旧版本或留下不可解释的 active state。
 
-该流程已固化为自动化测试 `tests/test_mcp_stdio_integration.py`（通过官方 MCP
-SDK 拉起 `assayer-mcp` 子进程并在单条 stdio 连接中完成安装、运行、卸载、
-再次运行被拒绝的完整验证）。
+该流程已固化为自动化测试 `tests/test_mcp_stdio_integration.py`：通过官方 MCP
+SDK 拉起 `assayer-mcp` 子进程，在单条 stdio 连接中验证零 Python Policy Pack
+的编译、安装、Common Review、升级、回滚、卸载及卸载后拒绝运行。
 
 ### 6.3 Clean Codex 验收
 

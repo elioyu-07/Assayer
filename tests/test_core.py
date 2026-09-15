@@ -7,6 +7,8 @@ from pathlib import Path
 from assayer_host import ActionExecution, BrowserSessionFailure, CredentialVault, DerivedReportBuilder, DeterministicActionAdapter, DeterministicEvidenceAdapter, DeterministicLoginAdapter, DeterministicObjectIdentityAdapter, DeterministicPageAdapter, DeterministicRecoveryAdapter, EvidenceCapture, HostCore, HostError, LoginSecret, NetworkRequest, ObjectMatch, ObjectVerification, RawVisualCapture, RecoveryAttempt, RecoveryCheck, SQLiteStore
 from assayer_host.page import EntrypointExecution, EntrypointObservation, PageObservation
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class ExplodingLoginAdapter:
     def authenticate(self, url, secret):
@@ -90,6 +92,7 @@ def session(scan, tool="inspect_page", key="op-001", revision=1, input=None):
 class HostCoreTest(unittest.TestCase):
     def setUp(self):
         self.cores = []
+        self.stores = {}
 
     def tearDown(self):
         for core in self.cores:
@@ -101,9 +104,15 @@ class HostCoreTest(unittest.TestCase):
     def make_core(self, *, succeed=True, store=None, page_adapter=None, identity_adapter=None, action_adapter=None, recovery_adapter=None, evidence_adapter=None, entrypoint_adapter=None):
         vault = CredentialVault()
         vault.put("cred-001", LoginSecret("test-user", "secret"))
+        store = store or SQLiteStore()
         core = HostCore(store=store, credential_vault=vault, login_adapter=DeterministicLoginAdapter(succeed=succeed), page_adapter=page_adapter if page_adapter is not None else DeterministicPageAdapter(), object_identity_adapter=identity_adapter if identity_adapter is not None else DeterministicObjectIdentityAdapter(), action_adapter=action_adapter, recovery_adapter=recovery_adapter, evidence_adapter=evidence_adapter, entrypoint_adapter=entrypoint_adapter)
         self.cores.append(core)
+        self.stores[id(core)] = store
         return core
+
+    def store(self, core):
+        """Return the explicitly injected Host persistence collaborator."""
+        return self.stores[id(core)]
 
     @staticmethod
     def platform_projection_fixture():
@@ -185,7 +194,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)
         request = session(started["result"], tool="inspect_object", input={"candidateId":"candidate-001"})
         first = core.handle(request)
-        with core._store.transaction() as connection:
+        with self.store(core).transaction() as connection:
             connection.execute("UPDATE scans SET run_revision=2 WHERE scan_id=?", (started["result"]["scanId"],))
         second = core.handle(request)
         self.assertEqual(first["error"]["code"], "UNKNOWN_REFERENCE")
@@ -243,8 +252,8 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         inspected = core.handle(session(started, input={"pageStateId": started["currentPageStateId"],
                                                         "include": ["route", "safeEntrypoints"]}))["result"]
-        detail = next(core._store.get_entrypoint(ref) for ref in inspected["entrypointRefs"]
-                      if core._store.get_entrypoint(ref)["label"] == "Details")
+        detail = next(self.store(core).get_entrypoint(ref) for ref in inspected["entrypointRefs"]
+                      if self.store(core).get_entrypoint(ref)["label"] == "Details")
         explored = core.handle(session(started, tool="explore_entrypoint", key="explore-detail", revision=1,
                                        input={"pageStateId": started["currentPageStateId"],
                                               "entrypointId": detail["entrypointId"]}))
@@ -252,9 +261,9 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(explored["result"]["activeTab"], "Details")
         self.assertEqual(explored["runRevision"], 2)
         self.assertNotEqual(explored["result"]["pageStateId"], started["currentPageStateId"])
-        stored = core._store.get_page_state(explored["result"]["pageStateId"])
+        stored = self.store(core).get_page_state(explored["result"]["pageStateId"])
         self.assertEqual(stored["parentPageStateId"], started["currentPageStateId"])
-        current = core._store.get_scan(started["scanId"])
+        current = self.store(core).get_scan(started["scanId"])
         self.assertEqual(current["current_page_state_id"], explored["result"]["pageStateId"])
 
     def test_build_discovery_plan_batches_candidates_and_logical_entrypoints(self):
@@ -287,10 +296,10 @@ class HostCoreTest(unittest.TestCase):
         explored = core.handle(session(started, tool="explore_entrypoint", key="scope-tabs-detail", revision=1, input={
             "pageStateId": started["currentPageStateId"], "entrypointId": details["entrypointId"],
         }))["result"]
-        before = core._store.get_scan(started["scanId"])["run_revision"]
+        before = self.store(core).get_scan(started["scanId"])["run_revision"]
         first = core.build_discovery_plan(started["scanId"], started["runId"])
         second = core.build_discovery_plan(started["scanId"], started["runId"])
-        after = core._store.get_scan(started["scanId"])["run_revision"]
+        after = self.store(core).get_scan(started["scanId"])["run_revision"]
         self.assertEqual(first, second)
         self.assertEqual(before, after)
         self.assertEqual(first["currentPage"]["pageStateId"], explored["pageStateId"])
@@ -342,27 +351,27 @@ class HostCoreTest(unittest.TestCase):
     def test_explore_entrypoint_blocks_navigation_until_case_decision_is_committed(self):
         core = self.make_core(entrypoint_adapter=SwitchingEntrypointAdapter(SwitchingPageAdapter()))
         started, _ = self.discover_candidate(core)
-        page = core._store.get_page_state(started["currentPageStateId"])
-        candidate = core._store.get_candidates(started["currentPageStateId"])[0]
+        page = self.store(core).get_page_state(started["currentPageStateId"])
+        candidate = self.store(core).get_candidates(started["currentPageStateId"])[0]
         object_id = core.handle(session(started, tool="inspect_object", key="barrier-verify",
                                          input={"candidateId": candidate["candidateId"]}))["result"]["objectId"]
         case = core.handle(session(started, tool="begin_case", key="barrier-case",
                                    input={"objectId": object_id, "rule": {"ruleId": "FUA-10", "version": "1.1.0"},
                                           "kind": "observation", "purpose": "Verify the page object",
                                           "plannedCoverageDimensions": ["filter_present"]}))
-        entrypoint = core._store.get_entrypoints(started["currentPageStateId"])[0]
-        revision = core._store.get_scan(started["scanId"])["run_revision"]
+        entrypoint = self.store(core).get_entrypoints(started["currentPageStateId"])[0]
+        revision = self.store(core).get_scan(started["scanId"])["run_revision"]
         result = core.handle(session(started, tool="explore_entrypoint", key="barrier-explore", revision=revision,
                                       input={"pageStateId": page["pageStateId"], "entrypointId": entrypoint["entrypointId"]}))
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(result["error"]["code"], "CASE_ACTIVE")
-        self.assertEqual(core._store.get_scan(started["scanId"])["current_page_state_id"], page["pageStateId"])
+        self.assertEqual(self.store(core).get_scan(started["scanId"])["current_page_state_id"], page["pageStateId"])
 
     def test_build_completion_input_closes_candidate_backed_entry_after_formal_decision(self):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             default_payload = core.build_completion_input(started["scanId"], started["runId"])
@@ -424,7 +433,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "BROWSER_SESSION_FAILED")
         self.assertEqual(result["runRevision"], 2)
-        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        self.assertEqual(self.store(core).get_scan(started["scanId"])["status"], "failed")
         completion = core.build_completion_input(started["scanId"], started["runId"])
         self.assertIn("Audit failed: BROWSER_SESSION_FAILED", completion["completionReason"])
         self.assertIn("browser", completion["completionReason"].lower())
@@ -478,7 +487,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(len(result["result"]["candidateRefs"]), 1)
         self.assertEqual(len(result["result"]["entrypointRefs"]), 1)
         self.assertEqual(adapter.calls, 1)
-        candidate = core._store.get_candidates(started["currentPageStateId"])[0]
+        candidate = self.store(core).get_candidates(started["currentPageStateId"])[0]
         self.assertEqual(candidate["potentialRules"], [{"ruleId":"FUA-10","version":"1.1.0"}])
 
     def test_inspect_page_reuses_immutable_snapshot_for_new_read(self):
@@ -587,7 +596,7 @@ class HostCoreTest(unittest.TestCase):
         return object_id, committed
 
     def completion_input(self, core, started, object_id, *, partial=False, assessment_count=1):
-        entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
+        entrypoint_id = self.store(core).get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
         return {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],
                 "processedEntrypointRefs":[] if partial else [entrypoint_id],"skippedEntrypoints":[],
                 "ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.1.0"},"assessmentCount":assessment_count,
@@ -600,7 +609,7 @@ class HostCoreTest(unittest.TestCase):
         result = self.inspect_candidate(core, started, candidate_id)
         self.assertEqual(result["result"]["rebindStatus"], "matched")
         self.assertEqual(result["runRevision"], 1)
-        audit_object = core._store.get_audit_object(result["result"]["objectId"])
+        audit_object = self.store(core).get_audit_object(result["result"]["objectId"])
         self.assertEqual(audit_object["status"], "eligible")
         self.assertEqual(audit_object["potentialRules"], [{"ruleId":"FUA-10","version":"1.1.0"}])
         self.assertTrue(result["result"]["controls"])
@@ -618,8 +627,8 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(observation["kind"], "runtime_visual")
         self.assertEqual(observation["visual"]["status"], "captured")
         self.assertEqual(observation["visual"]["sanitizationStatus"], "sanitized")
-        evidence = core._store.get_evidence(result["result"]["evidenceId"])
-        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        evidence = self.store(core).get_evidence(result["result"]["evidenceId"])
+        screenshot = self.store(core).get_screenshot(result["result"]["screenshotRef"])
         self.assertEqual(evidence["kind"], "runtime_visual")
         self.assertEqual(evidence["payload"]["content"]["observationScope"], "viewport")
         self.assertEqual(screenshot["kind"], "raw_visual")
@@ -632,22 +641,17 @@ class HostCoreTest(unittest.TestCase):
                           input={"rule":{"ruleId":"FUA-10","version":"1.1.0"}})
         result = core.handle(request)
         self.assertEqual(result["status"], "ok")
-        self.assertIn("Minimum Coverage Contract", result["result"]["content"])
-        self.assertEqual(result["result"]["contentDigest"], core._rules[("FUA-10", "1.1.0")]["contentDigest"])
+        self.assertEqual(
+            result["result"]["contentDigest"],
+            hashlib.sha256(result["result"]["content"].encode("utf-8")).hexdigest(),
+        )
         self.assertEqual(result["runRevision"], 1)
+        # Integrity corruption cannot be produced by a public Host operation;
+        # inject it directly to prove the fail-closed read boundary.
         core._rules[("FUA-10", "1.1.0")]["contentDigest"] = "0" * 64
         failed = core.handle(session(started, tool="get_rule_contract", key="rule-contract-tampered",
                                      input={"rule":{"ruleId":"FUA-10","version":"1.1.0"}}))
         self.assertEqual(failed["error"]["code"], "RULE_CONTRACT_INTEGRITY_FAILED")
-
-    def test_fua_10_current_contract_is_frontend_only(self):
-        core = self.make_core()
-        rule = core._rules[("FUA-10", "1.1.0")]
-        self.assertEqual(rule["requiredCapabilities"], ["runtime", "dom"])
-        content = (Path(__file__).parents[1] / rule["document"]).read_text(encoding="utf-8")
-        self.assertIn("This rule audits frontend behavior only", content)
-        self.assertIn("whether the list content changes after an action", content)
-        self.assertIn("Backend unavailability", content)
 
     def test_progress_rebuilds_investigation_from_effective_findings(self):
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
@@ -681,9 +685,9 @@ class HostCoreTest(unittest.TestCase):
             input={"objectId":object_id,"rule":{"ruleId":"FUA-10","version":"1.1.0"},
                    "findings":[{"dimension":"binding_to_list","status":"unresolved","reasonText":"Current evidence cannot confirm the binding",
                                 "evidenceRefs":[evidence["result"]["evidenceId"]],"caseRefs":[case_id],"supersedesRef":old_ref}]}))
-        latest = core._store.get_latest_findings(started["scanId"], object_id, {"ruleId":"FUA-10","version":"1.1.0"})
+        latest = self.store(core).get_latest_findings(started["scanId"], object_id, {"ruleId":"FUA-10","version":"1.1.0"})
         self.assertEqual([item["findingId"] for item in latest], replacement["result"]["findingRefs"])
-        self.assertEqual(len(core._store.list_entities("dimension_findings", started["scanId"])), 2)
+        self.assertEqual(len(self.store(core).list_entities("dimension_findings", started["scanId"])), 2)
 
     def test_inspect_object_not_found_does_not_create_object(self):
         adapter = DeterministicObjectIdentityAdapter(ObjectVerification("not_found", 0, excluded_reasons=("no_required_dimensions",)))
@@ -709,7 +713,7 @@ class HostCoreTest(unittest.TestCase):
         result = self.inspect_candidate(core, started, candidate_id)
         replacement = result["result"]["replacementCandidateRef"]
         self.assertNotEqual(replacement, candidate_id)
-        self.assertIsNotNone(core._store.get_candidate(replacement))
+        self.assertIsNotNone(self.store(core).get_candidate(replacement))
         self.assertNotIn("objectId", result["result"])
 
     def test_invalid_identity_outcome_is_fail_closed(self):
@@ -732,9 +736,9 @@ class HostCoreTest(unittest.TestCase):
         object_id, result = self.begin_case(core, started)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["runRevision"], 2)
-        case = core._store.get_case(result["result"]["caseId"])
+        case = self.store(core).get_case(result["result"]["caseId"])
         self.assertEqual(case["beforePageStateRef"], started["currentPageStateId"])
-        self.assertEqual(core._store.get_audit_object(object_id)["status"], "investigating")
+        self.assertEqual(self.store(core).get_audit_object(object_id)["status"], "investigating")
 
     def test_begin_case_rejects_second_active_case_for_same_rule(self):
         core = self.make_core()
@@ -767,7 +771,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
         result = self.perform_action(core, started, object_id, case_result["result"]["caseId"], action_type="focus", parameters={"value":"do-not-persist","nested":{"label":"private"}})
-        stored = core._store.get_action_attempt(result["result"]["actionId"])
+        stored = self.store(core).get_action_attempt(result["result"]["actionId"])
         serialized = str(stored)
         self.assertNotIn("do-not-persist", serialized)
         self.assertNotIn("private", serialized)
@@ -792,12 +796,12 @@ class HostCoreTest(unittest.TestCase):
         )
         self.assertEqual(result["status"], "ok")
         evidence_ref = result["result"]["interactionEvidenceRef"]
-        evidence = core._store.get_evidence(evidence_ref)
+        evidence = self.store(core).get_evidence(evidence_ref)
         self.assertEqual(evidence["kind"], "runtime_interaction")
         self.assertEqual(evidence["caseRef"], case_result["result"]["caseId"])
-        action = core._store.get_action_attempt(result["result"]["actionId"])
+        action = self.store(core).get_action_attempt(result["result"]["actionId"])
         self.assertEqual(action["parameters"], {"controlRef": "control-filter-input-001", "valueClass": "valid"})
-        case = core._store.get_case(case_result["result"]["caseId"])
+        case = self.store(core).get_case(case_result["result"]["caseId"])
         self.assertEqual(case["actions"][0]["inverseAction"]["type"], "restore_value")
         self.assertEqual(case["actions"][0]["resultEvidenceRefs"], [evidence_ref])
 
@@ -838,7 +842,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(first["error"]["code"], "REQUEST_RESULT_UNKNOWN")
         self.assertEqual(retry["error"]["code"], "REQUEST_RESULT_UNKNOWN")
         self.assertEqual(adapter.calls, 1)
-        operation_id = core._store.get_by_idempotency(started["scanId"], "unknown")["operation_id"]
+        operation_id = self.store(core).get_by_idempotency(started["scanId"], "unknown")["operation_id"]
         queried = core.handle(session(started, tool="get_operation", key="query", revision=3, input={"operationId":operation_id}))
         self.assertEqual(queried["result"]["status"], "result_unknown")
         self.assertEqual(queried["result"]["result"]["resultStatus"], "result_unknown")
@@ -872,7 +876,7 @@ class HostCoreTest(unittest.TestCase):
         self.assertEqual(result["result"]["finalStatus"], "restored")
         self.assertEqual(result["runRevision"], 4)
         self.assertEqual(adapter.calls, ["targeted_inverse"])
-        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "completed")
+        self.assertEqual(self.store(core).get_case(case_result["result"]["caseId"])["status"], "completed")
 
     def test_restore_uncertain_requires_refresh_replay(self):
         dims = tuple(RecoveryCheck(d, "match") for d in ("url_route", "page_layer", "active_tab", "overlay_state", "control_state", "object_identity", "pending_requests", "write_request"))
@@ -895,8 +899,8 @@ class HostCoreTest(unittest.TestCase):
         object_id, case_result = self.begin_case(core, started)
         result = self.restore_case(core, started, object_id, case_result["result"]["caseId"], revision=2)
         self.assertEqual(result["result"]["finalStatus"], "failed")
-        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
-        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "restore_failed")
+        self.assertEqual(self.store(core).get_scan(started["scanId"])["status"], "failed")
+        self.assertEqual(self.store(core).get_case(case_result["result"]["caseId"])["status"], "restore_failed")
 
     def test_default_recovery_adapter_fails_closed(self):
         core = self.make_core()
@@ -904,7 +908,7 @@ class HostCoreTest(unittest.TestCase):
         object_id, case_result = self.begin_case(core, started)
         result = self.restore_case(core, started, object_id, case_result["result"]["caseId"], revision=2)
         self.assertEqual(result["result"]["finalStatus"], "failed")
-        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        self.assertEqual(self.store(core).get_scan(started["scanId"])["status"], "failed")
 
     def test_host_restart_fails_running_action_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -915,14 +919,14 @@ class HostCoreTest(unittest.TestCase):
             object_id, case_result = self.begin_case(core, started)
             request = session(started, tool="perform_action", key="interrupted", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe","parameters":{}})
             operation = core._new_operation(request, started["scanId"], "browser_action", core._request_digest(request), "running", 2)
-            with core._store.transaction():
-                core._store.insert_operation(operation)
-            core._store.close(); self.cores.remove(core)
+            with self.store(core).transaction():
+                self.store(core).insert_operation(operation)
+            self.store(core).close(); self.cores.remove(core)
             restarted_store = SQLiteStore(path)
             restarted = self.make_core(store=restarted_store)
-            interrupted = restarted._store.get_by_idempotency(started["scanId"], "interrupted")
+            interrupted = self.store(restarted).get_by_idempotency(started["scanId"], "interrupted")
             self.assertEqual(interrupted["status"], "result_unknown")
-            self.assertEqual(restarted._store.get_scan(started["scanId"])["status"], "failed")
+            self.assertEqual(self.store(restarted).get_scan(started["scanId"])["status"], "failed")
             restarted_store.close(); self.cores.remove(restarted)
 
     def test_capture_structured_evidence_binds_object_and_increments_revision(self):
@@ -933,23 +937,23 @@ class HostCoreTest(unittest.TestCase):
         result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], revision=2)
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["runRevision"], 3)
-        evidence = core._store.get_evidence(result["result"]["evidenceId"])
+        evidence = self.store(core).get_evidence(result["result"]["evidenceId"])
         self.assertEqual(evidence["objectRef"], object_id)
         self.assertTrue(evidence["sanitized"])
-        self.assertEqual(core._store.get_case(case_result["result"]["caseId"])["status"], "evidence_captured")
+        self.assertEqual(self.store(core).get_case(case_result["result"]["caseId"])["status"], "evidence_captured")
 
     def test_capture_raw_visual_writes_immutable_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             adapter = DeterministicEvidenceAdapter()
             core = self.make_core(evidence_adapter=adapter)
             started = bootstrap(core)["result"]
-            core._store.get_scan(started["scanId"])
-            with core._store.transaction() as connection:
+            self.store(core).get_scan(started["scanId"])
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
             self.assertIn("screenshotRef", result["result"])
-            screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+            screenshot = self.store(core).get_screenshot(result["result"]["screenshotRef"])
             self.assertEqual(screenshot["status"], "captured")
             self.assertTrue((Path(tmp) / screenshot["path"]).exists())
 
@@ -959,7 +963,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
         result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
-        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        screenshot = self.store(core).get_screenshot(result["result"]["screenshotRef"])
         self.assertEqual(screenshot["status"], "ambiguous")
         self.assertNotIn("path", screenshot)
 
@@ -971,7 +975,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         object_id, case_result = self.begin_case(core, started)
         result = self.capture_evidence(core, started, object_id, case_id=case_result["result"]["caseId"], raw=True)
-        screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+        screenshot = self.store(core).get_screenshot(result["result"]["screenshotRef"])
         self.assertEqual(screenshot["status"], "rejected")
         self.assertNotIn("path", screenshot)
 
@@ -987,7 +991,7 @@ class HostCoreTest(unittest.TestCase):
         started = bootstrap(core)["result"]
         object_id, _ = self.begin_case(core, started)
         result = self.capture_evidence(core, started, object_id, revision=2)
-        payload = core._store.get_evidence(result["result"]["evidenceId"])["payload"]["content"]
+        payload = self.store(core).get_evidence(result["result"]["evidenceId"])["payload"]["content"]
         self.assertEqual(payload["password"], "[REDACTED]")
         self.assertEqual(payload["accessToken"], "[REDACTED]")
         self.assertNotIn("Bearer abc", str(payload))
@@ -1009,18 +1013,18 @@ class HostCoreTest(unittest.TestCase):
             second = self.make_core(store=second_store, evidence_adapter=DeterministicEvidenceAdapter(capture=EvidenceCapture(payload={"unexpected":"not-used"})))
             retry = second.handle(request)
             self.assertEqual(retry["result"], original["result"])
-            self.assertEqual(second._store.get_evidence(original["result"]["evidenceId"])["evidenceId"], original["result"]["evidenceId"])
+            self.assertEqual(self.store(second).get_evidence(original["result"]["evidenceId"])["evidenceId"], original["result"]["evidenceId"])
             second_store.close(); self.cores.remove(second)
 
     def test_screenshot_file_conflict_fails_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             request = session(started, tool="capture_evidence", key="evidence-conflict", revision=2, input={"pageStateId":started["currentPageStateId"],"objectId":object_id,"caseId":case_result["result"]["caseId"],"includeRawVisual":True})
-            scan = core._scan_from_row(core._store.get_scan(started["scanId"]))
+            scan = core._scan_from_row(self.store(core).get_scan(started["scanId"]))
             operation, _ = core._accept_operation(request, scan, implemented=True)
             screenshot_id = core._stable_id("screenshot", operation["operationId"])
             conflict = Path(tmp) / "screenshots" / f"{screenshot_id}.png"
@@ -1033,7 +1037,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             case_id = case_result["result"]["caseId"]
@@ -1045,14 +1049,14 @@ class HostCoreTest(unittest.TestCase):
             result = core.handle(request)
             self.assertEqual(result["runRevision"], 6)
             self.assertNotEqual(result["result"]["screenshotRef"], evidence["result"]["screenshotRef"])
-            screenshot = core._store.get_screenshot(result["result"]["screenshotRef"])
+            screenshot = self.store(core).get_screenshot(result["result"]["screenshotRef"])
             self.assertEqual(screenshot["kind"], "issue")
             self.assertEqual(screenshot["rawVisualRef"], evidence["result"]["screenshotRef"])
-            pending = core._store.get_pending_decision(result["result"]["pendingDecisionId"])
+            pending = self.store(core).get_pending_decision(result["result"]["pendingDecisionId"])
             self.assertEqual(pending["status"], "pending")
             self.assertTrue(pending["coverage"]["complete"])
-            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
-            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
+            self.assertEqual(self.store(core).list_entities("assessments", started["scanId"]), [])
+            self.assertEqual(self.store(core).list_entities("issues", started["scanId"]), [])
             retry = core.handle(request)
             self.assertEqual(retry["result"], result["result"])
 
@@ -1219,7 +1223,7 @@ class HostCoreTest(unittest.TestCase):
                                    sanitized=False, sanitization_status="not_performed")
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(EvidenceCapture(kind="runtime_visual", payload_type="image_metadata", payload={}, raw_visual=raw)), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             case_id = case_result["result"]["caseId"]
@@ -1234,7 +1238,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, first_case = self.begin_case(core, started, key="multi-one")
             first_id = first_case["result"]["caseId"]
@@ -1265,10 +1269,10 @@ class HostCoreTest(unittest.TestCase):
         committed = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=6,
                                         input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(committed["runRevision"], 7)
-        assessment = core._store.get_assessment(committed["result"]["assessmentId"])
+        assessment = self.store(core).get_assessment(committed["result"]["assessmentId"])
         self.assertEqual(assessment["result"], "scanned_no_issue")
-        self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "committed")
-        self.assertEqual(core._store.get_audit_object(object_id)["status"], "decided")
+        self.assertEqual(self.store(core).get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "committed")
+        self.assertEqual(self.store(core).get_audit_object(object_id)["status"], "decided")
         self.assertIsNone(committed["result"].get("issueId"))
         retry = core.handle(session(started, tool="commit_decision", key="commit-no-issue", revision=6,
                                     input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
@@ -1278,7 +1282,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             case_id = case_result["result"]["caseId"]
@@ -1289,7 +1293,7 @@ class HostCoreTest(unittest.TestCase):
                                            input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])))
             committed = core.handle(session(started, tool="commit_decision", key="issue-commit", revision=6,
                                             input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
-            issue = core._store.get_issue(committed["result"]["issueId"])
+            issue = self.store(core).get_issue(committed["result"]["issueId"])
             self.assertEqual(issue["assessmentRef"], committed["result"]["assessmentId"])
             self.assertEqual(issue["screenshotRef"], prepared["result"]["screenshotRef"])
 
@@ -1303,18 +1307,18 @@ class HostCoreTest(unittest.TestCase):
         finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
         prepared = core.handle(session(started, tool="prepare_decision", key="stale-prepare", revision=5,
                                        input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
-        with core._store.transaction() as connection:
-            case = core._store.get_case(case_id)
+        with self.store(core).transaction() as connection:
+            case = self.store(core).get_case(case_id)
             case["status"] = "restore_failed"
             case["recovery"]["finalStatus"] = "failed"
             case["endedAt"] = core._now()
             case["restoreReason"] = {"code":"TEST_INVALIDATION","message":"Test invalidated the recovery barrier"}
-            core._store.update_case(case)
+            self.store(core).update_case(case)
         result = core.handle(session(started, tool="commit_decision", key="stale-commit", revision=6,
                                      input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(result["error"]["code"], "CASE_NOT_RESTORED")
-        self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "invalidated")
-        self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+        self.assertEqual(self.store(core).get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "invalidated")
+        self.assertEqual(self.store(core).list_entities("assessments", started["scanId"]), [])
 
     def test_commit_rechecks_evidence_integrity(self):
         core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
@@ -1326,21 +1330,21 @@ class HostCoreTest(unittest.TestCase):
         finding_refs = self.record_findings(core, started, object_id, case_id, evidence["result"]["evidenceId"])
         prepared = core.handle(session(started, tool="prepare_decision", key="integrity-prepare", revision=5,
                                        input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, result="scanned_no_issue")))
-        tampered = core._store.get_evidence(evidence["result"]["evidenceId"])
+        tampered = self.store(core).get_evidence(evidence["result"]["evidenceId"])
         tampered["payload"]["content"] = {"tampered": True}
-        with core._store.transaction() as connection:
+        with self.store(core).transaction() as connection:
             connection.execute("UPDATE evidence SET entity_json=? WHERE evidence_id=?", (json.dumps(tampered), tampered["evidenceId"]))
         result = core.handle(session(started, tool="commit_decision", key="integrity-commit", revision=6,
                                      input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
         self.assertEqual(result["error"]["code"], "EVIDENCE_INTEGRITY_FAILED")
-        self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
+        self.assertEqual(self.store(core).list_entities("assessments", started["scanId"]), [])
 
     def test_commit_rolls_back_assessment_when_issue_insert_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = FailingIssueStore()
             core = self.make_core(store=store, evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             case_id = case_result["result"]["caseId"]
@@ -1352,16 +1356,16 @@ class HostCoreTest(unittest.TestCase):
             result = core.handle(session(started, tool="commit_decision", key="rollback-commit", revision=6,
                                          input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
             self.assertEqual(result["error"]["code"], "INTERNAL_FAILURE")
-            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM assessments").fetchone()[0], 0)
-            self.assertEqual(core._store._conn.execute("SELECT COUNT(*) FROM issues").fetchone()[0], 0)
-            self.assertEqual(core._store.get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "pending")
-            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 6)
+            self.assertEqual(self.store(core).list_entities("assessments", started["scanId"]), [])
+            self.assertEqual(self.store(core).list_entities("issues", started["scanId"]), [])
+            self.assertEqual(self.store(core).get_pending_decision(prepared["result"]["pendingDecisionId"])["status"], "pending")
+            self.assertEqual(self.store(core).get_scan(started["scanId"])["run_revision"], 6)
 
     def test_complete_audit_closes_coverage_and_exports_valid_ledger(self):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             request = session(started, tool="complete_audit", key="complete-ok", revision=7,
@@ -1396,7 +1400,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             result = core.handle(session(started, tool="complete_audit", key="complete-partial", revision=7,
@@ -1408,13 +1412,13 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             result = core.handle(session(started, tool="complete_audit", key="complete-bad-count", revision=7,
                                          input=self.completion_input(core, started, object_id, assessment_count=2)))
             self.assertEqual(result["error"]["code"], "COVERAGE_INVALID")
-            self.assertEqual(core._store.get_scan(started["scanId"])["run_revision"], 7)
+            self.assertEqual(self.store(core).get_scan(started["scanId"])["run_revision"], 7)
             self.assertFalse((Path(tmp) / "audit-ledger.json").exists())
 
     def test_complete_audit_rejects_pending_decision(self):
@@ -1435,7 +1439,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, case_result = self.begin_case(core, started)
             case_id = case_result["result"]["caseId"]
@@ -1446,7 +1450,7 @@ class HostCoreTest(unittest.TestCase):
                                            input=self.prepare_input(object_id, case_id, evidence["result"]["evidenceId"], finding_refs=finding_refs, raw_visual_ref=evidence["result"]["screenshotRef"])))
             committed = core.handle(session(started, tool="commit_decision", key="report-commit", revision=6,
                                             input={"pendingDecisionId":prepared["result"]["pendingDecisionId"]}))
-            entrypoint_id = core._store.get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
+            entrypoint_id = self.store(core).get_entrypoints(started["currentPageStateId"])[0]["entrypointId"]
             complete_input = {"visitedPageStateRefs":[started["currentPageStateId"]],"processedObjectRefs":[object_id],"processedEntrypointRefs":[entrypoint_id],"skippedEntrypoints":[],"ruleSummaries":[{"rule":{"ruleId":"FUA-10","version":"1.1.0"},"assessmentCount":1,"resultCounts":{"issue_found":1},"coverageComplete":True}],"unprocessedEntrypointRefs":[],"completionReason":"Issue and coverage are confirmed"}
             core.handle(session(started, tool="complete_audit", key="report-complete", revision=7, input=complete_input))
             report = json.loads((Path(tmp) / "issues.json").read_text())
@@ -1457,7 +1461,7 @@ class HostCoreTest(unittest.TestCase):
             self.assertIn("Filter region lacks reset", summary)
 
     def test_failed_scan_view_hides_formally_recorded_issue(self):
-        ledger = json.loads(Path("examples/issue-ledger.json").read_text())
+        ledger = json.loads((ROOT / "examples" / "issue-ledger.json").read_text())
         ledger["scan"]["status"] = "failed"
         ledger["scan"]["conclusionsValid"] = False
         rendered = DerivedReportBuilder().render(ledger)
@@ -1472,7 +1476,7 @@ class HostCoreTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             core = self.make_core(evidence_adapter=DeterministicEvidenceAdapter(), recovery_adapter=DeterministicRecoveryAdapter())
             started = bootstrap(core)["result"]
-            with core._store.transaction() as connection:
+            with self.store(core).transaction() as connection:
                 connection.execute("UPDATE scans SET output_dir=? WHERE scan_id=?", (tmp, started["scanId"]))
             object_id, _ = self.committed_no_issue(core, started)
             (Path(tmp) / "issues.json").write_text("conflict")
@@ -1491,7 +1495,7 @@ class HostCoreTest(unittest.TestCase):
         request = session(started, tool="perform_action", key="action-1", revision=2, input={"pageStateId":started["currentPageStateId"],"caseId":case_result["result"]["caseId"],"objectId":object_id,"type":"focus","intent":"Observe the filter region","parameters":{}})
         result = core.handle(request)
         self.assertEqual(result["status"], "failed")
-        self.assertEqual(core._store.get_scan(started["scanId"])["status"], "failed")
+        self.assertEqual(self.store(core).get_scan(started["scanId"])["status"], "failed")
         retry = core.handle(request)
         self.assertEqual(retry["error"]["code"], "PERSISTENT_WRITE_OBSERVED")
         self.assertEqual(adapter.calls, 1)

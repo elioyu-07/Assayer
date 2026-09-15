@@ -14,7 +14,8 @@ the shortest path for the `ass-spec` journey: install the platform, install the
 
 | Requirement | Why |
 |---|---|
-| macOS arm64 + CPython 3.13 | The current Alpha bundle is platform- and Python-minor-pinned. A mismatch fails explicitly with `ASSAYER_BUNDLE_INCOMPATIBLE`. |
+| Python package runtime | CPython 3.11–3.13 are supported by the packages and CI (3.11/3.13 full gate; 3.12 fast gate). |
+| Codex Alpha bundle | The currently published bundle is pinned to macOS arm64 + CPython 3.13. A mismatch fails explicitly with `ASSAYER_BUNDLE_INCOMPATIBLE`; this is a bundle limitation, not a package support limitation. |
 | Python | External prerequisite; Assayer does not install it. |
 | Chromium | Only needed for web URL audits. Spec review is a read-only file journey and never starts a browser. |
 
@@ -23,6 +24,15 @@ the shortest path for the `ass-spec` journey: install the platform, install the
 Install the Assayer Codex Plugin from a personal Codex marketplace. Installing
 this one deliverable brings the Skill, MCP server, rules, schemas, and an offline
 wheelhouse with it; there is nothing to configure by hand.
+
+Prepare the private runtime once and verify readiness:
+
+```bash
+assayer doctor --target ./spec.md --fix
+```
+
+This explicit preparation may create a venv and perform an offline install.
+Normal MCP starts do not repeat that work.
 
 Details: [installation](j01-install-delivery.md) and
 [activation and discovery](j02-activation-and-discovery.md).
@@ -40,8 +50,10 @@ asking in natural language:
 install ass-spec
 ```
 
-The Agent resolves the intent, shows the plan, and drives the deterministic
-install (download → checksum verification → conformance gate → materialize).
+For a first-time install by trusted catalog name, the Host resolves and applies
+the deterministic transaction directly (download → checksum verification →
+conformance gate → materialize). Local packages, repairs, upgrades, downgrades,
+rollbacks, and removals still show one confirmation plan.
 You never point the platform at a path or write an entry point by hand.
 
 The same natural-language path covers the rest of the lifecycle:
@@ -55,14 +67,16 @@ remove ass-spec
 For the deterministic substrate and its error codes, see the
 [agent-first plugin lifecycle](agent-first-plugin-lifecycle-design.md).
 
-## 4. Open a fresh Codex CLI task
+## 4. Continue in the same task
 
-Plugins are discovered when a task starts. An already-open task does not pick up
-a newly installed plugin, so **open a new task** after installing `ass-spec`.
+The Host reads the durable plugin store for the Run, so a successful `ass-spec`
+install can be followed immediately by a review. A new task is only needed when
+the Assayer Codex Plugin itself was installed or upgraded and Codex must reload
+its Skill and MCP definitions.
 
 ## 5. Ask in natural language
 
-In that fresh task, say:
+Then say:
 
 ```text
 Audit this project's spec.md
@@ -109,7 +123,7 @@ Individual checks resolve to one of five decisions: `issue_found`,
 |---|---|
 | Plugin does not appear in the catalog | You kept an old task open. Install `ass-spec`, then open a **new** task. |
 | "not installed" hint when you run | `ass-spec` was not installed as a separate distribution. Install it (step 3). |
-| `ASSAYER_BUNDLE_INCOMPATIBLE` | The platform/OS mismatch. Use macOS arm64 with CPython 3.13. |
+| `ASSAYER_BUNDLE_INCOMPATIBLE` | The bundled runtime does not match its manifest. Use the current macOS arm64 + CPython 3.13 Alpha bundle, or run the Python packages directly on a supported 3.11–3.13 runtime. |
 | `dirty` / quarantine on install | A conformance gate failed. The plugin is visible but not runnable; inspect the gate report before retrying. |
 
 ## Related

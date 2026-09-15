@@ -14,7 +14,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
 
 
 @dataclass(frozen=True)
@@ -43,10 +42,23 @@ def _starts_with(module: str, prefix: str) -> bool:
     return module == prefix or module.startswith(prefix + ".")
 
 
-def _role_for(path: Path) -> str | None:
-    try:
-        relative = path.resolve().relative_to(SRC.resolve())
-    except ValueError:
+def _source_roots(root: Path) -> tuple[Path, ...]:
+    roots = [root / "src"]
+    packages = root / "packages"
+    if packages.is_dir():
+        roots.extend(sorted(path for path in packages.glob("*/src") if path.is_dir()))
+    return tuple(roots)
+
+
+def _role_for(path: Path, *, root: Path = ROOT) -> str | None:
+    relative = None
+    for source_root in _source_roots(root):
+        try:
+            relative = path.resolve().relative_to(source_root.resolve())
+            break
+        except ValueError:
+            continue
+    if relative is None:
         return None
     parts = relative.parts
     if not parts:
@@ -59,7 +71,7 @@ def _role_for(path: Path) -> str | None:
         return "host"
     if parts[0] == "assayer_agent":
         return "agent"
-    if parts[0] == "assayer_document_navigation":
+    if parts[0] in {"assayer_document_navigation", "assayer_browser_provider"}:
         return "capability_provider"
     return None
 
@@ -99,7 +111,7 @@ def _reason(role: str, module: str, path: Path) -> str | None:
 
 
 def scan_file(path: Path, *, root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
-    role = _role_for(path)
+    role = _role_for(path, root=root)
     if role is None or path.suffix != ".py":
         return ()
     try:
@@ -118,10 +130,10 @@ def scan_file(path: Path, *, root: Path = ROOT) -> tuple[BoundaryViolation, ...]
 
 
 def find_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
-    source_root = root / "src"
     violations: list[BoundaryViolation] = []
-    for path in sorted(source_root.rglob("*.py")):
-        violations.extend(scan_file(path, root=root))
+    for source_root in _source_roots(root):
+        for path in sorted(source_root.rglob("*.py")):
+            violations.extend(scan_file(path, root=root))
     return tuple(violations)
 
 

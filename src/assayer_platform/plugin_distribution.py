@@ -22,6 +22,23 @@ from .conformance import RELEASE_DESCRIPTOR
 from .contract import PlatformContractError
 
 
+_FORBIDDEN_INSTALLED_PARTS = frozenset({
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "tests",
+})
+
+
 def verify_sha256(data: bytes, expected: str) -> None:
     """Fail closed when the downloaded bytes do not match the catalog digest."""
     digest = hashlib.sha256(data).hexdigest()
@@ -52,6 +69,11 @@ def extract_archive(data: bytes, target: Path) -> None:
                 raise _unsafe(member, "path is absolute or escapes the package root")
             if "\\" in member or member.startswith("/"):
                 raise _unsafe(member, "path uses an unsafe separator")
+            if any(
+                part in _FORBIDDEN_INSTALLED_PARTS or part.endswith(".egg-info")
+                for part in path.parts
+            ) or path.suffix in {".pyc", ".pyo"}:
+                raise _unsafe(member, "source-only or transient content is not installable")
             mode = info.external_attr >> 16
             if stat.S_ISLNK(mode):
                 raise _unsafe(member, "symbolic links are not permitted")

@@ -1,10 +1,17 @@
 # Assayer Data Schemas
 
-These files use JSON Schema Draft 2020-12 to describe persistent audit entities and the rule registry. Relative `$ref` values are resolved from this directory.
+These files use JSON Schema Draft 2020-12 to describe platform-owned persistent
+audit entities, runtime contracts, and the rule registry. Public plugin and
+capability schemas are owned by `src/assayer_plugin_sdk/schemas/`. Platform
+validators compose both directories into one resolver store, so relative
+references to the SDK-owned `common.schema.json` remain valid without copying
+it into this directory.
 
 ## Files
 
-- `common.schema.json`: shared types for IDs, timestamps, digests, rule references, result states, severities, coordinates, and source locations.
+- `src/assayer_plugin_sdk/schemas/common.schema.json`: SDK-owned shared types
+  for IDs, timestamps, digests, rule references, result states, severities,
+  coordinates, and source locations.
 - `scan-run.schema.json`: input boundary, frozen rule set, status, and coverage proof for a Scan.
 - `page-state.schema.json`: replayable page, dialog, drawer, tab, detail, and edit states.
 - `entrypoint.schema.json`: processable, skipped, or pending page entrypoints in the Coverage Universe.
@@ -13,8 +20,12 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `audit-object.schema.json`: audit objects discovered on real runtime pages.
 - `operation.schema.json`: idempotent Host request execution and result-known state.
 - `dimension-finding.schema.json`: immutable five-state Findings for object, frozen rule, and coverage dimension, including Evidence/Case references and supersession chain.
-- `actionable-result.schema.json`: platform-owned remediation envelope for root-cause results that must be directly actionable, distinct from dimension-level Findings.
-- `evidence-claim.schema.json`: portable direct, absence, derived, and external-unverified Evidence Claim contract used by actionable results.
+- `src/assayer_plugin_sdk/schemas/actionable-result.schema.json`: SDK-owned
+  remediation envelope for root-cause results that must be directly actionable,
+  distinct from dimension-level Findings.
+- `src/assayer_plugin_sdk/schemas/evidence-claim.schema.json`: SDK-owned portable
+  direct, absence, derived, and external-unverified Evidence Claim contract used
+  by actionable results.
 - `rule-assessment.schema.json`: fixed five-state decision for one object and one rule.
 - `reverse-case.schema.json`: Agent-planned, Host-safely-executed reverse Case, including pre-action baseline, reverse actions, targeted recovery, verification, and refresh fallback.
 - `action-attempt.schema.json`: Host safety decision, target, and request-observation references for one Case action.
@@ -31,48 +42,41 @@ These files use JSON Schema Draft 2020-12 to describe persistent audit entities 
 - `observability-manifest.schema.json`: event-stream integrity, extended-telemetry visibility, and diagnostic-completeness declaration.
 - `performance-bill.schema.json`: wall-clock, Host, browser, transport, between-Agent-turn, model-visibility, payload-size, screenshot, and duplicate-entrypoint measurements for one Scan.
 - `public-progress.schema.json`: identifier-free, user-readable runtime phase, status, counts, and next-step contract returned by the product MCP facade.
-- `result-delivery.schema.json`: summary-first terminal delivery metadata,
-  stable section references, and result-bound delta pages.
-- `plugin-manifest.schema.json`: domain-neutral plugin checks, evidence requirements, capabilities, and performance/recovery constraints.
-- `plugin-protocol-envelope.schema.json`: binding-neutral Host-to-plugin request/response envelope for the plugin protocol operations, with the shared error shape.
-- `plugin-domain-result-contract.schema.json`: one plugin-owned Agent submission boundary per interactive Check, with its semantic rules and instructions digest.
+- `src/assayer_plugin_sdk/schemas/plugin-manifest.schema.json`: SDK-owned,
+  domain-neutral plugin checks, evidence requirements, capabilities, and
+  performance/recovery constraints.
 - `plugin-conformance.schema.json`: package-time plugin registration results, violated contract identifiers, and required next actions.
 - `plugin-release-acceptance.schema.json`: installed-wheel interactive acceptance evidence for Check coverage, paging, resume, replay, and terminal publication.
 - `plugin-release.schema.json`: static, import-free plugin package layout, registration metadata, policy resources, and deterministic fixture declarations.
 - `plugin-fixture.schema.json`: deterministic package fixture input and expected terminal decision or failure outcomes.
-- `plugin-progress.schema.json`: compact generic phase, waiting ownership, completed and remaining counts, and next-action guidance for interactive plugin Runs.
-- `plugin-result-overview.schema.json`: platform-owned terminal validity, coverage, outcome counts, review/failure counts, and plain-language next action.
-- `installation-status.schema.json`: read-only package, plugin, private-runtime, bundle-integrity, and safe feedback-diagnostic status for the product MCP.
 - `plugin-lifecycle-plan.schema.json`: fail-closed upgrade, rollback, and uninstall preconditions, ordered Codex operations, and compensation readiness.
 - `plugin-lifecycle-transaction.schema.json`: sanitized durable execution journal for confirmed lifecycle changes, terminal verification, and compensation outcomes.
-- `plugin-lifecycle-product.schema.json`: two-stage planning, one-use confirmation token, trusted-authorization outcomes, terminal replay, and transaction-result delivery.
 - `private-runtime-cleanup.schema.json`: verified post-uninstall runtime removal, idempotent absence, quarantined retry, and fail-closed ownership rejection.
 - `lifecycle-acceptance.schema.json`: explicitly non-publishable isolated upgrade, rollback, uninstall, and runtime-cleanup acceptance result.
-- `capability-provider.schema.json`: provider identity, capability names,
+- `src/assayer_plugin_sdk/schemas/capability-provider.schema.json`: SDK-owned
+  provider identity, capability names,
   authorization, scope, budgets, failure semantics, and algorithm versions.
 - `provider-conformance.schema.json`: actionable `CPV1-*` registration and constructed-runtime conformance results for capability providers.
 - `capability-negotiation.schema.json`: four-way capability intersection, denial ownership, provider identity, and effective provider-budget ceilings.
 - `provider-execution.schema.json`: Host-created idempotent provider requests and identity-bearing fact or classified-failure responses.
-- `provider-release.schema.json`: external provider identity, descriptor, runtime source, fixtures, package metadata, and conformance binding.
+- `provider-release.schema.json`: external provider identity, descriptor,
+  runtime source, optional installed-wheel fixture runtime factory, fixtures,
+  package metadata, and conformance binding.
 - `provider-fixture.schema.json`: deterministic provider fact or classified-failure fixture input and exact expected outcome.
 - `parallel-execution.schema.json`: fail-closed serial/parallel inspection plan, policy reason, task count, worker ceiling, ordered merge, and failure isolation.
 - `platform-performance-bill.schema.json`: domain-neutral measured Run, Host,
   Provider, and parallel-inspection timing; explicit unavailable Agent/model/
   transport telemetry; and estimate-only scheduler wait reduction.
-- `result-conformance.schema.json`: shared terminal result, ledger identity,
-  Evidence, Decision, recovery, receipt, coverage, invalidation, and artifact
-  publication conformance report.
 - `platform-ledger.schema.json`: generic run operations, event timeline, commit receipts, and published artifact correlations.
 - `canonical-result.schema.json`: portable terminal result, coverage, outcomes,
   findings, review items, failures, performance, and exact ledger trace
   references. Generic batch and interactive platform Runs emit and validate
   this artifact at terminal persistence.
-- `evidence-graph.schema.json`: portable candidate coverage, pending-member,
-  root-cause-group, and per-WorkItem evidence-graph projection.
 - `frontend-canonical-extension.schema.json`: privacy-safe frontend page,
   object, entrypoint, issue, and diagnostic counts attached to the common
   result without changing its domain-neutral vocabulary.
-- `evaluation-corpus.schema.json`: generic plugin-owned fixed evaluation
+- `src/assayer_plugin_sdk/schemas/evaluation-corpus.schema.json`: SDK-owned
+  generic plugin-owned fixed evaluation
   corpus envelope. Domain semantics and expected outcomes remain in the
   owning plugin's packaged evaluation assets.
 

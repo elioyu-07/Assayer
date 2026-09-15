@@ -16,16 +16,19 @@
       "properties": {
         "ledgerKind": { "const": "platform-ledger" },
         "eventCount": { "type": "integer", "minimum": 0 },
-        "operationCount": { "type": "integer", "minimum": 0 }
+        "operationCount": { "type": "integer", "minimum": 0 },
+        "semanticTaskBuilds": { "type": "integer", "minimum": 0 },
+        "semanticTaskBytes": { "type": "integer", "minimum": 0 }
       }
     },
     "measurement": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["wallClock", "hostOperations", "provider", "agentWait", "transport", "model"],
+      "required": ["wallClock", "hostOperations", "semanticTask", "provider", "agentWait", "transport", "model"],
       "properties": {
         "wallClock": { "$ref": "#/$defs/timing" },
         "hostOperations": { "$ref": "#/$defs/timing" },
+        "semanticTask": { "$ref": "#/$defs/timing" },
         "provider": { "$ref": "#/$defs/providerTiming" },
         "agentWait": { "$ref": "#/$defs/timing" },
         "transport": { "$ref": "#/$defs/timing" },

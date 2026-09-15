@@ -45,11 +45,16 @@ def bind_capability_provider(
     check: CheckContract,
     scope: Mapping[str, Any],
     run_id: str,
+    *,
+    provider_runtime: Any = None,
 ) -> BoundCapabilityProvider | None:
     """Return a bound provider for the Check, or ``None`` when none is needed.
 
-    Fails closed with ``PROVIDER_NOT_FOUND`` when the Check requires a declared
-    provider capability but no installed provider supplies it.
+    ``provider_runtime`` is an opaque Host-owned adapter passed to the
+    provider factory (for example ``BrowserSnapshotSource``).  The binding
+    layer never starts or inspects that runtime.  Fails closed with
+    ``PROVIDER_NOT_FOUND`` when the Check requires a declared provider
+    capability but no installed provider supplies it.
     """
     capabilities = provider_required_capabilities(registration, check)
     if not capabilities:
@@ -74,6 +79,7 @@ def bind_capability_provider(
     )
     return BoundCapabilityProvider(
         provider_registration, negotiation, run_id=run_id, scope=provider_scope,
+        runtime=provider_runtime,
     )
 
 

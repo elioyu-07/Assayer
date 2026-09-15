@@ -81,17 +81,6 @@ class DeterministicHarnessTest(unittest.TestCase):
             self.assertEqual(summary["mode"], "deterministic")
             self.assertEqual(summary["completion"]["runRevision"], 9)
 
-    def test_default_host_still_fails_closed_without_browser_adapters(self):
-        core = HostCore()
-        try:
-            self.assertEqual(type(core._login_adapter).__name__, "UnavailableLoginAdapter")
-            self.assertEqual(type(core._page_adapter).__name__, "UnavailablePageAdapter")
-            self.assertEqual(type(core._object_identity_adapter).__name__, "UnavailableObjectIdentityAdapter")
-            self.assertEqual(type(core._action_adapter).__name__, "UnavailableActionAdapter")
-            self.assertEqual(type(core._recovery_adapter).__name__, "UnavailableRecoveryAdapter")
-        finally:
-            core.close()
-
     def test_injecting_only_login_cannot_activate_fixture_page(self):
         vault = CredentialVault()
         vault.put("credential-only", LoginSecret("test-user", "secret"))

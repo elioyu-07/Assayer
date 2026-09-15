@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from .contract import (
     Artifact, CheckContract, DecisionProposal, InvestigationPacket,
-    PlatformContext, PlatformRunResult, ReviewCheckpoint, WorkItem,
+    PlatformContext, PlatformRunResult, WorkItem,
 )
 
 
@@ -38,9 +38,7 @@ class EvidenceCollectionProvider(Protocol):
 
 @runtime_checkable
 class ReviewProtocol(Protocol):
-    """Validate and persist domain-neutral Agent review boundaries."""
-
-    def checkpoint(self, checkpoint: ReviewCheckpoint, context: PlatformContext) -> Mapping[str, Any]: ...
+    """Validate domain-owned review submissions."""
 
     def submit(self, decisions: Sequence[DecisionProposal], context: PlatformContext) -> Mapping[str, Any]: ...
 

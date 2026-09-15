@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+import importlib
 import importlib.util
 from importlib import metadata
 import json
@@ -110,6 +112,7 @@ def _installed_registration(
 def _run_fixture(
     registration: ProviderRegistration,
     fixture: Mapping[str, Any],
+    fixture_runtime_factory: Any = None,
 ) -> list[ProviderConformanceIssue]:
     fixture_id = fixture["fixtureId"]
     capability = fixture["capability"]
@@ -127,6 +130,10 @@ def _run_fixture(
     )
     profile = CapabilityProfile(frozenset({capability}))
     try:
+        provider_runtime = (
+            fixture_runtime_factory(deepcopy(dict(fixture)))
+            if fixture_runtime_factory is not None else None
+        )
         negotiation = CapabilityNegotiator().negotiate(
             registration,
             (capability,),
@@ -139,6 +146,7 @@ def _run_fixture(
             negotiation,
             run_id=f"conformance:{fixture_id}",
             scope=fixture["scope"],
+            runtime=provider_runtime,
         )
         try:
             result = bound.collect(
@@ -185,6 +193,45 @@ def _run_fixture(
     return []
 
 
+def _installed_fixture_runtime_factory(
+    target: Path,
+    runtime_spec: str | None,
+) -> tuple[Any, list[ProviderConformanceIssue]]:
+    if runtime_spec is None:
+        return None, []
+    module_name, _, attribute = runtime_spec.partition(":")
+    try:
+        spec = importlib.util.find_spec(module_name)
+    except (ImportError, AttributeError, ValueError):
+        spec = None
+    origin = Path(spec.origin).resolve() if spec and spec.origin else None
+    try:
+        if origin is None:
+            raise ValueError
+        origin.relative_to(target)
+    except ValueError:
+        return None, [_issue(
+            "PROVIDER_FIXTURE_RUNTIME_SOURCE_MISMATCH",
+            "The fixture runtime factory did not resolve from the isolated provider target.",
+            "Package the declared fixture runtime factory inside the provider wheel.",
+        )]
+    try:
+        factory = getattr(importlib.import_module(module_name), attribute)
+    except Exception:
+        return None, [_issue(
+            "PROVIDER_FIXTURE_RUNTIME_LOAD_FAILED",
+            "The installed fixture runtime factory could not be loaded.",
+            "Fix the packaged fixture runtime factory import and attribute.",
+        )]
+    if not callable(factory):
+        return None, [_issue(
+            "PROVIDER_FIXTURE_RUNTIME_INVALID",
+            "The installed fixture runtime factory is not callable.",
+            "Export a callable that accepts one detached fixture object.",
+        )]
+    return factory, []
+
+
 def _worker(target: Path, package_root: Path, result_path: Path) -> int:
     sys.path.insert(0, str(target))
     release = json.loads(
@@ -212,10 +259,16 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 "The installed registration descriptor differs from the statically validated descriptor.",
                 "Build the runtime registration from the packaged provider descriptor.",
             ))
+        fixture_runtime_factory, runtime_issues = _installed_fixture_runtime_factory(
+            target, release.get("fixtureRuntime"),
+        )
+        issues.extend(runtime_issues)
         if not issues:
             for relative in release["fixtures"]:
                 fixture = json.loads((package_root / relative).read_text(encoding="utf-8"))
-                issues.extend(_run_fixture(registration, fixture))
+                issues.extend(_run_fixture(
+                    registration, fixture, fixture_runtime_factory,
+                ))
 
     payload = ProviderConformanceReport(release["providerId"], tuple(issues)).as_dict()
     result_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -356,8 +409,8 @@ def inspect_provider_installation(
             ),))
         try:
             payload = json.loads(result_path.read_text(encoding="utf-8"))
-            from .conformance import _schema_validator
-            _schema_validator("provider-conformance.schema.json").validate({
+            from .registry import schema_validator
+            schema_validator("provider-conformance.schema.json").validate({
                 "schemaVersion": "1.0.0",
                 "status": "passed" if not payload["issues"] else "failed",
                 "providers": [payload],

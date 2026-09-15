@@ -1,6 +1,7 @@
 # Independent Plugin Lifecycle — Design
 
-Status: implemented
+Status: current source-materialization implementation recorded; wheel-only
+target required by Platform Constitution v1.1 is not implemented
 
 ## Purpose
 
@@ -15,7 +16,35 @@ The existing pieces already cover two adjacent concerns:
   directory and discard it.
 - **Product-transport lifecycle** (`assayer_host/lifecycle_*`, `codex_plugin_client`)
   plans and compensates `upgrade`/`rollback`/`uninstall` of the Assayer product
-  plugin through the Codex CLI marketplace.
+plugin through the Codex CLI marketplace.
+
+This document originally accepted a statically validated source directory as
+the durable installation unit. That behavior is now migration debt. Under the
+Simple authoring constitution, source input must first be compiled and built in
+isolation, and the exact verified wheel and digest become the only installation
+unit. A repository tree is never copied into the store.
+
+The operations below describe the current Advanced SPI implementation unless a
+target rule explicitly replaces them.
+
+## Wheel-only target amendment
+
+The target lifecycle is:
+
+```text
+author source
+  -> deterministic SDK compilation
+  -> isolated wheel build
+  -> exact wheel inspection and lifecycle acceptance
+  -> digest-bound wheel installation
+  -> activation
+```
+
+The store may retain an unpacked wheel payload for import, but every installed
+file must be a member of the validated wheel. `.git`, virtual environments,
+tests, build directories, and undeclared source files cannot enter by recursive
+source copying. Registration, manifest, entry point, compatibility, and release
+metadata for an ordinary plugin are compiler-generated wheel content.
 
 What is missing is the **platform-owned, durable lifecycle for domain plugins**:
 a place where the platform records what it installed, plus the install / upgrade

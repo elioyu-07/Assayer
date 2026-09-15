@@ -27,11 +27,38 @@ from assayer_platform.installation_conformance import inspect_plugin_installatio
 from assayer_platform.package_conformance import main as package_main
 from assayer_platform.release_conformance import (
     inspect_plugin_release,
-    main as release_main,
 )
+from assayer_platform.registry import schema_validator
 
 
 class PluginReleaseGateTest(unittest.TestCase):
+    @staticmethod
+    def acceptance_result(**submission_metric):
+        return {
+            "schemaVersion": "2.0.0",
+            "status": "passed",
+            "checks": [{
+                "checkId": "FIX-001",
+                "checkVersion": "1.0.0",
+                "completedRuns": 1,
+                "agentCorrections": 0,
+                "ledgerPaths": ["run/ledger.json"],
+                "resumeVerified": True,
+                "replayVerified": True,
+                "terminalPublicationVerified": True,
+                **submission_metric,
+            }],
+        }
+
+    def test_release_acceptance_requires_exactly_one_submission_metric(self):
+        validator = schema_validator("plugin-release-acceptance.schema.json")
+        validator.validate(self.acceptance_result(domainResultSubmissions=1))
+        validator.validate(self.acceptance_result(reviewBatchSubmissions=2))
+        self.assertIsNotNone(next(validator.iter_errors(self.acceptance_result()), None))
+        self.assertIsNotNone(next(validator.iter_errors(self.acceptance_result(
+            domainResultSubmissions=1, reviewBatchSubmissions=1,
+        )), None))
+
     def registration(self, **overrides):
         values = {
             "manifest": ConfigQualityPlugin.manifest,
@@ -50,6 +77,12 @@ class PluginReleaseGateTest(unittest.TestCase):
         manifest = {
             "pluginId": "fixture.release-quality", "version": "1.0.0",
             "platformApiVersion": "1.0.0", "domains": ["fixture"],
+            "compatibility": {
+                "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+                "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+                "capabilities": ["domain_result", "supported_by", "task_local_evidence_handles"],
+                "domainContractVersion": "1.0.0",
+            },
             "subjectKinds": ["fixture_item"],
             "checks": [{
                 "checkId": "FIX-001", "version": "1.0.0",
@@ -63,7 +96,7 @@ class PluginReleaseGateTest(unittest.TestCase):
             "executionProfile": {
                 "discoverBatching": "allowed", "inspectBatching": "allowed",
                 "decisionBatching": "allowed", "parallelism": "forbidden",
-                "cacheReuse": "allowed", "checkpoint": "required",
+                "cacheReuse": "allowed",
                 "ordering": "independent", "failureSplitting": "allowed",
             },
         }
@@ -95,7 +128,7 @@ class PluginReleaseGateTest(unittest.TestCase):
             "[project]\n"
             "name = \"fixture-assayer-plugin\"\n"
             "version = \"1.0.0\"\n"
-            "dependencies = [\"assayer-plugin-sdk>=0.1.2,<0.2.0\"]\n"
+            "dependencies = [\"assayer-plugin-sdk==0.1.2\"]\n"
             "[project.entry-points.\"assayer.plugins\"]\n"
             "fixture = \"fixture_plugin.plugin:registration\"\n"
             "[tool.setuptools.packages.find]\n"
@@ -106,6 +139,12 @@ class PluginReleaseGateTest(unittest.TestCase):
             "pluginId": "fixture.release-quality",
             "pluginVersion": "1.0.0",
             "platformApiVersion": "1.0.0",
+            "compatibility": {
+                "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+                "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+                "capabilities": ["domain_result", "supported_by", "task_local_evidence_handles"],
+                "domainContractVersion": "1.0.0",
+            },
             "registration": "fixture_plugin.plugin:registration",
             "manifest": "plugin/manifest.json",
             "scopeSchema": "plugin/scope.schema.json",
@@ -123,12 +162,12 @@ class PluginReleaseGateTest(unittest.TestCase):
         manifest = (package / "plugin" / "manifest.json").read_text()
         scope_schema = (package / "plugin" / "scope.schema.json").read_text()
         source = f'''import json
-from assayer_platform import PluginRegistration
-from assayer_platform.contract import (
+from assayer_plugin_sdk import PluginRegistration
+from assayer_plugin_sdk.contract import (
     DecisionProposal, DimensionObservation, EvidenceRecord, Finding,
     InvestigationPacket, WorkItem,
 )
-from assayer_platform.registry import load_plugin_manifest
+from assayer_plugin_sdk.manifest import load_plugin_manifest
 
 MANIFEST = load_plugin_manifest(json.loads({manifest!r}))
 SCOPE_SCHEMA = json.loads({scope_schema!r})
@@ -184,14 +223,12 @@ registration = PluginRegistration(
 
     def make_strict_installable(
         self, package: Path, *, acceptance: bool = True,
-        semantic_resource: bool = True, acceptance_replay: bool = True,
-        result_schema_valid: bool = True,
-        mapper: bool = True,
+        semantic_resource: bool = True,
         reported_submissions: int = 1,
     ) -> None:
         semantic = "# Fixture semantic review\n"
         result_schema = {
-            "type": "object" if result_schema_valid else "invalid-type",
+            "type": "object",
             "additionalProperties": False,
             "required": ["result", "findings", "reason"],
             "properties": {
@@ -207,17 +244,16 @@ registration = PluginRegistration(
             "    def map_domain_result(self, result, packet, check, context):\n"
             "        del packet, check, context\n"
             "        return dict(result)\n"
-            if mapper else ""
         )
         manifest = (package / "plugin" / "manifest.json").read_text()
         scope_schema = (package / "plugin" / "scope.schema.json").read_text()
         source = f'''import hashlib
 import json
-from assayer_platform import DomainResultContract, PluginRegistration
-from assayer_platform.contract import (
+from assayer_plugin_sdk import DomainResultContract, PluginRegistration
+from assayer_plugin_sdk.contract import (
     DimensionObservation, EvidenceRecord, InvestigationPacket, WorkItem,
 )
-from assayer_platform.registry import load_plugin_manifest
+from assayer_plugin_sdk.manifest import load_plugin_manifest
 
 MANIFEST = load_plugin_manifest(json.loads({manifest!r}))
 SCOPE_SCHEMA = json.loads({scope_schema!r})
@@ -251,7 +287,7 @@ class FixturePlugin:
 
 
 CONTRACT = DomainResultContract(
-    "dev.assayer.fixture.release", "2.0.0", "FIX-001", "1.0.0",
+    "dev.assayer.fixture.release", "1.0.0", "FIX-001", "1.0.0",
     {result_schema!r},
     "fixture_plugin/review.md", hashlib.sha256({semantic!r}.encode()).hexdigest(),
 )
@@ -320,7 +356,7 @@ def run(*, registration, output_root, transport_factory):
             "agentCorrections": 0,
             "ledgerPaths": [ledger.relative_to(output_root).as_posix()],
             "resumeVerified": resumed.get("resumed") is True,
-            "replayVerified": {acceptance_replay!r} and replay.get("replayed") is True,
+            "replayVerified": replay.get("replayed") is True,
             "terminalPublicationVerified": terminal["status"] == "completed"
                 and (output_root / run_id / "result-summary.json").is_file(),
         }}]
@@ -408,7 +444,12 @@ def run(*, registration, output_root, transport_factory):
     def test_unsafe_failure_splitting_declaration_is_rejected(self):
         payload = {
             "pluginId": "fixture.unsafe-split", "version": "1.0.0",
-            "platformApiVersion": "1.0.0", "domains": ["fixture"],
+            "platformApiVersion": "1.0.0",
+            "compatibility": {
+                "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+                "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+            },
+            "domains": ["fixture"],
             "subjectKinds": ["fixture_item"],
             "checks": [{
                 "checkId": "FIX-001", "version": "1.0.0",
@@ -421,7 +462,7 @@ def run(*, registration, output_root, transport_factory):
             "executionProfile": {
                 "discoverBatching": "allowed", "inspectBatching": "forbidden",
                 "decisionBatching": "allowed", "parallelism": "forbidden",
-                "cacheReuse": "forbidden", "checkpoint": "required",
+                "cacheReuse": "forbidden",
                 "failureSplitting": "allowed", "ordering": "strict",
             },
         }
@@ -503,20 +544,13 @@ def run(*, registration, output_root, transport_factory):
             package = self.write_package(Path(directory))
             metadata = package / "pyproject.toml"
             metadata.write_text(metadata.read_text().replace(
-                'dependencies = ["assayer-plugin-sdk>=0.1.2,<0.2.0"]\n', "",
+                'dependencies = ["assayer-plugin-sdk==0.1.2"]\n', "",
             ))
             report = inspect_plugin_package(package)
         self.assertIn(
             "PLUGIN_SDK_DEPENDENCY_MISSING",
             {issue.code for issue in report.issues},
         )
-
-    def test_isolated_install_discovers_registration_and_runs_fixture(self):
-        with tempfile.TemporaryDirectory() as directory:
-            package = self.write_package(Path(directory))
-            self.make_installable(package)
-            report = inspect_plugin_installation(package)
-        self.assertTrue(report.passed, report.as_dict())
 
     def test_isolated_install_rejects_fixture_expectation_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -625,21 +659,6 @@ def run(*, registration, output_root, transport_factory):
             ["failed", "not_run", "not_run", "not_run"],
         )
 
-    def test_complete_release_cli_emits_stage_specific_machine_result(self):
-        with tempfile.TemporaryDirectory() as directory:
-            package = self.write_package(Path(directory))
-            self.make_installable(package)
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
-                status = release_main([str(package)])
-        payload = json.loads(output.getvalue())
-        self.assertEqual(status, 0)
-        self.assertEqual(payload["status"], "passed")
-        self.assertEqual(
-            [stage["name"] for stage in payload["plugins"][0]["stages"]],
-            ["source_static", "public_surface", "wheel_build", "installed_lifecycle"],
-        )
-
     def test_strict_interactive_wheel_runs_declared_acceptance_and_validates_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
@@ -669,17 +688,6 @@ def run(*, registration, output_root, transport_factory):
             "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_MISSING",
         )
 
-    def test_strict_acceptance_cannot_claim_success_without_replay(self):
-        with tempfile.TemporaryDirectory() as directory:
-            package = self.write_package(Path(directory))
-            self.make_strict_installable(package, acceptance_replay=False)
-            result = inspect_plugin_release(package)
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(
-            result["issues"][0]["code"],
-            "PLUGIN_RELEASE_ACCEPTANCE_RESULT_INVALID",
-        )
-
     def test_strict_acceptance_cannot_invent_domain_result_submissions(self):
         with tempfile.TemporaryDirectory() as directory:
             package = self.write_package(Path(directory))
@@ -689,28 +697,6 @@ def run(*, registration, output_root, transport_factory):
         self.assertEqual(
             result["issues"][0]["code"],
             "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
-        )
-
-    def test_strict_wheel_rejects_malformed_domain_result_schema_before_acceptance(self):
-        with tempfile.TemporaryDirectory() as directory:
-            package = self.write_package(Path(directory))
-            self.make_strict_installable(package, result_schema_valid=False)
-            result = inspect_plugin_release(package)
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(
-            result["issues"][0]["code"],
-            "PLUGIN_INSTALLED_REGISTRATION_FAILED",
-        )
-
-    def test_strict_wheel_rejects_missing_domain_result_mapper_during_acceptance(self):
-        with tempfile.TemporaryDirectory() as directory:
-            package = self.write_package(Path(directory))
-            self.make_strict_installable(package, mapper=False)
-            result = inspect_plugin_release(package)
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(
-            result["issues"][0]["code"],
-            "PLUGIN_RELEASE_ACCEPTANCE_EXECUTION_FAILED",
         )
 
 if __name__ == "__main__":

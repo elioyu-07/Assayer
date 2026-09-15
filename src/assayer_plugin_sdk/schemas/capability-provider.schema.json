@@ -55,6 +55,7 @@
     "algorithmVersions": {
       "type": "object",
       "additionalProperties": { "$ref": "common.schema.json#/$defs/semanticVersion" }
-    }
+    },
+    "resultSchema": { "type": "object" }
   }
 }

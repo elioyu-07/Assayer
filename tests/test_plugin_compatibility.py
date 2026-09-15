@@ -7,15 +7,35 @@ import tempfile
 import unittest
 
 from assayer_platform import (
+    DomainResultContract,
     InteractivePluginController,
-    PluginCompatibility,
     PluginRegistry,
     PlatformContractError,
     PluginRegistration,
     load_plugin_manifest,
-    negotiate_plugin_compatibility,
 )
+from assayer_plugin_sdk import PluginCompatibility, negotiate_plugin_compatibility
 from tests.helpers import config_quality_registration
+
+
+CONFIG_DOMAIN_RESULT_CONTRACT = DomainResultContract(
+    contract_id="test.config-quality.review",
+    contract_version="1.0.0",
+    check_id="CFG-001",
+    check_version="1.0.0",
+    result_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["result", "findings", "reason"],
+        "properties": {
+            "result": {"enum": ["scanned_no_issue", "needs_review"]},
+            "findings": {"type": "array", "minItems": 1},
+            "reason": {"type": "string", "minLength": 1},
+        },
+    },
+    semantic_instructions_path="tests/config-quality.md",
+    semantic_instructions_sha256="0" * 64,
+)
 
 
 class PluginCompatibilityTests(unittest.TestCase):
@@ -23,16 +43,16 @@ class PluginCompatibilityTests(unittest.TestCase):
         source = Path(__file__).parent / "fixtures/plugins/minimal/src/minimal_plugin/manifest.json"
         value = json.loads(source.read_text(encoding="utf-8"))
         value["compatibility"] = {
-            "protocolMinVersion": "1.1.0",
+            "protocolMinVersion": "1.2.0",
             "protocolMaxVersion": "1.2.0",
-            "sdkMinVersion": "0.1.0",
+            "sdkMinVersion": "0.1.2",
             "sdkMaxVersion": "0.1.2",
             "capabilities": ["domain_result"],
             "domainContractVersion": "1.0.0",
         }
         registration = PluginRegistration(load_plugin_manifest(value))
-        self.assertEqual(registration.protocol_min_version, "1.1.0")
-        self.assertEqual(registration.protocol_capabilities, frozenset({"domain_result"}))
+        self.assertEqual(registration.compatibility.protocol_min_version, "1.2.0")
+        self.assertEqual(registration.compatibility.capabilities, frozenset({"domain_result"}))
 
         with self.assertRaises(PlatformContractError) as mismatch:
             PluginRegistration(
@@ -46,26 +66,35 @@ class PluginCompatibilityTests(unittest.TestCase):
             mismatch.exception.code, "PLUGIN_COMPATIBILITY_IDENTITY_MISMATCH",
         )
 
-    def test_semver_minor_forms_are_normalized(self):
-        result = negotiate_plugin_compatibility(
-            PluginCompatibility(protocol_min_version="1.1", protocol_max_version="1.2")
-        )
-        self.assertEqual(result.protocol_version, "1.2.0")
+    def test_protocol_ranges_are_rejected(self):
+        with self.assertRaises(PlatformContractError) as error:
+            PluginCompatibility(protocol_min_version="1.1.0", protocol_max_version="1.2.0")
+        self.assertEqual(error.exception.code, "PLUGIN_COMPATIBILITY_RANGE_UNSUPPORTED")
 
-    def test_supported_older_protocol_uses_host_adapter(self):
-        result = negotiate_plugin_compatibility(
-            PluginCompatibility(
-                protocol_min_version="1.0.0",
-                protocol_max_version="1.1.0",
+    def test_missing_declaration_is_rejected(self):
+        with self.assertRaises(PlatformContractError) as error:
+            negotiate_plugin_compatibility(None)
+        self.assertEqual(error.exception.code, "PLUGIN_COMPATIBILITY_REQUIRED")
+
+    def test_manifest_requires_explicit_compatibility(self):
+        source = Path(__file__).parent / "fixtures/plugins/minimal/src/minimal_plugin/manifest.json"
+        value = json.loads(source.read_text(encoding="utf-8"))
+        value.pop("compatibility")
+        with self.assertRaises(PlatformContractError) as error:
+            load_plugin_manifest(value)
+        self.assertEqual(error.exception.code, "PLUGIN_COMPATIBILITY_REQUIRED")
+
+    def test_older_protocol_is_rejected_without_adapter(self):
+        with self.assertRaises(PlatformContractError) as error:
+            negotiate_plugin_compatibility(
+                PluginCompatibility(protocol_min_version="1.1.0", protocol_max_version="1.1.0")
             )
-        )
-        self.assertEqual(result.protocol_version, "1.1.0")
-        self.assertEqual(result.adapter, "host.compat.protocol-1.1.0")
+        self.assertEqual(error.exception.code, "PLUGIN_PROTOCOL_INCOMPATIBLE")
 
     def test_unsupported_protocol_fails_closed(self):
         with self.assertRaises(PlatformContractError) as error:
             negotiate_plugin_compatibility(
-                PluginCompatibility(protocol_min_version="2.0.0", protocol_max_version="2.1.0")
+                PluginCompatibility(protocol_min_version="2.0.0", protocol_max_version="2.0.0")
             )
         self.assertEqual(error.exception.code, "PLUGIN_PROTOCOL_INCOMPATIBLE")
 
@@ -77,11 +106,21 @@ class PluginCompatibilityTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "PLUGIN_CAPABILITY_INCOMPATIBLE")
 
     def test_controller_rejects_before_run_state_is_created(self):
+        base = config_quality_registration()
+        manifest = replace(
+            base.manifest,
+            compatibility=PluginCompatibility(
+                protocol_min_version="2.0.0",
+                protocol_max_version="2.0.0",
+                sdk_min_version="0.1.2",
+                sdk_max_version="0.1.2",
+                domain_contract_version="1.0.0",
+            ),
+        )
         registration = replace(
-            config_quality_registration(),
-            execution_modes=frozenset({"interactive"}),
-            protocol_min_version="2.0.0",
-            protocol_max_version="2.0.0",
+            base, manifest=manifest, execution_modes=frozenset({"interactive"}),
+            compatibility=manifest.compatibility,
+            domain_result_contracts=(CONFIG_DOMAIN_RESULT_CONTRACT,),
         )
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "config.json"
@@ -97,12 +136,22 @@ class PluginCompatibilityTests(unittest.TestCase):
             self.assertEqual(error.exception.code, "PLUGIN_PROTOCOL_INCOMPATIBLE")
             self.assertEqual(tuple(output.iterdir()), ())
 
-    def test_new_host_starts_supported_older_plugin_through_adapter(self):
+    def test_new_host_rejects_older_plugin_before_run_state(self):
+        base = config_quality_registration()
+        manifest = replace(
+            base.manifest,
+            compatibility=PluginCompatibility(
+                protocol_min_version="1.1.0",
+                protocol_max_version="1.1.0",
+                sdk_min_version="0.1.2",
+                sdk_max_version="0.1.2",
+                domain_contract_version="1.0.0",
+            ),
+        )
         registration = replace(
-            config_quality_registration(),
-            execution_modes=frozenset({"interactive"}),
-            protocol_min_version="1.0.0",
-            protocol_max_version="1.1.0",
+            base, manifest=manifest, execution_modes=frozenset({"interactive"}),
+            compatibility=manifest.compatibility,
+            domain_result_contracts=(CONFIG_DOMAIN_RESULT_CONTRACT,),
         )
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "config.json"
@@ -110,21 +159,20 @@ class PluginCompatibilityTests(unittest.TestCase):
             controller = InteractivePluginController(
                 PluginRegistry((registration,)), Path(directory) / "output",
             )
-            started = controller.start(
-                plugin_id=registration.manifest.plugin_id,
-                check_id="CFG-001",
-                scope={"files": [{"path": str(source)}]},
-            )
-            self.assertEqual(started["result"]["compatibility"]["protocolVersion"], "1.1.0")
-            self.assertEqual(
-                started["result"]["compatibility"]["adapter"],
-                "host.compat.protocol-1.1.0",
-            )
+            with self.assertRaises(PlatformContractError) as error:
+                controller.start(
+                    plugin_id=registration.manifest.plugin_id,
+                    check_id="CFG-001",
+                    scope={"files": [{"path": str(source)}]},
+                )
+            self.assertEqual(error.exception.code, "PLUGIN_PROTOCOL_INCOMPATIBLE")
+            self.assertEqual(tuple((Path(directory) / "output").iterdir()), ())
 
     def test_resume_requires_the_frozen_protocol_handshake(self):
         registration = replace(
             config_quality_registration(),
             execution_modes=frozenset({"interactive"}),
+            domain_result_contracts=(CONFIG_DOMAIN_RESULT_CONTRACT,),
         )
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "config.json"

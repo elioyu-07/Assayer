@@ -20,6 +20,7 @@ from assayer_platform import (
     build_canonical_result,
     validate_canonical_result,
 )
+from assayer_platform.registry import schema_store
 from tests.helpers import config_quality_registration
 from tests.helpers.config_quality import (
     ConfigQualityPlugin,
@@ -32,11 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class CanonicalResultTest(unittest.TestCase):
     def validator(self):
-        schemas = {}
-        for path in (ROOT / "schemas").glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
+        schemas = schema_store(ROOT / "schemas")
         schema = schemas["canonical-result.schema.json"]
         return Draft202012Validator(
             schema,

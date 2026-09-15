@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from .contract import PlatformContractError, PlatformLedger
 from .canonical_result import canonical_ledger_bytes, render_canonical_result
+from .audit_report import render_audit_report
 from .platform_performance import render_platform_performance_bill
 from .observability import render_platform_observability
 
@@ -59,8 +60,6 @@ def _next_action(value: Any) -> str:
     return {
         "discover_work_items": "Discover the next bounded WorkItem batch.",
         "inspect_work_items": "Inspect the next bounded WorkItem batch.",
-        "checkpoint_review": "Review the next evidence batch and save a durable checkpoint.",
-        "submit_decisions": "Submit the evidence-backed decision for the current WorkItem.",
         "advance_plugin_run": "Continue the Run with the requested Agent review or decision.",
         "advance_plugin_run_or_recover_work_item": (
             "Continue the Run after resolving the reported WorkItem failure."
@@ -72,7 +71,7 @@ def _next_action(value: Any) -> str:
 
 def workflow_progress(
     workflow: Mapping[str, Any], *, discovered: int, inspected: int,
-    decisions: int, checkpoints: int, entered_at: str | None = None,
+    decisions: int, entered_at: str | None = None,
 ) -> dict[str, Any]:
     """Build one compact, domain-neutral user and Agent progress block."""
     state = str(workflow.get("state", "running"))
@@ -102,7 +101,6 @@ def workflow_progress(
             "workItemsDiscovered": discovered,
             "workItemsInspected": inspected,
             "decisionsCommitted": decisions,
-            "reviewCheckpoints": checkpoints,
         },
         "remaining": {
             "workItemsToInspect": int(remaining.get("workItemsToInspect", 0) or 0),
@@ -121,7 +119,6 @@ def _operation_message(operation: Any, phase: str) -> str:
         "discover": "WorkItem discovery",
         "inspect": "WorkItem inspection",
         "inspect_batch": "inspection batch split",
-        "review_checkpoint": "semantic-review checkpoint",
         "commit": "evidence-backed decision commit",
         "recover": "WorkItem recovery",
         "publish": "artifact publication",
@@ -146,9 +143,6 @@ def _event_message(event: Any, operations: Mapping[str, Any]) -> tuple[str, str]
     if event.name == "platform.workflow.transition":
         next_step = event.details.get("requiredNextStep")
         return "PHASE", f"Workflow changed to {_state_label(event.outcome)}. Next: {_next_action(next_step)}"
-    if event.name == "review.checkpoint.saved":
-        count = int(event.details.get("itemCount", 0) or 0)
-        return "SAVED", f"Saved a durable semantic-review checkpoint for {count} evidence item(s)."
     if event.name == "inspection.batch.split":
         before = int(event.details.get("failedBatchSize", 0) or 0)
         after = int(event.details.get("nextBatchSize", 0) or 0)
@@ -197,7 +191,6 @@ def _render_platform_diary(ledger: PlatformLedger) -> str:
         discovered=len(ledger.work_items),
         inspected=len(ledger.investigations),
         decisions=len(ledger.decisions),
-        checkpoints=len(ledger.review_checkpoints),
         entered_at=boundary_event.occurred_at if boundary_event else ledger.run.started_at,
     )
     lines = [
@@ -214,7 +207,6 @@ def _render_platform_diary(ledger: PlatformLedger) -> str:
         "--------",
         f"WorkItems: {len(ledger.work_items)} discovered, {len(ledger.investigations)} inspected, "
         f"{len(ledger.decisions)} decided, {pending_decisions} awaiting decision",
-        f"Review: {len(ledger.review_checkpoints)} checkpoint record(s)",
         f"Failures: {len(ledger.failures)}",
         "",
         "Timeline",
@@ -263,7 +255,9 @@ def _render_platform_diary(ledger: PlatformLedger) -> str:
     return "\n".join(lines)
 
 
-def render_platform_artifacts(ledger: PlatformLedger) -> dict[str, bytes]:
+def render_platform_artifacts(
+    ledger: PlatformLedger, *, snapshot_root: str | Path | None = None,
+) -> dict[str, bytes]:
     """Render the canonical platform ledger and readable event timelines."""
     performance_json, performance_markdown, _bill = render_platform_performance_bill(ledger)
     observability_json, observability_markdown, _observability = render_platform_observability(ledger)
@@ -271,6 +265,9 @@ def render_platform_artifacts(ledger: PlatformLedger) -> dict[str, bytes]:
     canonical_json, _canonical = render_canonical_result(
         ledger, ledger_bytes=ledger_json,
     ) if ledger.status in {"completed", "partial", "failed"} else (None, None)
+    audit_report = render_audit_report(
+        ledger, snapshot_root=snapshot_root,
+    ) if ledger.status in {"completed", "partial", "failed"} else None
     return {
         "platform-ledger.json": ledger_json,
         "platform-events.jsonl": "".join(
@@ -283,6 +280,7 @@ def render_platform_artifacts(ledger: PlatformLedger) -> dict[str, bytes]:
         "platform-observability.json": observability_json,
         "platform-observability.md": observability_markdown,
         **({"canonical-result.json": canonical_json} if canonical_json is not None else {}),
+        **({"audit-report.md": audit_report} if audit_report is not None else {}),
     }
 
 
@@ -319,7 +317,7 @@ class JsonPlatformLedgerStore:
 
     def save(self, ledger: PlatformLedger) -> Path:
         destination = self._path(ledger.run.run_id)
-        rendered = render_platform_artifacts(ledger)
+        rendered = render_platform_artifacts(ledger, snapshot_root=self.root)
         self._atomic_write(destination, rendered["platform-ledger.json"].decode("utf-8"))
         events_path = self.root / f"{ledger.run.run_id}.platform-events.jsonl"
         self._atomic_write(events_path, rendered["platform-events.jsonl"].decode("utf-8"))
@@ -343,6 +341,10 @@ class JsonPlatformLedgerStore:
         if canonical is not None:
             canonical_path = self.root / f"{ledger.run.run_id}.canonical-result.json"
             self._atomic_write(canonical_path, canonical.decode("utf-8"))
+        audit_report = rendered.get("audit-report.md")
+        if audit_report is not None:
+            report_path = self.root / f"{ledger.run.run_id}.audit-report.md"
+            self._atomic_write(report_path, audit_report.decode("utf-8"))
         return destination
 
     def load(self, run_id: str) -> dict[str, Any] | None:

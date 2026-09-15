@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from assayer_platform import (
+    build_actionable_result,
     PlatformContext,
     PlatformContractError,
     PlatformKernel,
@@ -126,6 +127,56 @@ class ActionableResultContractTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(PlatformContractError, "reversed line scope"):
             extract_result_delivery(dataclasses.replace(decision, details={"result_delivery": raw}), packet)
+
+    def test_builder_preserves_multi_dimension_links_observation_and_owner(self):
+        decision, packet = self._reviewed_result()
+        primary = next(
+            item.dimension for item in decision.findings if item.status == "violated"
+        )
+        secondary = "mandatory-content"
+        evidence_id = packet.evidence[0].evidence_id
+
+        delivery = build_actionable_result(
+            [{
+                "finding_id": "finding-release-gap",
+                "status": "CONFIRMED",
+                "severity": "P2",
+                "object_id": "configuration-document",
+                "dimension": primary,
+                "gap": "The release contract is incomplete.",
+                "observed_fact": "The document has no rollback trigger or verification step.",
+                "impact": "A failed release has no deterministic recovery path.",
+                "recommendation": "Define rollback and verification.",
+                "closure_evidence": "A release drill passes.",
+                "affected_elements": ["release"],
+                "owner": "Release owner",
+                "next_action": "Add the release contract.",
+            }],
+            {primary: "REWORK", secondary: "REWORK"},
+            {primary: [evidence_id], secondary: [evidence_id]},
+            evidence_id=evidence_id,
+            source_chunks=[{"end_line": 12}],
+            work_item_identity=packet.work_item.identity,
+            document_path="[LOCAL_PATH]",
+            confirmed_status="CONFIRMED",
+            actionable_statuses={"REWORK"},
+            finding_refs_by_dimension={
+                primary: ["finding-release-gap"],
+                secondary: ["finding-release-gap"],
+            },
+        )
+
+        self.assertEqual(delivery["status"], "complete")
+        self.assertEqual(
+            delivery["remediations"][0]["dimensions"], [primary, secondary],
+        )
+        self.assertEqual(delivery["remediations"][0]["owner"], {
+            "status": "assigned", "identity": "Release owner",
+        })
+        self.assertEqual(
+            delivery["evidenceClaims"][0]["observed"],
+            ["The document has no rollback trigger or verification step."],
+        )
 
 
 if __name__ == "__main__":

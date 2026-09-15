@@ -15,6 +15,8 @@ release descriptor binds one provider identity and version to:
 - one `assayer.providers` registration import path;
 - the packaged Python runtime source root;
 - deterministic fact and classified-failure fixtures;
+- an optional installed-wheel fixture runtime factory for providers that need
+  a Host-owned source adapter;
 - Python package metadata and an explicit Assayer dependency; and
 - the frozen provider conformance contract version.
 
@@ -49,8 +51,15 @@ convenient subset.
    isolated distribution;
 4. reruns constructed provider conformance without calling a live source;
 5. reconciles the runtime descriptor with the statically checked descriptor;
-6. executes every fixture through negotiated `BoundCapabilityProvider`; and
-7. compares exact Evidence kinds and counts or classified failure codes.
+6. loads any declared fixture runtime factory from that exact isolated wheel
+   and passes its detached fixture input to the provider as opaque runtime;
+7. executes every fixture through negotiated `BoundCapabilityProvider`; and
+8. compares exact Evidence kinds and counts or classified failure codes.
+
+The platform does not interpret fixture runtime data or recognize
+browser-specific fields. A browser provider can therefore inject a fake
+`BrowserSnapshotSource` without starting Playwright or weakening ordinary
+provider isolation.
 
 The install and fixture-worker time limits protect this release test. They do
 not introduce a total timeout for user audit Runs.

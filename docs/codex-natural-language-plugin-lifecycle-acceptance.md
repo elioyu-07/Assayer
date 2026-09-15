@@ -6,35 +6,70 @@ It deliberately separates repository automation from a clean Codex profile run.
 Passing MCP tests is not, by itself, evidence that Codex Marketplace discovery,
 Skill loading, and natural-language routing work in a clean user environment.
 
+Pass, failure, and blocked decisions in this record follow
+[Operator Release Gate v1](operator-release-gate-v1.md). This document is an
+evidence log; it does not define a competing operator gate. In particular, one
+successful baseline Run does not close J04 or J05.
+
 ## Status
 
 | Gate | Status | Evidence |
 |---|---|---|
 | Lifecycle MCP contract | Passed | `tests/test_plugin_lifecycle_mcp.py` |
+| Natural-language local-source verification MCP contract | Passed | `verify_plugin_source`; transport and real stdio coverage in `tests/test_plugin_lifecycle_mcp.py` and `tests/test_mcp_stdio_integration.py` |
+| Fresh bundle `verify_plugin_source` call on 2026-09-15 | Passed | Assayer `0.1.2+codex.20260915014354`; fresh private runtime exposed 17 tools and verified `plugins/frontend-audit` through compile, generated contracts, isolated wheel, and installed lifecycle |
 | Same-connection install and registry refresh | Passed | `tests/test_plugin_registry_refresh.py` |
 | Same-connection complete Run and result paging | Passed | `tests/test_mcp_stdio_integration.py` |
-| Checkpoint draft preflight and semantic rejection safety | Passed | `tests/test_interactive_protocol.py`, `tests/test_agent_contract_boundary.py` |
+| Exact DomainResult contract and semantic rejection safety | Passed | `tests/test_plugin_compatibility.py`, `tests/test_plugin_conformance.py`, `tests/test_plugin_release_gate.py` |
 | Same-connection upgrade and rollback | Passed | `tests/test_mcp_stdio_integration.py` |
 | Natural-language route classification | Passed | `tests/test_plugin_lifecycle_router.py` |
-| Full browser/MCP regression gate | Passed | `scripts/run_tests.py full` — 769 tests |
-| Exact Assayer bundle build and offline launcher check | Passed | `scripts/build_plugin_bundle.py` — `assayer-0.1.2`; SDK release-gate wheel SHA-256 `6bdcf099244690e9d29e6e579c5185e8a07eae3121a9b6a8375472bfc21f6d99`; fresh local CLI bundle embeds wheel SHA-256 `5f246587a9dc69c708499f511e6e528922287f7a14ba3d9c3d322ccf52740f6f` |
-| External `ass-spec` SDK consumer against exact `assayer 0.1.2` | Passed | 64 tests; exact-wheel release gate passed all four stages |
-| External `ass-spec` against previously released `assayer 0.1.1` | Rejected as incompatible | Old bundled schema rejects `checkpointSemanticRules`; `ass-spec` now requires `assayer>=0.1.2` |
+| Full browser/MCP regression gate | Deferred | Browser full gate is intentionally outside the current task scope |
+| Exact Assayer bundle build and offline launcher check | Passed | Deterministic package and launcher checks; see `docs/exact-contract-release-performance-evidence.md` |
+| External `ass-spec` SDK consumer against exact `assayer 0.1.2` | Passed | 56 tests; exact current SDK contract and manifest accepted |
+| External `ass-spec` against an older Assayer contract | Rejected as incompatible | Exact protocol/SDK and DomainResult identity checks fail closed |
 | Clean Codex CLI marketplace discovery and install | Passed | Disposable `CODEX_HOME`; `codex plugin marketplace add`, `plugin list --available`, `plugin add`, and `plugin list` all reported `assayer@assayer-clean` at `0.1.2+codex.20260909095928` |
 | Clean installed-bundle MCP startup | Passed | Installed cache copy launched with isolated `HOME`/`XDG_CACHE_HOME`; private runtime created offline, `bundle-ready` and `runtime-identity.json` written, launcher exited 0 on EOF |
 | Clean Codex natural-language lifecycle acceptance | Pending operator evidence | Requires an interactive Codex session for natural-language routing and confirmation UX; CLI/plugin and launcher gates above are complete |
 | Operator-session attempt on 2026-09-09 | Blocked by environment | Isolated `codex exec` loaded the disposable profile but the model transport timed out through all retries; no domain-plugin mutation was performed |
+| Operator-session attempt on 2026-09-11 | Blocked by network | Clean `assayer-clean` marketplace install succeeded; read-only `codex exec` could not complete the model turn after DNS failure and an approved network retry timed out |
+| OPR-J04-B01 attempt on 2026-09-14 | Blocked by model transport | Exact Assayer Marketplace discovery and installation passed in a newly generated profile. Thread `01a09f16-112f-7a61-afa8-4c281f4cd06d` exhausted five WebSocket retries and a bounded HTTPS fallback wait before any Assayer tool call or domain-plugin mutation. Machine-readable result: `/Users/sev7nyo/code/Assayer-operator-evidence/operator-acceptance/20260914T084239Z-7dc69e6d080662d9/gate-results.json` |
+| OPR-J04-B01 retry on 2026-09-14 | Blocked by model transport | Exact cachebusted candidate `0.1.2+codex.20260914085115` installed through a new local Marketplace. Stdin was closed with EOF; the model transport still exhausted five WebSocket retries and bounded HTTPS fallback waiting before any Assayer tool call. Machine-readable result: `/Users/sev7nyo/code/Assayer-operator-evidence/operator-acceptance/20260914T090452Z-1d26aebf84cef5b3/gate-results.json` |
+| OPR-J04-B01 retry on 2026-09-15 | Blocked by model transport | Exact candidate `0.1.2+codex.20260915014354` was staged, installed, and prepared in a new clean profile. The model transport exhausted five WebSocket retries before any Assayer business tool call. Machine-readable result: `/Users/sev7nyo/code/Assayer-operator-evidence/operator-acceptance/20260915T015933Z-576becdf1334bbba/gate-results.json` |
+| OPR-J04-B01 capacity retry on 2026-09-15 | Blocked by model capacity | Exact candidate `0.1.2+codex.20260915014354` was discovered, installed, and prepared in another clean profile. Codex loaded the lifecycle and plugin-run Skills, then the selected model reported capacity exhaustion before any Assayer business tool call or domain-plugin mutation. Thread `01a0a2dd-b855-7290-ad9e-eb6f8fa0363f`; machine-readable result: `/Users/sev7nyo/code/Assayer-operator-evidence/operator-acceptance/20260915T021825Z-2cead14cfbdd599e/gate-results.json` |
+| Local Python 3.13 fast gate on 2026-09-14 | Passed (local evidence) | `scripts/run_tests.py fast --quiet`; 723 tests passed in 8.586 seconds. This is not the GitHub Actions matrix result. |
+| Clean temporary-venv Python 3.13 fast gate on 2026-09-14 | Passed (local evidence) | CI-style editable installation plus explicit `setuptools`/`wheel`/`uv`; `scripts/run_tests.py fast --quiet`; 723 tests passed. |
+| Local Python 3.13 full gate on 2026-09-14 | Passed (local evidence) | `scripts/run_tests.py full --quiet`; 789 tests passed in 44.624 seconds. This is not operator J04/J05 evidence. |
+| Local Python 3.13 split-install matrix on 2026-09-14 | Passed (local evidence) | `scripts/install_matrix.py`; all platform, SDK, Agent, plugin/provider, root-meta, and duplicate-conflict cases passed. This is not the CI 3.11/3.13 result. |
+| Isolated release/provider gate with explicit build toolchain on 2026-09-14 | Passed (local evidence) | Temporary venv with `setuptools`, `wheel`, and `uv`; `tests.test_plugin_release_gate` plus `tests.test_provider_release_gate`: 35 tests passed. |
+
+The automated Python support policy is recorded in
+[CI Support Matrix v1](ci-support-matrix-v1.md): Python 3.11 and 3.13 are
+full-gate entries, Python 3.12 is a fast-gate entry, and macOS arm64/CPython
+3.13 remains the clean operator reference rather than a CI pass.
+
+The 2026-09-14 attempt used archive SHA-256
+`7e24b8f8bc2f276c58aa9848ab1e4024482d4c33a2479efbd83c4acfbbcecdb5`.
+It also exposed a release-identity defect: the newly built bytes initially kept
+the earlier cachebuster `0.1.2+codex.20260914010407`. That archive is retained
+only as blocked diagnostic evidence and is not a publishable candidate. The
+cachebuster was replaced through the Codex plugin update helper with
+`0.1.2+codex.20260914085115`, and the corrected candidate passed bundle build,
+isolated installation, entry-point discovery, Host construction, and offline
+launcher startup. A new operator attempt is still required for that exact
+candidate.
 
 ## Automated Evidence
 
 The deterministic integration journey is:
 
 ```text
+verify local Policy Pack -> exact wheel (without installation)
+->
 install v1
 -> list
 -> start_plugin_run
 -> advance_plugin_run
--> submit decision
+-> submit DomainResult
 -> terminal result
 -> get_plugin_result
 -> upgrade v2
@@ -75,8 +110,8 @@ Use the following natural-language sequence:
 
 ```text
 Install Assayer from the configured Codex Marketplace.
+Run assayer doctor --fix.
 Install ass-spec.
-Confirm the displayed installation plan.
 Use ass-spec to review spec.md for completeness and ambiguity.
 Show me the result and the full report location.
 Upgrade ass-spec.
@@ -90,7 +125,7 @@ For each request, record:
 - the exact user text;
 - whether Codex selected Marketplace, lifecycle, or Run workflow;
 - the tools discovered by Codex;
-- the plan shown before every mutation;
+- the plan shown for every confirmation-required mutation (trusted first install is the exception);
 - the user's confirmation or rejection;
 - the resulting plugin state and active version;
 - the Run ID and terminal status for plugin usage;
@@ -103,7 +138,7 @@ The automated and CLI portions are complete. Full operator acceptance still requ
 
 - Assayer is installed by Codex Marketplace without manual MCP configuration;
 - the Assayer MCP starts and reports dependency failures clearly;
-- `ass-spec` is installed through natural language and explicit confirmation;
+- `ass-spec` is installed through natural language in one trusted-catalog Host transaction;
 - the same Codex task uses `ass-spec` and receives a terminal structured result;
 - upgrade and rollback are completed through natural language;
 - uninstall is completed through natural language;

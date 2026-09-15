@@ -1,6 +1,7 @@
 import ast
 import os
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,21 @@ ROOT = Path(__file__).resolve().parents[1]
 SDK_ROOT = ROOT / "src" / "assayer_plugin_sdk"
 
 FORBIDDEN_ROOTS = ("assayer_platform", "assayer_host")
+
+
+def _compiled_frontend_project() -> dict:
+    from assayer_platform.simple_plugin_compiler import compile_simple_plugin
+
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "generated"
+        compile_simple_plugin(
+            ROOT / "plugins" / "frontend-audit",
+            output,
+            distribution_name="assayer-plugin-frontend-audit",
+        )
+        return tomllib.loads(
+            (output / "pyproject.toml").read_text(encoding="utf-8")
+        )
 
 
 def _imported_roots(path: Path) -> set[str]:
@@ -33,49 +49,22 @@ class PluginSdkDistributionTest(unittest.TestCase):
                 offenders[path.name] = sorted(forbidden)
         self.assertEqual({}, offenders)
 
-    def test_sdk_exposes_the_plugin_facing_contract(self) -> None:
-        import assayer_plugin_sdk as sdk
-
-        for name in (
-            "PLATFORM_API_VERSION",
-            "HOST_PROTOCOL_VERSION",
-            "HOST_SDK_VERSION",
-            "DomainResultContract",
-            "PluginCompatibility",
-            "negotiate_plugin_compatibility",
-            "WorkItem",
-            "InvestigationPacket",
-            "Finding",
-            "DecisionProposal",
-            "ReviewCheckpoint",
-            "CommitReceipt",
-            "CheckContract",
-            "PluginManifest",
-            "PlatformContext",
-            "EvidenceRecord",
-            "CapabilityAccess",
-            "ProviderCollectionResult",
-            "ExecutionProfile",
-            "PlatformContractError",
-            "PluginContractError",
-            "EvidenceHandle",
-            "EvidenceHandleRegistry",
-            "to_json_value",
-            "validate_entity_id",
-        ):
-            self.assertTrue(hasattr(sdk, name), name)
-
-    def test_sdk_contract_identity_is_shared_with_the_platform_shim(self) -> None:
-        import assayer_plugin_sdk as sdk
-        import assayer_platform as platform
-
-        self.assertIs(sdk.PlatformContractError, platform.PlatformContractError)
-        self.assertIs(sdk.DomainResultContract, platform.DomainResultContract)
-
-    def test_sdk_resolves_its_own_schema_root(self) -> None:
+    def test_sdk_owns_one_self_contained_schema_root(self) -> None:
         from assayer_plugin_sdk.resources import schema_root
 
-        self.assertTrue((schema_root() / "common.schema.json").is_file())
+        expected = (ROOT / "src" / "assayer_plugin_sdk" / "schemas").resolve()
+        self.assertEqual(expected, schema_root())
+        names = (
+            "common.schema.json",
+            "plugin-manifest.schema.json",
+            "capability-provider.schema.json",
+            "evidence-claim.schema.json",
+            "actionable-result.schema.json",
+            "evaluation-corpus.schema.json",
+        )
+        for name in names:
+            self.assertTrue((expected / name).is_file(), name)
+            self.assertFalse((ROOT / "schemas" / name).exists(), name)
         with tempfile.TemporaryDirectory() as directory:
             previous = os.environ.get("ASSAYER_SDK_SCHEMA_ROOT")
             os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = directory
@@ -87,35 +76,31 @@ class PluginSdkDistributionTest(unittest.TestCase):
                 else:
                     os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
 
-    def test_sdk_schema_root_is_self_contained(self) -> None:
-        from assayer_plugin_sdk.resources import schema_root
+    def test_platform_schema_store_composes_sdk_and_platform_owners(self) -> None:
+        from assayer_platform.registry import schema_path, schema_store
 
-        expected = (ROOT / "src" / "assayer_plugin_sdk" / "schemas").resolve()
-        self.assertEqual(expected, schema_root())
-        for name in (
-            "common.schema.json",
-            "plugin-manifest.schema.json",
-            "capability-provider.schema.json",
-            "evidence-claim.schema.json",
-            "actionable-result.schema.json",
-            "evaluation-corpus.schema.json",
-        ):
-            self.assertTrue((expected / name).is_file(), name)
+        store = schema_store(ROOT / "schemas")
+        self.assertIn("common.schema.json", store)
+        self.assertIn("platform-ledger.schema.json", store)
+        self.assertEqual(
+            SDK_ROOT / "schemas" / "common.schema.json",
+            schema_path("common.schema.json", ROOT / "schemas"),
+        )
+        self.assertEqual(
+            ROOT / "schemas" / "platform-ledger.schema.json",
+            schema_path("platform-ledger.schema.json", ROOT / "schemas"),
+        )
 
-    def test_sdk_schema_copies_do_not_drift_from_the_repo(self) -> None:
-        sdk = ROOT / "src" / "assayer_plugin_sdk" / "schemas"
-        repo = ROOT / "schemas"
-        for name in (
-            "common.schema.json",
-            "plugin-manifest.schema.json",
-            "capability-provider.schema.json",
-            "evidence-claim.schema.json",
-            "actionable-result.schema.json",
-            "evaluation-corpus.schema.json",
-        ):
-            self.assertEqual(
-                (repo / name).read_bytes(), (sdk / name).read_bytes(), name,
-            )
+    def test_platform_schema_store_rejects_sdk_shadowing(self) -> None:
+        from assayer_platform import PlatformContractError
+        from assayer_platform.registry import schema_store
+
+        with tempfile.TemporaryDirectory() as directory:
+            shadow = Path(directory) / "common.schema.json"
+            shadow.write_bytes((SDK_ROOT / "schemas" / shadow.name).read_bytes())
+            with self.assertRaises(PlatformContractError) as rejected:
+                schema_store(Path(directory))
+        self.assertEqual("SCHEMA_RESOURCE_CONFLICT", rejected.exception.code)
 
     def test_schema_root_fails_closed_for_a_missing_override(self) -> None:
         from assayer_plugin_sdk.plugin_sdk import PluginContractError
@@ -132,23 +117,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
             else:
                 os.environ["ASSAYER_SDK_SCHEMA_ROOT"] = previous
 
-    def test_plugin_facing_validators_use_the_sdk_schema_root(self) -> None:
-        sdk = ROOT / "src" / "assayer_plugin_sdk"
-        for name in ("actionable_result.py", "evidence_claim.py", "evaluation.py"):
-            text = (sdk / name).read_text(encoding="utf-8")
-            self.assertNotIn("_schema_root", text, name)
-            self.assertIn("assayer_plugin_sdk.resources", text, name)
-
-    def test_in_repo_plugin_depends_only_on_the_sdk(self) -> None:
-        plugin_root = ROOT / "src" / "assayer_frontend_audit"
-        for path in plugin_root.glob("*.py"):
-            self.assertNotIn(
-                "assayer_platform", path.read_text(encoding="utf-8"), path.name,
-            )
-
     def test_split_distribution_configs_are_sdk_only(self) -> None:
-        import tomllib
-
         sdk = tomllib.loads(
             (ROOT / "packages" / "assayer-plugin-sdk" / "pyproject.toml").read_text(encoding="utf-8")
         )
@@ -159,9 +128,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
             sdk["tool"]["setuptools"]["package-data"]["assayer_plugin_sdk"],
         )
 
-        plugin = tomllib.loads(
-            (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").read_text(encoding="utf-8")
-        )
+        plugin = _compiled_frontend_project()
         dependencies = plugin["project"]["dependencies"]
         self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in dependencies))
         self.assertFalse(
@@ -177,9 +144,19 @@ class PluginSdkDistributionTest(unittest.TestCase):
             any("assayer-platform" in dep or "assayer-host" in dep for dep in provider_dependencies)
         )
 
-    def test_split_distribution_dag_and_entry_point_ownership(self) -> None:
-        import tomllib
+        browser_provider = tomllib.loads(
+            (ROOT / "packages" / "assayer-provider-browser" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        browser_dependencies = browser_provider["project"]["dependencies"]
+        self.assertEqual(["assayer-plugin-sdk==0.1.2"], browser_dependencies)
+        self.assertIn(
+            "descriptor.json",
+            browser_provider["tool"]["setuptools"]["package-data"][
+                "assayer_browser_provider"
+            ],
+        )
 
+    def test_split_distribution_dag_and_entry_point_ownership(self) -> None:
         def config(name: str) -> dict:
             return tomllib.loads(
                 (ROOT / "packages" / name / "pyproject.toml").read_text(encoding="utf-8")
@@ -187,9 +164,10 @@ class PluginSdkDistributionTest(unittest.TestCase):
 
         expected_packages = {
             "assayer-plugin-sdk": ["assayer_plugin_sdk"],
-            "assayer-plugin-frontend-audit": ["assayer_frontend_audit"],
+            "assayer-agent": ["assayer_agent"],
             "assayer-provider-markdown": ["assayer_document_navigation"],
-            "assayer-platform": ["assayer_platform", "assayer_host", "assayer_agent"],
+            "assayer-provider-browser": ["assayer_browser_provider"],
+            "assayer-platform": ["assayer_platform", "assayer_host"],
         }
         for name, packages in expected_packages.items():
             self.assertEqual(
@@ -204,17 +182,26 @@ class PluginSdkDistributionTest(unittest.TestCase):
         self.assertNotIn("assayer.plugins", entry_points)
         self.assertNotIn("assayer.providers", entry_points)
 
+        agent = config("assayer-agent")
+        self.assertEqual(["assayer-plugin-sdk==0.1.2"], agent["project"]["dependencies"])
+        self.assertNotIn("assayer.plugins", agent["project"].get("entry-points", {}))
+        self.assertNotIn("assayer.providers", agent["project"].get("entry-points", {}))
+
         sdk_entry_points = config("assayer-plugin-sdk")["project"].get("entry-points", {})
         self.assertNotIn("assayer.plugins", sdk_entry_points)
         self.assertNotIn("assayer.providers", sdk_entry_points)
 
         self.assertIn(
             "assayer.frontend-audit",
-            config("assayer-plugin-frontend-audit")["project"]["entry-points"]["assayer.plugins"],
+            _compiled_frontend_project()["project"]["entry-points"]["assayer.plugins"],
         )
         self.assertIn(
             "markdown",
             config("assayer-provider-markdown")["project"]["entry-points"]["assayer.providers"],
+        )
+        self.assertIn(
+            "browser",
+            config("assayer-provider-browser")["project"]["entry-points"]["assayer.providers"],
         )
 
 

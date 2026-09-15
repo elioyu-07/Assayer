@@ -2,8 +2,8 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.1.0 |
-| Date | 2026-09-04 |
+| Document version | 1.2.0 |
+| Date | 2026-09-13 |
 | Status | Execution baseline |
 | Owner | Assayer maintainers |
 | Primary client | Codex CLI |
@@ -38,12 +38,19 @@ that result and never an independent source of truth.
 
 ## 3. Guiding constraints
 
-- The platform owns lifecycle, permissions, evidence integrity, decision gates,
-  persistence, recovery, observability, and common result semantics.
+- The platform owns lifecycle, permissions, source binding, identity, Evidence
+  lineage, execution planning, incremental review and coverage, decision
+  mapping, persistence, recovery, observability, packaging mechanics, and common
+  result semantics.
 - A capability provider owns controlled access to a browser, file, repository,
-  API, database, log, or other approved source. It does not decide compliance.
-- A plugin owns domain rules, applicability, WorkItem discovery, evidence
-  organization, semantic review requirements, and domain summary data.
+  API, database, log, or other approved source, including immutable snapshots,
+  anchors, navigation, and closed-scope absence proofs. It does not decide
+  compliance.
+- An ordinary plugin owns one business version, input kind, domain rules,
+  applicability, deterministic Candidates/Facts/Relations, semantic-review
+  meaning, invariants, and business examples. It does not own platform
+  identities, Schemas, lifecycle hooks, Evidence graphs, coverage, commit,
+  summaries, or release mechanics.
 - User intent or an explicitly documented default preset defines the audit
   boundary. The platform may adapt discovery and execution only inside that
   boundary; it must not silently add rule domains that the user did not select.
@@ -123,16 +130,19 @@ platform-wide promise.
 - A long semantic review is observable as Agent work with a bounded next step;
   the platform does not silently wait forever for one monolithic decision.
 
-### Stage 2 — Freeze the platform constitution (M2) — documentation complete
+### Stage 2 — Freeze the platform constitution (M2) — amended documentation complete
 
 **Goal:** define the stable laws that all plugins and providers share.
 
 **Deliverables**
 
-- Plugin Constitution: purpose, boundaries, safety, evidence, unknown, and
-  release laws.
-- Audit Plugin Contract: manifest, checks, WorkItems, InvestigationPackets,
-  Findings, Decisions, recovery, idempotency, and summaries.
+- Platform Constitution: purpose, ownership, safety, Evidence, unknown,
+  domain-only authoring, bounded incremental review, Advanced SPI isolation,
+  versioning, and wheel-only release laws.
+- Audit Plugin Contract: Policy Pack, Simple SDK, frozen source Support, common
+  review, generated contracts, Advanced SPI admission, and conformance.
+- Simple Plugin Authoring Architecture: compiler, Host closure, migration, and
+  measurable acceptance.
 - Capability Provider Contract: capability names, authorization, scope,
   timeout, budget, failure, and evidence semantics.
 - Canonical Audit Result Schema: terminal status, coverage, outcomes, findings,
@@ -152,9 +162,11 @@ The M2 documentation gate is complete in
 [Platform Constitution v1](platform-constitution-v1.md), [Audit Plugin Contract
 v1](plugin-contract-v1.md), [Capability Provider Contract v1](capability-provider-contract-v1.md),
 [Canonical Audit Result Contract v1](canonical-result-contract-v1.md), and the
-[v1 traceability matrix](platform-contract-traceability-v1.md). Machine
-conformance and install enforcement remain Stage 3 (M3); the matrix explicitly
-marks partial implementation so this milestone does not overclaim.
+[Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md), plus
+the [v1 traceability matrix](platform-contract-traceability-v1.md). The original
+M3 low-level SPI gates remain migration evidence. Simple compiler, source,
+incremental-review, and wheel-only enforcement are Stage 5 and are explicitly
+marked incomplete so this milestone does not overclaim.
 
 ### Stage 3 — Make the contracts enforceable and efficient (M3)
 
@@ -173,13 +185,14 @@ gates that every plugin shares.
   for production integrations. Missing real dependencies fail clearly; they do
   not silently skip.
 - Generic paged and incremental lifecycle operations with durable checkpoints;
-  a plugin can process bounded WorkItem batches without submitting one
-  monolithic Agent payload.
+  the Host can process bounded internal work batches without asking a plugin or
+  Agent to submit one monolithic payload.
 - Host-side mechanical deduplication/grouping with an auditable mapping back to
   every original WorkItem; grouping cannot make a semantic decision or discard
   Evidence.
-- Layered InvestigationPackets and cursor-based delta transport so Agent turns
-  receive summaries first and expand raw Evidence only when needed.
+- Internal layered InvestigationPackets and cursor-based delta transport so
+  Agent turns receive summaries first and expand raw Evidence only when needed;
+  these packet and cursor types remain invisible to ordinary plugins.
 - Platform-level staged Agent output and context governance. A Run reports a
   compact phase start, bounded incremental progress, phase completion, and a
   compact final result instead of emitting one monolithic response or
@@ -202,8 +215,9 @@ gates that every plugin shares.
   rule profiles, and documented default presets. The selected rules are frozen
   at Run start, and the ledger and final result identify both covered and
   intentionally excluded scope.
-- Safe adaptive batch sizing and failure splitting, honoring plugin-declared
-  ordering, isolation, parallelism, and cache constraints.
+- Safe adaptive batch sizing and failure splitting under Host defaults. Only an
+  admitted Advanced SPI contract may impose stricter ordering, isolation,
+  parallelism, or cache constraints.
 - Measured parallel execution only for independent WorkItems, bounded by
   negotiated runtime concurrency and merged deterministically. Persistent or
   cross-process platform caching is explicitly deferred; the existing in-process
@@ -236,6 +250,11 @@ gates that every plugin shares.
   cutoff.
 - Performance bills separate Agent waiting, transport, Host, provider, cache,
   and split time; unavailable telemetry is explicit.
+
+**Historical M3 Advanced SPI implementation record.** The following slices
+describe how the current low-level contract was built. They do not define the
+ordinary author surface and do not prove the Simple authoring amendment
+implemented.
 
 Current M3 progress: WorkItem inspection paging, summary-first Evidence,
 on-demand full Evidence expansion, declarative nested Evidence collection
@@ -447,8 +466,9 @@ the external Spec plugin.
 
 ### Stage 5 — Build the Agent-first plugin workbench (M5)
 
-**Goal:** let a developer create a conforming plugin through conversation
-without making conversation the only trust mechanism.
+**Goal:** deliver Policy Pack, Simple SDK, and a deterministic compiler so an
+ordinary developer authors only executable domain policy. Conversation may
+help write that policy but is never the contract compiler or trust mechanism.
 
 **Agent workflow**
 
@@ -456,24 +476,38 @@ without making conversation the only trust mechanism.
 describe intent
   -> clarify subject, rule, evidence, and unknown cases
   -> match existing capabilities
-  -> generate standard plugin package and fixtures
-  -> run conformance checks
+  -> write Policy Pack and optional Simple scan logic
+  -> run assayer plugin verify
   -> repair failures
   -> request human confirmation
-  -> install/register/version
+  -> install the exact verified wheel
 ```
 
 **Required outputs**
 
-- Readable source files and manifest, not opaque model state.
-- Rule and evidence definitions, scope schema, tests, Skill instructions, and
-  release metadata.
+- `plugin.yaml`, `checks.yaml`, semantic instructions, business cases, and
+  optional `plugin.py`; no author-maintained platform artifacts.
+- A Simple SDK surface limited to domain objects and an explicitly isolated
+  Advanced SPI.
+- Host-owned frozen DocumentSnapshot, Support resolution, ReviewBatch,
+  CoverageLedger, common Review model, Decision mapping, commit, and summary.
+- Deterministically generated manifest, Schemas, registration, compatibility,
+  execution defaults, entry points, release descriptor, and lifecycle tests.
+- One `assayer plugin verify` action that builds, validates, installs, and tests
+  the exact wheel. Local installation never copies the source repository.
 - A summary of assumptions, permissions, unresolved questions, and generated
   changes before installation.
 
 **Exit gate**
 
-- A developer can inspect or edit every generated artifact.
+- A Policy Pack can contain zero Python; the minimal Simple plugin contains one
+  Python file and no more than 50 lines of domain code.
+- Generated artifacts are inspectable build output but never parallel editable
+  sources of truth.
+- Agent tasks remain bounded and incrementally durable for 10 MB or
+  100,000-line inputs; no submission contains a complete WorkItem review.
+- `minimal` and `ass-spec` preserve domain-result equivalence, and `ass-spec`
+  removes at least 60 percent of platform-mechanical code.
 - The Agent cannot bypass conformance, permission, or publication gates.
 - Re-running the same request is deterministic or explains its differences.
 
@@ -593,7 +627,7 @@ silently broaden the selected rule boundary.
 | M2 Platform constitution | Documentation complete | Machine enforcement belongs to M3 |
 | M3 Enforceable and efficient platform | Active; Slices 042-074 implemented and J06b accepted; multi-window ownership defect designed | Implement multi-window Run isolation, then collect measured owner workloads and remaining clean-CLI evidence |
 | M4 External Spec plugin | Complete; `ass-spec` is an independent external distribution (static + isolated-install + lifecycle gates), the built-in `builtin_plugins/spec_quality` is removed with its tests migrated to the external package, and the full install → discover → run → upgrade → rollback → uninstall CLI journey was validated (the acceptance script and its test moved to the `ass-spec` repository with the plugin) | M5 starts on a proven external plugin lifecycle |
-| M5 Agent-first workbench | Queued | Starts after one external plugin lifecycle is proven |
+| M5 Agent-first workbench | Active; Policy Pack, Simple SDK/compiler, incremental common review, exact-wheel verification/install, and the natural-language `verify_plugin_source` entry are implemented | Complete `minimal`/`ass-spec` migration and prove the remaining equivalence and code-reduction exit gates |
 | M6 External frontend/providers | Queued | Requires stable external plugin and provider contracts |
 | M7 Ecosystem expansion | Deferred | Requires evidence from at least two real plugin use cases |
 
@@ -794,6 +828,8 @@ journey and observability baseline
   -> minimum ownership/recovery correction
   -> Spec golden journey
   -> independent Spec packaging
+  -> Simple SDK compiler and Host-owned incremental review
+  -> minimal and ass-spec migration
   -> Frontend Alpha journey closure
   -> ecosystem expansion
 ```

@@ -15,20 +15,20 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from assayer_platform import DomainResultContract, PlatformContext, PluginRegistration
-from assayer_platform.contract import (
+from assayer_plugin_sdk import DomainResultContract, PlatformContext, PluginRegistration
+from assayer_plugin_sdk.contract import (
     CheckContract,
     DimensionObservation,
     EvidenceRecord,
     InvestigationPacket,
     WorkItem,
 )
-from assayer_platform.evidence_graph import (
+from assayer_plugin_sdk.evidence_graph import (
     build_candidate_evidence_graph,
     render_candidate_evidence_graph,
     validate_candidate_evidence_graph_projection,
 )
-from assayer_platform.registry import load_plugin_manifest
+from assayer_plugin_sdk.manifest import load_plugin_manifest
 
 
 _MANIFEST = Path(__file__).with_name("manifest.json")
@@ -170,7 +170,6 @@ DOMAIN_RESULT_CONTRACT = DomainResultContract(
                         "dimension": {"type": "string", "minLength": 1},
                         "status": {"type": "string", "minLength": 1},
                         "reason": {"type": "string", "minLength": 1},
-                        "evidenceRefs": {"type": "array", "items": {"type": "string", "minLength": 1}},
                         "supportedBy": {"type": "array", "items": {"type": "string", "minLength": 1}},
                     },
             }},

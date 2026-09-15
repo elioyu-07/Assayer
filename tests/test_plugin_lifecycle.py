@@ -21,11 +21,13 @@ from assayer_platform import (
     load_registration,
 )
 from assayer_platform import installed_plugin_registry
+from assayer_plugin_sdk import PluginCompatibility
 
 
 def _manifest(plugin_id="fixture.lifecycle", version="1.0.0"):
     return PluginManifest(
         plugin_id=plugin_id, version=version, platform_api_version="1.0.0",
+        compatibility=PluginCompatibility(),
         domains=("fixture",), subject_kinds=("fixture_item",),
         checks=(CheckContract(
             "FIX-001", "1.0.0", ("fixture_item",), ("present",),
@@ -33,7 +35,7 @@ def _manifest(plugin_id="fixture.lifecycle", version="1.0.0"):
             ("structured_read",), "needs_review", ("source_digest",),
         ),),
         execution_profile=ExecutionProfile(
-            "forbidden", "forbidden", "forbidden", "forbidden", "forbidden", "required",
+            "forbidden", "forbidden", "forbidden", "forbidden", "forbidden",
         ),
     )
 
@@ -103,16 +105,18 @@ class PluginInstallationStoreTest(unittest.TestCase):
             self.assertEqual(reloaded["plugins"]["fixture.lifecycle"]["activeVersion"], "1.0.0")
 
     def test_upsert_appends_history_and_flips_active_version(self):
-        store = PluginInstallationStore("/tmp/unused-assayer-store")
-        index = store.load()
-        entry = store.upsert(index, "fixture.lifecycle", version="1.0.0", package_root="p", installed_at=1, conformance={})
-        entry = store.upsert(index, "fixture.lifecycle", version="2.0.0", package_root="p2", installed_at=2, conformance={})
-        self.assertEqual(store.version_history(entry), ["1.0.0", "2.0.0"])
-        self.assertEqual(store.active_version(entry), "2.0.0")
+        with tempfile.TemporaryDirectory() as directory:
+            store = PluginInstallationStore(directory)
+            index = store.load()
+            entry = store.upsert(index, "fixture.lifecycle", version="1.0.0", package_root="p", installed_at=1, conformance={})
+            entry = store.upsert(index, "fixture.lifecycle", version="2.0.0", package_root="p2", installed_at=2, conformance={})
+            self.assertEqual(store.version_history(entry), ["1.0.0", "2.0.0"])
+            self.assertEqual(store.active_version(entry), "2.0.0")
 
     def test_store_rejects_unsafe_identity(self):
-        store = PluginInstallationStore("/tmp/unused-assayer-store")
-        _assert_error_code(self, "PLUGIN_IDENTITY_INVALID", lambda: store.package_dir("../evil", "1.0.0"))
+        with tempfile.TemporaryDirectory() as directory:
+            store = PluginInstallationStore(directory)
+            _assert_error_code(self, "PLUGIN_IDENTITY_INVALID", lambda: store.package_dir("../evil", "1.0.0"))
 
 
 class PluginLifecycleManagerTest(unittest.TestCase):
@@ -128,12 +132,17 @@ class PluginLifecycleManagerTest(unittest.TestCase):
     def test_install_materializes_and_activates(self):
         with tempfile.TemporaryDirectory() as directory:
             package = _FakePackage(Path(directory))
-            result = self.manager(directory).install(package.root)
+            digest = "a" * 64
+            result = self.manager(directory).install(
+                package.root, wheel_sha256=digest,
+            )
             self.assertEqual(result["operation"], "install")
             self.assertEqual(result["status"], "completed")
             self.assertEqual(result["version"], "1.0.0")
+            self.assertEqual(result["wheelSha256"], digest)
             installed = self.manager(directory).get("fixture.lifecycle")
             self.assertEqual(installed["activeVersion"], "1.0.0")
+            self.assertEqual(installed["versions"]["1.0.0"]["wheelSha256"], digest)
             self.assertTrue((Path(directory) / "packages" / "fixture.lifecycle" / "1.0.0").is_dir())
 
     def test_install_conflict_fails_closed(self):
@@ -325,16 +334,6 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             manager = self.manager(directory)
             _assert_error_code(self, "UNKNOWN_PLUGIN", lambda: manager.uninstall("fixture.lifecycle"))
 
-    def test_uninstall_leaves_builtin_platform_intact(self):
-        with tempfile.TemporaryDirectory() as directory:
-            manager = self.manager(directory)
-            manager.install(_FakePackage(Path(directory)).root)
-            manager.uninstall("fixture.lifecycle")
-            self.assertEqual(
-                installed_plugin_registry().select(plugin_id="assayer.frontend-audit").manifest.plugin_id,
-                "assayer.frontend-audit",
-            )
-
     def test_list_and_get_reflect_installed_state(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = self.manager(directory)
@@ -356,18 +355,14 @@ class PluginLifecycleManagerTest(unittest.TestCase):
             self.assertEqual(view["upgradeTo"], "2.0.0")
             self.assertEqual(manager.list()[0]["state"], "upgradable")
 
-    def test_installed_state_without_source_or_with_older_source(self):
-        with tempfile.TemporaryDirectory() as directory:
-            manager = self.manager(directory, latest_available=lambda plugin_id: "0.9.0")
-            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
-            self.assertEqual(manager.get("fixture.lifecycle")["state"], "installed")
-            self.assertNotIn("upgradeTo", manager.get("fixture.lifecycle"))
-
-    def test_installed_state_when_source_unknown(self):
-        with tempfile.TemporaryDirectory() as directory:
-            manager = self.manager(directory, latest_available=lambda plugin_id: None)
-            manager.install(_FakePackage(Path(directory), version="1.0.0").root)
-            self.assertEqual(manager.get("fixture.lifecycle")["state"], "installed")
+    def test_installed_state_when_catalog_is_older_or_unavailable(self):
+        for latest in ("0.9.0", None):
+            with self.subTest(latest=latest), tempfile.TemporaryDirectory() as directory:
+                manager = self.manager(directory, latest_available=lambda plugin_id: latest)
+                manager.install(_FakePackage(Path(directory), version="1.0.0").root)
+                view = manager.get("fixture.lifecycle")
+                self.assertEqual(view["state"], "installed")
+                self.assertNotIn("upgradeTo", view)
 
 
 class DiscoveryTest(unittest.TestCase):
@@ -452,15 +447,17 @@ class LoadRegistrationTest(unittest.TestCase):
             src.mkdir(parents=True)
             (src / "fixture_lifecycle.py").write_text(
                 "from assayer_platform import PluginRegistration, PluginManifest, ExecutionProfile, CheckContract\n"
+                "from assayer_plugin_sdk import PluginCompatibility\n"
                 "def registration():\n"
                 "    manifest = PluginManifest(\n"
                 "        plugin_id='fixture.lifecycle', version='1.0.0', platform_api_version='1.0.0',\n"
+                "        compatibility=PluginCompatibility(),\n"
                 "        domains=('fixture',), subject_kinds=('fixture_item',),\n"
                 "        checks=(CheckContract('FIX-001', '1.0.0', ('fixture_item',), ('present',),\n"
                 "            ('scanned_no_issue', 'needs_review'), ('structured',), ('structured_read',),\n"
                 "            'needs_review', ('source_digest',)),),\n"
                 "        execution_profile=ExecutionProfile('forbidden', 'forbidden', 'forbidden',\n"
-                "            'forbidden', 'forbidden', 'required'),\n"
+                "            'forbidden', 'forbidden'),\n"
                 "    )\n"
                 "    return PluginRegistration(manifest, plugin_factory=lambda: object(),\n"
                 "        decision_provider_factory=lambda: object(), capabilities=frozenset({'structured_read'}),\n"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 
 DECISION_STATES = frozenset({
@@ -51,7 +51,6 @@ class ExecutionProfile:
     decision_batching: str
     parallelism: str
     cache_reuse: str
-    checkpoint: str
     max_batch_size: int = 1
     ordering: str = "independent"
     failure_splitting: str = "forbidden"
@@ -95,9 +94,9 @@ class PluginManifest:
     subject_kinds: tuple[str, ...]
     checks: tuple[CheckContract, ...]
     execution_profile: ExecutionProfile
-    # Optional independent Host/SDK compatibility declaration.  Kept on the
-    # manifest so installed distributions can negotiate before plugin code is
-    # imported; legacy manifests receive the platform default window.
+    # Explicit Host/SDK compatibility declaration. Installed distributions
+    # negotiate this before plugin code is imported; there is no default or
+    # legacy compatibility window.
     compatibility: Any = None
 
 
@@ -130,6 +129,10 @@ class CapabilityProviderDescriptor:
     limits: Mapping[str, Any]
     failure_policy: tuple[Mapping[str, Any], ...]
     algorithm_versions: Mapping[str, Any]
+    # Provider-owned result contract.  The platform treats this as opaque
+    # metadata; consumers may validate the provider payload without importing
+    # provider implementation details.
+    result_schema: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "scope_schema", _mapping(self.scope_schema))
@@ -137,6 +140,8 @@ class CapabilityProviderDescriptor:
         object.__setattr__(self, "limits", _mapping(self.limits))
         object.__setattr__(self, "failure_policy", tuple(_mapping(item) for item in self.failure_policy))
         object.__setattr__(self, "algorithm_versions", _mapping(self.algorithm_versions))
+        if self.result_schema is not None:
+            object.__setattr__(self, "result_schema", _mapping(self.result_schema))
 
 
 @dataclass(frozen=True)
@@ -206,6 +211,36 @@ class ProviderCollectionResult:
     retry: str | None = None
 
 
+@dataclass(frozen=True)
+class ProviderSourceSnapshot:
+    """One Host-bound source state discovered by a capability provider.
+
+    Providers return only source identity, state digest, and bounded metadata;
+    the actual source snapshot remains inside the provider/runtime boundary.
+    The Host uses this value to create WorkItems and never asks a plugin to
+    calculate source identity or digest material.
+    """
+
+    source_identity: str
+    state_digest: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source_identity, str) or not self.source_identity.strip():
+            raise PlatformContractError(
+                "INVALID_PROVIDER_SOURCE", "Provider source identity must be nonempty",
+            )
+        if not isinstance(self.state_digest, str) or not self.state_digest.strip():
+            raise PlatformContractError(
+                "INVALID_PROVIDER_SOURCE", "Provider source state digest must be nonempty",
+            )
+        if not isinstance(self.metadata, Mapping):
+            raise PlatformContractError(
+                "INVALID_PROVIDER_SOURCE", "Provider source metadata must be an object",
+            )
+        object.__setattr__(self, "metadata", _mapping(self.metadata))
+
+
 @runtime_checkable
 class CapabilityAccess(Protocol):
     """Host-bound capability access a plugin consumes instead of a provider library.
@@ -231,6 +266,17 @@ class CapabilityAccess(Protocol):
         example a document path).  When ``None`` the Run-level scope bound at
         negotiation is used.
         """
+    ...
+
+
+@runtime_checkable
+class ProviderSourceDiscovery(Protocol):
+    """Optional provider extension for Host-owned source discovery."""
+
+    def discover_sources(
+        self, scope: Mapping[str, Any], context: Any,
+    ) -> Sequence[ProviderSourceSnapshot]:
+        """Discover and freeze source identities for a bounded Run scope."""
         ...
 
 
@@ -438,40 +484,6 @@ class DecisionProposal:
 
 
 @dataclass(frozen=True)
-class ReviewCheckpoint:
-    checkpoint_id: str
-    work_item_id: str
-    check_id: str
-    check_version: str
-    collection_id: str
-    item_ids: tuple[str, ...]
-    payload: Mapping[str, Any]
-    supersedes_checkpoint_id: str | None = None
-
-    def __post_init__(self) -> None:
-        if not all(isinstance(value, str) and value for value in (
-            self.checkpoint_id, self.work_item_id, self.check_id,
-            self.check_version, self.collection_id,
-        )):
-            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint identity fields are required")
-        if not self.item_ids or any(not isinstance(item_id, str) or not item_id for item_id in self.item_ids):
-            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint item IDs are required")
-        if len(set(self.item_ids)) != len(self.item_ids):
-            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Review checkpoint item IDs must be unique")
-        if self.supersedes_checkpoint_id is not None and (
-            not isinstance(self.supersedes_checkpoint_id, str)
-            or not self.supersedes_checkpoint_id
-            or self.supersedes_checkpoint_id == self.checkpoint_id
-        ):
-            raise PlatformContractError(
-                "INVALID_REVIEW_CHECKPOINT",
-                "Superseded checkpoint identity must be a different nonempty checkpoint ID",
-            )
-        object.__setattr__(self, "item_ids", tuple(self.item_ids))
-        object.__setattr__(self, "payload", _mapping(self.payload))
-
-
-@dataclass(frozen=True)
 class CommitReceipt:
     commit_id: str
     work_item_id: str
@@ -524,7 +536,6 @@ class PlatformLedger:
     decisions: tuple[DecisionProposal, ...] = ()
     failures: tuple[WorkFailure, ...] = ()
     decision_authority: str = "platform"
-    review_checkpoints: tuple[ReviewCheckpoint, ...] = ()
     workflow: Mapping[str, Any] = field(default_factory=dict)
     metrics: Mapping[str, int] = field(default_factory=dict)
 
@@ -539,9 +550,6 @@ class PlatformLedger:
             raise PlatformContractError(
                 "INVALID_LEDGER_AUTHORITY", "A Run must have exactly one decision authority",
             )
-        checkpoint_ids = tuple(item.checkpoint_id for item in self.review_checkpoints)
-        if len(checkpoint_ids) != len(set(checkpoint_ids)):
-            raise PlatformContractError("INVALID_REVIEW_CHECKPOINT", "Ledger review checkpoint IDs must be unique")
         object.__setattr__(self, "workflow", _mapping(self.workflow))
         object.__setattr__(self, "metrics", _mapping(self.metrics))
 

@@ -1,10 +1,9 @@
-"""Compatibility negotiation for the interactive plugin boundary.
+"""The exact current contract for the interactive plugin boundary.
 
-The Host owns this handshake.  Plugin authors declare independent protocol and
-SDK ranges; a Run is created only after those ranges (and protocol
-capabilities) are known to be compatible.  The implementation intentionally
-uses a tiny semver subset so it does not pull package-version policy into the
-plugin contract.
+The Host owns this handshake.  This is deliberately not a compatibility
+window: a plugin must declare the exact protocol and SDK contract used by the
+Host.  Old protocol envelopes, old SDK ranges, and adapter identities are
+rejected before a Run is created.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from .contract import PlatformContractError
 
 
 HOST_PROTOCOL_VERSION = "1.2.0"
-HOST_SUPPORTED_PROTOCOL_VERSIONS = ("1.0.0", "1.1.0", HOST_PROTOCOL_VERSION)
 HOST_SDK_VERSION = "0.1.2"
 HOST_PROTOCOL_CAPABILITIES = frozenset({
     "task_local_evidence_handles",
@@ -37,29 +35,32 @@ def _version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in parts)  # type: ignore[return-value]
 
 
-def _validate_range(minimum: str, maximum: str, *, label: str) -> None:
+def _validate_exact(minimum: str, maximum: str, *, label: str) -> None:
     try:
         low, high = _version(minimum), _version(maximum)
     except ValueError as error:
         raise PlatformContractError("PLUGIN_COMPATIBILITY_INVALID", f"Invalid {label} range") from error
-    if low > high:
-        raise PlatformContractError("PLUGIN_COMPATIBILITY_INVALID", f"Invalid {label} range: minimum exceeds maximum")
+    if low != high:
+        raise PlatformContractError(
+            "PLUGIN_COMPATIBILITY_RANGE_UNSUPPORTED",
+            f"The hard-cut contract requires one exact {label} version",
+        )
 
 
 @dataclass(frozen=True)
 class PluginCompatibility:
-    """Independent compatibility declaration carried by a registration."""
+    """Exact protocol/SDK declaration carried by a registration."""
 
-    protocol_min_version: str = "1.0.0"
+    protocol_min_version: str = HOST_PROTOCOL_VERSION
     protocol_max_version: str = HOST_PROTOCOL_VERSION
-    sdk_min_version: str = "0.1.0"
+    sdk_min_version: str = HOST_SDK_VERSION
     sdk_max_version: str = HOST_SDK_VERSION
     capabilities: frozenset[str] = frozenset()
     domain_contract_version: str | None = None
 
     def __post_init__(self) -> None:
-        _validate_range(self.protocol_min_version, self.protocol_max_version, label="protocol")
-        _validate_range(self.sdk_min_version, self.sdk_max_version, label="SDK")
+        _validate_exact(self.protocol_min_version, self.protocol_max_version, label="protocol")
+        _validate_exact(self.sdk_min_version, self.sdk_max_version, label="SDK")
         if self.domain_contract_version is not None:
             try:
                 _version(self.domain_contract_version)
@@ -73,7 +74,6 @@ class CompatibilityResult:
     protocol_version: str
     sdk_version: str
     capabilities: frozenset[str]
-    adapter: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         value: dict[str, object] = {
@@ -81,8 +81,6 @@ class CompatibilityResult:
             "sdkVersion": self.sdk_version,
             "capabilities": sorted(self.capabilities),
         }
-        if self.adapter is not None:
-            value["adapter"] = self.adapter
         return value
 
 
@@ -92,37 +90,29 @@ def negotiate_plugin_compatibility(
     protocol_version: str = HOST_PROTOCOL_VERSION,
     sdk_version: str = HOST_SDK_VERSION,
     host_capabilities: Iterable[str] = HOST_PROTOCOL_CAPABILITIES,
-    supported_protocol_versions: Iterable[str] = HOST_SUPPORTED_PROTOCOL_VERSIONS,
 ) -> CompatibilityResult:
-    """Fail closed when a plugin cannot run on this Host.
-
-    ``None`` is a legacy declaration and receives the broad compatibility
-    window used by pre-negotiation registrations.
-    """
-    declaration = declaration or PluginCompatibility()
+    """Fail closed unless the plugin declares the exact current contract."""
+    if declaration is None:
+        raise PlatformContractError(
+            "PLUGIN_COMPATIBILITY_REQUIRED",
+            "The plugin must declare the current exact protocol and SDK contract",
+        )
     try:
+        protocol = _version(declaration.protocol_min_version)
+        sdk_declared = _version(declaration.sdk_min_version)
+        host_protocol = _version(protocol_version)
         sdk = _version(sdk_version)
-        pmin, pmax = _version(declaration.protocol_min_version), _version(declaration.protocol_max_version)
-        smin, smax = _version(declaration.sdk_min_version), _version(declaration.sdk_max_version)
     except ValueError as error:
         raise PlatformContractError("PLUGIN_COMPATIBILITY_INVALID", "Plugin compatibility declaration is invalid") from error
-    supported = sorted(
-        (
-            (_version(value), value)
-            for value in supported_protocol_versions
-            if pmin <= _version(value) <= pmax
-        ),
-        reverse=True,
-    )
-    if not supported:
+    if protocol != host_protocol:
         raise PlatformContractError(
             "PLUGIN_PROTOCOL_INCOMPATIBLE",
-            f"Plugin supports protocol {declaration.protocol_min_version}..{declaration.protocol_max_version}; Host provides {protocol_version}",
+            f"Plugin requires protocol {declaration.protocol_min_version}; Host provides {protocol_version}",
         )
-    if not smin <= sdk <= smax:
+    if sdk_declared != sdk:
         raise PlatformContractError(
             "PLUGIN_SDK_INCOMPATIBLE",
-            f"Plugin supports SDK {declaration.sdk_min_version}..{declaration.sdk_max_version}; Host provides {sdk_version}",
+            f"Plugin requires SDK {declaration.sdk_min_version}; Host provides {sdk_version}",
         )
     host = frozenset(host_capabilities)
     missing = sorted(declaration.capabilities - host)
@@ -131,18 +121,13 @@ def negotiate_plugin_compatibility(
             "PLUGIN_CAPABILITY_INCOMPATIBLE",
             "Host does not support plugin protocol capabilities: " + ", ".join(missing),
         )
-    negotiated_protocol = supported[0][1]
-    adapter = (
-        None if _version(negotiated_protocol) == _version(protocol_version)
-        else f"host.compat.protocol-{negotiated_protocol}"
-    )
     return CompatibilityResult(
-        negotiated_protocol, sdk_version, declaration.capabilities & host, adapter,
+        protocol_version, sdk_version, declaration.capabilities & host,
     )
 
 
 __all__ = [
-    "HOST_PROTOCOL_VERSION", "HOST_SUPPORTED_PROTOCOL_VERSIONS",
+    "HOST_PROTOCOL_VERSION",
     "HOST_SDK_VERSION", "HOST_PROTOCOL_CAPABILITIES",
     "PluginCompatibility", "CompatibilityResult", "negotiate_plugin_compatibility",
 ]

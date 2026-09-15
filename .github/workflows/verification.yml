@@ -10,38 +10,71 @@ permissions:
 
 jobs:
   fast:
+    name: Fast / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
+      - name: Install wheel verifier
+        run: python -m pip install --upgrade pip setuptools wheel uv
       - run: python -m pip install -e packages/assayer-plugin-sdk
-      - run: python -m pip install -e packages/assayer-plugin-frontend-audit -e packages/assayer-provider-markdown -e .
+      - name: Build compiler-generated plugin wheels
+        run: python scripts/build_distributions.py --output /tmp/assayer-wheels
+      - run: python -m pip install /tmp/assayer-wheels/assayer_plugin_frontend_audit-*.whl
+      - run: >-
+          python -m pip install
+          -e packages/assayer-provider-markdown
+          -e packages/assayer-provider-browser
+          -e .
+      - run: python scripts/resilience_scan.py --root .
       - run: python scripts/run_tests.py fast --quiet
 
   full:
+    name: Full / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
+      - name: Install wheel verifier
+        run: python -m pip install --upgrade pip setuptools wheel uv
       - run: python -m pip install -e packages/assayer-plugin-sdk
-      - run: python -m pip install -e packages/assayer-plugin-frontend-audit -e packages/assayer-provider-markdown -e '.[test]'
-      - run: python -m playwright install --with-deps chromium
+      - name: Build compiler-generated plugin wheels
+        run: python scripts/build_distributions.py --output /tmp/assayer-wheels
+      - run: python -m pip install /tmp/assayer-wheels/assayer_plugin_frontend_audit-*.whl
+      - run: >-
+          python -m pip install
+          -e packages/assayer-provider-markdown
+          -e packages/assayer-provider-browser
+          -e '.[test]'
+      - run: python -m playwright install --with-deps chrome
       - run: python scripts/run_tests.py full --quiet
 
   install-matrix:
+    name: Install matrix / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip setuptools wheel
       - run: python scripts/install_matrix.py
-

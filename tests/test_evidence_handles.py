@@ -75,6 +75,25 @@ class EvidenceHandleRegistryTests(unittest.TestCase):
             resolve_evidence_references(self._packet(), ["source:missing:1:1"])
         self.assertEqual(rejected.exception.code, "DOMAIN_EVIDENCE_REFERENCE_INVALID")
 
+    def test_host_can_bind_only_the_current_common_review_evidence_subset(self):
+        registry = EvidenceHandleRegistry.from_bindings(
+            "task:common",
+            (("R7", "source:one:2:2"),),
+            (self._packet(),),
+            content_by_reference={"source:one:2:2": {"text": "bounded chunk"}},
+        )
+
+        self.assertEqual(registry.handles, ("R7",))
+        self.assertEqual(
+            registry.resolve("R7").as_public()["content"],
+            {"text": "bounded chunk"},
+        )
+        with self.assertRaises(PlatformContractError) as rejected:
+            EvidenceHandleRegistry.from_bindings(
+                "task:common", (("R8", "source:outside"),), (self._packet(),),
+            )
+        self.assertEqual(rejected.exception.code, "INVALID_REVIEW_BINDING")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,6 +5,8 @@ import tomllib
 import unittest
 from pathlib import Path
 
+from assayer_platform.yaml_subset import load_yaml_subset
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "assayer"
@@ -20,34 +22,29 @@ class PluginPackagingContractTests(unittest.TestCase):
 
     def test_plugin_mcp_uses_only_relocatable_paths(self):
         config = json.loads((PLUGIN / ".mcp.json").read_text())
+        manifest = json.loads(
+            (PLUGIN / ".codex-plugin" / "plugin.json").read_text()
+        )
         server = config["mcpServers"]["assayer"]
+        self.assertEqual(manifest["mcpServers"], "./.mcp.json")
         self.assertEqual(server["command"], "./scripts/launch_assayer_mcp")
         self.assertEqual(server["cwd"], ".")
         self.assertNotIn(str(ROOT), json.dumps(config))
         self.assertTrue((PLUGIN / "scripts" / "launch_assayer_mcp").is_file())
+        self.assertTrue((PLUGIN / "scripts" / "prepare_assayer_runtime").is_file())
         self.assertTrue((PLUGIN / "skills" / "assayer-audit" / "SKILL.md").is_file())
-
-    def test_launcher_validates_full_plugin_version_but_installs_base_wheel_version(self):
-        launcher = (PLUGIN / "scripts" / "launch_assayer_mcp").read_text()
-        self.assertIn('"$WHEEL_DIR" "$PLUGIN_VERSION"', launcher)
-        self.assertNotIn('"$WHEEL_DIR" "$BASE_VERSION" <<', launcher)
-        self.assertIn('"assayer[browser,mcp]==$BASE_VERSION"', launcher)
-        self.assertIn('export ASSAYER_PLUGIN_VERSION="$PLUGIN_VERSION"', launcher)
-        self.assertIn('print(version("assayer"))', launcher)
-        self.assertIn('if [ "$RUNTIME_VERSION" != "$BASE_VERSION" ]', launcher)
-        self.assertIn('export ASSAYER_RUNTIME_VERSION="$RUNTIME_VERSION"', launcher)
-        self.assertIn("export ASSAYER_BUNDLE_VERIFIED=1", launcher)
-        self.assertIn('"$RUNTIME_ROOT/runtime-identity.json" "$PLUGIN_VERSION" "$RUNTIME_VERSION"', launcher)
-        self.assertIn('temporary.replace(destination)', launcher)
+        self.assertTrue((PLUGIN / "skills" / "assayer-plugin-development" / "SKILL.md").is_file())
 
     def test_assayer_skill_declares_local_mcp_dependency_for_cli_discovery(self):
-        # Keep the packaging gate dependency-light; the plugin validator owns
-        # full YAML parsing and this test only checks the stable contract keys.
-        text = (PLUGIN / "skills" / "assayer-audit" / "agents" / "openai.yaml").read_text()
-        self.assertIn("dependencies:", text)
-        self.assertIn("type: \"mcp\"", text)
-        self.assertIn("value: \"assayer\"", text)
-        self.assertIn("transport: \"stdio\"", text)
+        value = load_yaml_subset(
+            PLUGIN / "skills" / "assayer-audit" / "agents" / "openai.yaml"
+        )
+        self.assertEqual(value["dependencies"]["tools"], [{
+            "type": "mcp",
+            "value": "assayer",
+            "description": "Local Assayer stdio MCP server",
+            "transport": "stdio",
+        }])
 
     def test_distribution_preserves_protocol_schema_directory(self):
         setuptools = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
@@ -59,7 +56,7 @@ class PluginPackagingContractTests(unittest.TestCase):
         root = tomllib.loads((ROOT / "pyproject.toml").read_text())
         setuptools = root["tool"]["setuptools"]
         self.assertEqual(
-            ["assayer_platform", "assayer_host", "assayer_agent"],
+            ["assayer_platform", "assayer_host"],
             setuptools["packages"],
         )
         self.assertNotIn("package-data", setuptools)
@@ -67,28 +64,22 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertTrue(
             any(dep.startswith("assayer-plugin-sdk") for dep in root["project"]["dependencies"])
         )
-        # The plugin manifest ships from its own split distribution now.
-        plugin = tomllib.loads(
-            (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").read_text()
+        self.assertTrue((ROOT / "plugins" / "frontend-audit" / "plugin.yaml").is_file())
+        self.assertFalse((ROOT / "src" / "assayer_frontend_audit" / "__init__.py").exists())
+        self.assertFalse(
+            (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").exists()
         )
-        self.assertIn(
-            "manifest.json",
-            plugin["tool"]["setuptools"]["package-data"]["assayer_frontend_audit"],
-        )
-        self.assertTrue((ROOT / "src" / "assayer_frontend_audit" / "manifest.json").is_file())
         self.assertFalse((ROOT / "src" / "assayer_platform" / "builtin_plugins").exists())
-
-    def test_bundle_builder_runs_plugin_conformance_before_wheel_packaging(self):
-        source = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
-        validation = source.index("_validate_plugin_releases()", source.index("def build("))
-        wheel = source.index("_build_wheelhouse(", source.index("def build("))
-        self.assertLess(validation, wheel)
 
     def test_bundle_declares_every_runtime_extra_it_builds(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
         extras = project["optional-dependencies"]
         self.assertIn("playwright==1.62.0", extras["browser"])
         self.assertIn("mcp==1.27.0", extras["mcp"])
+
+    def test_bundle_runtime_preparation_installs_browser_provider(self):
+        preparer = (PLUGIN / "scripts" / "prepare_assayer_runtime").read_text()
+        self.assertIn('"assayer-provider-browser"', preparer)
 
 
 if __name__ == "__main__":

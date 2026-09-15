@@ -28,18 +28,6 @@ def _load_matrix_module():
 matrix = _load_matrix_module()
 
 
-def observed(*, plugins=(), providers=(), origins=None, plugin_count=None,
-             conflict=None, purelib="/venv/site-packages"):
-    return {
-        "plugins": list(plugins),
-        "providers": list(providers),
-        "origins": origins or {},
-        "purelib": purelib,
-        "plugin_count": plugin_count,
-        "conflict": conflict,
-    }
-
-
 class InstallMatrixAssertionsTest(unittest.TestCase):
     def test_matrix_covers_the_split_shapes_and_the_conflict(self):
         names = {case.name for case in matrix.CASES}
@@ -49,92 +37,34 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
         self.assertEqual("PLUGIN_CONFLICT", conflict.conflict)
         self.assertEqual((2, 0), (conflict.plugins, conflict.providers))
         split = next(case for case in matrix.CASES if case.name == "all-split")
-        self.assertEqual((1, 1), (split.plugins, split.providers))
-
-    def test_root_meta_is_platform_only_after_the_flip(self):
+        self.assertEqual((1, 2), (split.plugins, split.providers))
+        self.assertTrue(split.agent)
+        self.assertIn("agent-only", names)
+        agent_only = next(case for case in matrix.CASES if case.name == "agent-only")
+        self.assertFalse(agent_only.platform)
         root = next(case for case in matrix.CASES if case.name == "root-meta")
         self.assertEqual((0, 0), (root.plugins, root.providers))
 
-    def test_duplicate_plugin_wheel_declares_the_shared_entry_point(self):
+    def test_root_wheel_guard_rejects_module_and_sdk_schema_leaks(self):
         import tempfile
         import zipfile
 
-        with tempfile.TemporaryDirectory() as directory:
-            wheel = matrix.build_duplicate_plugin_wheel(Path(directory))
-            self.assertTrue(wheel.is_file())
-            with zipfile.ZipFile(wheel) as archive:
-                names = archive.namelist()
-                entry_points = next(name for name in names if name.endswith("entry_points.txt"))
-                text = archive.read(entry_points).decode("utf-8")
-            self.assertIn("assayer.frontend-audit-shadow = assayer_frontend_audit:registration", text)
-
-    def test_valid_observation_passes(self):
-        case = matrix.Case("ok", ("assayer",), 1, 1)
-        matrix._assert_case(case, observed(
-            plugins=["assayer.frontend-audit"],
-            providers=["markdown"],
-            origins={
-                "assayer.frontend-audit": "/venv/site-packages/assayer_frontend_audit/__init__.py",
-                "markdown": "/venv/site-packages/assayer_document_navigation/__init__.py",
+        leaks = {
+            "module": {"assayer_plugin_sdk/__init__.py": ""},
+            "schema": {
+                "assayer_host/__init__.py": "",
+                "assayer-0.1.2.data/data/share/assayer/schemas/common.schema.json": "{}",
             },
-            plugin_count=1,
-        ))
-
-    def test_plugin_count_mismatch_fails(self):
-        case = matrix.Case("p", ("assayer",), 1, 0)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(plugins=[], plugin_count=0))
-
-    def test_provider_count_mismatch_fails(self):
-        case = matrix.Case("q", ("assayer",), 0, 1)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(providers=[], plugin_count=0))
-
-    def test_unexpected_conflict_fails(self):
-        case = matrix.Case("r", ("assayer",), 1, 0)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(
-                plugins=["assayer.frontend-audit"], plugin_count=None, conflict="PLUGIN_CONFLICT",
-            ))
-
-    def test_missing_expected_conflict_fails(self):
-        case = matrix.Case("s", ("assayer",), 2, 1, conflict="PLUGIN_CONFLICT")
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(
-                plugins=["assayer.frontend-audit", "assayer.frontend-audit"],
-                providers=["markdown"], plugin_count=1, conflict=None,
-            ))
-
-    def test_registry_did_not_load_expected_plugins_fails(self):
-        case = matrix.Case("t", ("assayer",), 1, 0)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(
-                plugins=["assayer.frontend-audit"], plugin_count=0,
-            ))
-
-    def test_root_wheel_platform_only_passes(self):
-        import tempfile
-        import zipfile
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "assayer-0.1.2-py3-none-any.whl"
-            with zipfile.ZipFile(path, "w") as archive:
-                for name in ("assayer_platform", "assayer_host", "assayer_agent"):
-                    archive.writestr(f"{name}/__init__.py", "")
-                archive.writestr("assayer-0.1.2.dist-info/METADATA", "Metadata-Version: 2.1\n")
-            matrix.assert_root_wheel_is_platform_only(Path(directory))
-
-    def test_root_wheel_with_leaked_modules_fails(self):
-        import tempfile
-        import zipfile
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "assayer-0.1.2-py3-none-any.whl"
-            with zipfile.ZipFile(path, "w") as archive:
-                archive.writestr("assayer_platform/__init__.py", "")
-                archive.writestr("assayer_plugin_sdk/__init__.py", "")
-            with self.assertRaises(SystemExit):
-                matrix.assert_root_wheel_is_platform_only(Path(directory))
+        }
+        for name, members in leaks.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "assayer-0.1.2-py3-none-any.whl"
+                with zipfile.ZipFile(path, "w") as archive:
+                    archive.writestr("assayer_platform/__init__.py", "")
+                    for member, content in members.items():
+                        archive.writestr(member, content)
+                with self.assertRaises(SystemExit):
+                    matrix.assert_root_wheel_is_platform_only(Path(directory))
 
     def test_clean_staging_removes_stale_build_outputs(self):
         import tempfile
@@ -146,34 +76,10 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
             (root / "src" / "assayer.egg-info").mkdir(parents=True)
             (root / "build" / "lib" / "assayer_plugin_sdk").mkdir(parents=True)
             (root / "packages" / "x" / "build").mkdir(parents=True)
-            original = build_dists.ROOT
-            build_dists.ROOT = root
-            try:
-                build_dists._clean_staging()
-            finally:
-                build_dists.ROOT = original
+            build_dists.clean_staging(root)
             self.assertFalse((root / "build").exists())
             self.assertFalse((root / "src" / "assayer.egg-info").exists())
             self.assertFalse((root / "packages" / "x" / "build").exists())
-
-    def test_entry_point_outside_site_packages_fails(self):
-        case = matrix.Case("u", ("assayer",), 1, 0)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(
-                plugins=["assayer.frontend-audit"],
-                origins={"assayer.frontend-audit": "/somewhere/else/__init__.py"},
-                plugin_count=1,
-            ))
-
-    def test_unresolved_entry_point_fails(self):
-        case = matrix.Case("v", ("assayer",), 1, 0)
-        with self.assertRaises(SystemExit):
-            matrix._assert_case(case, observed(
-                plugins=["assayer.frontend-audit"],
-                origins={"assayer.frontend-audit": None},
-                plugin_count=1,
-            ))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,14 +1,12 @@
 """Import-boundary conformance for Assayer plugins.
 
-Enforces the Platform--Plugin Boundary Contract v1 section 5: a plugin may
-import only names that belong to the public SDK surface declared in
-``assayer_platform.public_surface``.
+Enforces the Platform--Plugin Boundary Contract: a plugin may import only
+the standalone SDK surface.  Platform and Host implementation modules are
+not plugin dependencies.
 
 The check walks the plugin's Python source tree and flags any
-``assayer_platform`` import that references a module or symbol outside the
-whitelist. Symbol-level enforcement applies to ``from ... import ...``
-statements; a bare ``import assayer_platform.<module>`` is checked at module
-granularity, and a bare ``import assayer_platform`` is allowed.
+``assayer_platform`` imports are rejected.  Symbol-level enforcement applies
+to SDK imports through the SDK's own public surface.
 """
 
 from __future__ import annotations
@@ -18,16 +16,14 @@ import ast
 import json
 from pathlib import Path
 
-from .conformance import PluginConformanceReport, _issue
+from .conformance import PluginConformanceIssue, PluginConformanceReport, _issue
 from .public_surface import PUBLIC_SURFACE, PUBLIC_SURFACE_VERSION
 
 _SURFACE_INVARIANT = "PBV1-PUBLIC-SURFACE"
 
-# A plugin runtime may import the SDK contract and the legacy public platform
-# surface.  Any other ``assayer*`` top-level module is a concrete
-# implementation (for example the ``assayer_document_navigation`` capability
-# provider) that a plugin must reach through the Host instead of importing.
-_ALLOWED_ASSAYER_ROOTS = frozenset({"assayer_plugin_sdk", "assayer_platform"})
+# Any ``assayer*`` module other than the SDK is a platform or provider
+# implementation that a plugin must reach through the Host binding.
+_ALLOWED_ASSAYER_ROOTS = frozenset({"assayer_plugin_sdk"})
 
 
 def _surface_issue(
@@ -42,6 +38,8 @@ def _provider_import_issues(
     issues: list["PluginConformanceIssue"] = []
     for module_name in modules:
         top = module_name.split(".", 1)[0]
+        if top == "assayer_platform":
+            continue
         if not top.startswith("assayer") or top in _ALLOWED_ASSAYER_ROOTS:
             continue
         if (root / top).is_dir() or (root / f"{top}.py").is_file():
@@ -107,21 +105,21 @@ def _file_issues(path: Path, root: Path) -> list["PluginConformanceIssue"]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imported_modules.append(alias.name)
-                if alias.name == "assayer_platform":
-                    continue
-                if alias.name.startswith("assayer_platform."):
-                    issues.extend(_module_issues(
-                        alias.name, location=f"{path}:{node.lineno}",
+                if alias.name == "assayer_platform" or alias.name.startswith("assayer_platform."):
+                    issues.append(_surface_issue(
+                        "PLUGIN_IMPORT_PLATFORM_IMPLEMENTATION",
+                        f"{path}:{node.lineno}: imports platform implementation `{alias.name}`.",
+                        "Import the equivalent contract from assayer_plugin_sdk.",
                     ))
         elif isinstance(node, ast.ImportFrom):
             if node.level != 0 or not node.module:
                 continue
             imported_modules.append(node.module)
             if node.module == "assayer_platform" or node.module.startswith("assayer_platform."):
-                issues.extend(_symbol_issues(
-                    node.module,
-                    [alias.name for alias in node.names],
-                    location=f"{path}:{node.lineno}",
+                issues.append(_surface_issue(
+                    "PLUGIN_IMPORT_PLATFORM_IMPLEMENTATION",
+                    f"{path}:{node.lineno}: imports platform implementation `{node.module}`.",
+                    "Import the equivalent contract from assayer_plugin_sdk.",
                 ))
     issues.extend(_provider_import_issues(
         path, root, imported_modules, location=f"{path}",

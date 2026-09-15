@@ -114,7 +114,7 @@ reports no known boundary violations and all golden journeys pass.
 ## 6. Acceptance
 
 - Static dependency-direction checks pass.
-- Spec and Config produce valid, equivalent generic evidence-graph shapes.
+- Spec and Config produce valid, equivalent typed evidence-graph projections.
 - Existing Spec fixture and interactive tests remain green.
 - Result replay produces identical summaries before and after transport restart.
 - No HTML or browser behavior is introduced by the migration.

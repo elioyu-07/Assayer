@@ -1,15 +1,15 @@
 ---
 name: assayer-plugin-lifecycle
-description: "Manage installed Assayer domain plugins in natural language: install, upgrade, downgrade, rollback, uninstall, list, and inspect. Use when the user asks to install, add, update, pin, remove, or look up an Assayer plugin. Do not use for running a plugin (see assayer-plugin) or auditing a URL (see assayer-audit)."
+description: "Manage installed Assayer domain plugins in natural language: install, upgrade, downgrade, rollback, uninstall, list, and inspect. Use when the user asks to install, add, update, pin, remove, or look up an Assayer plugin. Do not use for developing or verifying plugin source (see assayer-plugin-development), running a plugin (see assayer-plugin), or auditing a URL (see assayer-audit)."
 ---
 
 # Assayer Plugin Lifecycle
 
 Use this Skill when the user asks to manage Assayer domain plugins themselves —
 install, upgrade, downgrade, roll back, uninstall, list, or inspect — not to run
-one and not to install Assayer itself. The Assayer MCP exposes the deterministic
-lifecycle tools; this Skill only teaches how to map a natural-language request to
-them. Never hardcode a plugin's rules, versions, or checks here.
+one and not to install Assayer itself. The Assayer MCP exposes a deterministic
+product lifecycle tool; this Skill only maps a natural-language request to it.
+Never hardcode a plugin's rules, versions, or checks here.
 
 When this Skill is loaded inside Codex, use the Assayer MCP tools already
 available in the current task. Do not invoke the `codex` CLI, start another
@@ -21,7 +21,8 @@ tool-discovery mechanism before reporting the integration as unavailable.
 
 | User intent | Skill | Tools |
 |---|---|---|
-| Manage an Assayer domain plugin (install/upgrade/remove/look up) | this Skill | `plan_plugin_change` / `execute_plugin_change` / `list_plugins` / `get_plugin_info` |
+| Verify a local plugin source or build its verified wheel | `assayer-plugin-development` | `verify_plugin_source` |
+| Manage an Assayer domain plugin (install/upgrade/remove/look up) | this Skill | `apply_plugin_change` / `list_plugins` / `get_plugin_info` |
 | Run an installed plugin against an input | `assayer-plugin` | `start_plugin_run`, `advance_plugin_run`, … |
 | Audit a web URL | `assayer-audit` | `start_audit`, … |
 | Install/upgrade Assayer itself (the Codex plugin) | Codex Marketplace / product lifecycle | not an MCP tool |
@@ -54,37 +55,37 @@ files.
 
 These never mutate and need no confirmation.
 
-## Mutations are two-phase: plan, confirm, execute
+## Mutations are Host-owned transactions
 
 `install`, `upgrade`, `downgrade`, `rollback`, and `uninstall` are mutating.
-Always use the two-phase flow — never call the single-shot mutation tools
-directly when the plan gate is available:
+Use the product-level `apply_plugin_change` tool. The Host performs planning,
+source/checksum validation, isolated installation, conformance, and atomic
+commit internally; the Agent must not orchestrate those phases or inspect the
+repository to rediscover them.
 
-1. Call `plan_plugin_change(operation=..., ...)` and read the returned `plan`
-   (operation, pluginId, current and target version, current and next state,
-   source, checksum, gates) plus the one-time `token`.
-2. Show the plan to the user in one or two sentences: the plugin, the version
-   change, and the source. Ask for an explicit yes.
-3. Only after the user confirms, call
-   `execute_plugin_change(token=..., confirmed=true)`.
+An explicit first-time install by trusted plugin name may complete in one Host
+transaction. Upgrades, downgrades, rollbacks, uninstalls, local package
+sources, and repairs return one compact confirmation plan. After the user
+confirms, call `apply_plugin_change` again with its token and
+`confirmed=true`.
 
-| User says (examples) | Plan call |
+| User says (examples) | Product call |
 |---|---|
-| "install ass-spec" | `plan_plugin_change(operation="install", plugin="ass-spec")` |
-| "install ass-spec 0.9.0" | `plan_plugin_change(operation="install", plugin="ass-spec", version="0.9.0")` |
-| "upgrade ass-spec" | `plan_plugin_change(operation="upgrade", plugin="ass-spec")` |
-| "pin ass-spec to 0.9.0" | `plan_plugin_change(operation="downgrade", pluginId="ass-spec", version="0.9.0")` |
-| "rollback ass-spec" | `plan_plugin_change(operation="rollback", pluginId="ass-spec")` |
-| "uninstall ass-spec" | `plan_plugin_change(operation="uninstall", pluginId="ass-spec")` |
+| "install ass-spec" | `apply_plugin_change(operation="install", plugin="ass-spec")` |
+| "install ass-spec 0.9.0" | `apply_plugin_change(operation="install", plugin="ass-spec", version="0.9.0")` |
+| "upgrade ass-spec" | `apply_plugin_change(operation="upgrade", pluginId="ass-spec")` |
+| "pin ass-spec to 0.9.0" | `apply_plugin_change(operation="downgrade", pluginId="ass-spec", version="0.9.0")` |
+| "rollback ass-spec" | `apply_plugin_change(operation="rollback", pluginId="ass-spec")` |
+| "uninstall ass-spec" | `apply_plugin_change(operation="uninstall", pluginId="ass-spec")` |
 
 Resolve the plugin identifier from the user's words. When the identifier is
 ambiguous, use `list_plugins()` or `get_plugin_info` to disambiguate rather than
 guessing.
 
-The plan token is one-time use, expires, and is invalidated if the store changes
-underneath it. If `execute_plugin_change` returns `PLAN_TOKEN_EXPIRED`,
-`PLAN_TOKEN_USED`, or `PLAN_STALE`, call `plan_plugin_change` again for a fresh
-plan rather than retrying the execute.
+The confirmation token is one-time use, expires, and is invalidated if the
+store changes underneath it. If `apply_plugin_change` returns
+`PLAN_TOKEN_EXPIRED`, `PLAN_TOKEN_USED`, or `PLAN_STALE`, request a fresh plan
+rather than retrying the mutation.
 
 ## Failure handling
 
@@ -99,17 +100,17 @@ installed plugins.
 When the user asks to run a plugin that is not installed, do not fail or start a
 Run against a missing plugin. Instead:
 
-1. `get_plugin_info(pluginId=...)` (or `list_plugins()`) to confirm it is absent.
-2. Tell the user the plugin is missing and that you will install it first.
-3. `plan_plugin_change(operation="install", plugin=...)`, show the plan, wait.
-4. `execute_plugin_change(token=..., confirmed=true)`.
-5. After a successful install, hand off to the `assayer-plugin` workflow to run
+1. Tell the user the plugin is missing and that you will install it first.
+2. `apply_plugin_change(operation="install", plugin=...)`.
+3. After a successful install, hand off to the `assayer-plugin` workflow to run
    it. If the install fails or quarantines, stop — never continue to a Run.
 
 ## Report
 
-After any mutation, confirm the outcome with `list_plugins()` or
-`get_plugin_info` and tell the user the resulting state. Never expose
+After a successful mutation, trust the returned `resultingState`, version, and
+next action; do not call `list_plugins` or `get_plugin_info` just to repeat the
+same confirmation. Query them only when the result is uncertain, dirty, or the
+user explicitly asks for status. Never expose
 credentials, secrets, raw wheel bytes, hidden reasoning, or internal protocol
 details. Keep the answer to the lifecycle facts: what changed, what state it is
 now in, and what the user can do next.

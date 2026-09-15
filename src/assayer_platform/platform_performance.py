@@ -10,7 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator, RefResolver
 
 from .contract import PlatformLedger
-from .registry import _schema_root
+from .registry import schema_store
 
 
 _NOT_EXPOSED = {
@@ -54,9 +54,9 @@ def _parallel_plan(ledger: PlatformLedger) -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _bill_validator() -> Draft202012Validator:
-    root = _schema_root()
-    schema = json.loads((root / "platform-performance-bill.schema.json").read_text(encoding="utf-8"))
-    common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
+    schemas = schema_store()
+    schema = schemas["platform-performance-bill.schema.json"]
+    common = schemas["common.schema.json"]
     return Draft202012Validator(
         schema,
         resolver=RefResolver(
@@ -78,6 +78,24 @@ def build_platform_performance_bill(ledger: PlatformLedger) -> dict[str, Any]:
     host_operations = _captured(
         sum(max(0, int(item.duration_ms)) for item in ledger.operations),
         "summed_work",
+    )
+    semantic_task_builds = int(metrics.get("semanticTaskBuilds", 0) or 0)
+    semantic_task = (
+        _captured(int(metrics.get("semanticTaskBuildMs", 0) or 0), "summed_work")
+        if semantic_task_builds
+        else _not_exposed("No interactive semantic task was compiled in this Run.")
+    )
+    agent_wait_samples = int(metrics.get("agentWaitSamples", 0) or 0)
+    agent_wait = (
+        _captured(int(metrics.get("agentWaitMs", 0) or 0), "elapsed")
+        if agent_wait_samples
+        else _not_exposed(_NOT_EXPOSED["agentWait"])
+    )
+    transport_samples = int(metrics.get("transportSamples", 0) or 0)
+    transport = (
+        _captured(int(metrics.get("transportMs", 0) or 0), "summed_work")
+        if transport_samples
+        else _not_exposed(_NOT_EXPOSED["transport"])
     )
 
     provider_bound = any(
@@ -125,12 +143,16 @@ def build_platform_performance_bill(ledger: PlatformLedger) -> dict[str, Any]:
         estimated_reduction = {"status": "not_applicable", "reason": reason}
 
     limitations = [
-        *_NOT_EXPOSED.values(),
+        _NOT_EXPOSED["model"],
         (
             "Run wall clock covers platform execution through the recorded boundary; "
             "later report publication and unavailable client work are outside it."
         ),
     ]
+    if agent_wait["status"] != "captured":
+        limitations.append(_NOT_EXPOSED["agentWait"])
+    if transport["status"] != "captured":
+        limitations.append(_NOT_EXPOSED["transport"])
     if provider["status"] != "captured":
         limitations.append(str(provider["reason"]))
     if plan["mode"] == "parallel":
@@ -149,13 +171,16 @@ def build_platform_performance_bill(ledger: PlatformLedger) -> dict[str, Any]:
             "ledgerKind": "platform-ledger",
             "eventCount": len(ledger.events),
             "operationCount": len(ledger.operations),
+            "semanticTaskBuilds": semantic_task_builds,
+            "semanticTaskBytes": int(metrics.get("semanticTaskBytes", 0) or 0),
         },
         "measurement": {
             "wallClock": wall_clock,
             "hostOperations": host_operations,
+            "semanticTask": semantic_task,
             "provider": provider,
-            "agentWait": _not_exposed(_NOT_EXPOSED["agentWait"]),
-            "transport": _not_exposed(_NOT_EXPOSED["transport"]),
+            "agentWait": agent_wait,
+            "transport": transport,
             "model": _not_exposed(_NOT_EXPOSED["model"]),
         },
         "parallelism": {
@@ -205,6 +230,7 @@ def render_platform_performance_bill(
         f"- Tasks and workers: {parallel['taskCount']} task(s), {parallel['workerCount']} worker(s)",
         f"- Run wall clock: {_timing_text(bill['measurement']['wallClock'])}",
         f"- Host operation work: {_timing_text(bill['measurement']['hostOperations'])}",
+        f"- Semantic task compilation: {_timing_text(bill['measurement']['semanticTask'])}",
         f"- Provider work: {_timing_text(bill['measurement']['provider'])}",
         f"- Parallel inspection window: {_timing_text(parallel['inspectionWindow'])}",
         f"- Parallel task work: {_timing_text(parallel['summedTaskWork'])}",

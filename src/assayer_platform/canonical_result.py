@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator, RefResolver
 from .contract import PlatformContractError, PlatformLedger, PlatformRunResult
 from .actionable_result import extract_result_delivery_bundle
 from .platform_performance import build_platform_performance_bill
-from .registry import _schema_root
+from .registry import schema_store
 from .evidence_graph import validate_candidate_evidence_graph_projection
 
 
@@ -147,12 +147,7 @@ def canonical_ledger_bytes(ledger: PlatformLedger) -> bytes:
 
 
 def _validator() -> Draft202012Validator:
-    root = _schema_root()
-    schemas: dict[str, Any] = {}
-    for path in root.glob("*.schema.json"):
-        schema = json.loads(path.read_text(encoding="utf-8"))
-        schemas[path.name] = schema
-        schemas[schema["$id"]] = schema
+    schemas = schema_store()
     schema = schemas["canonical-result.schema.json"]
     return Draft202012Validator(
         schema,
@@ -187,19 +182,34 @@ def _failure_owner(code: str) -> str:
     return "unattributed"
 
 
-def _canonical_evidence_graph(packet: Any) -> dict[str, Any] | None:
+def _canonical_evidence_graph(
+    packet: Any, *, decision_committed: bool = False,
+) -> dict[str, Any] | None:
     """Project an optional plugin graph into the portable result shape."""
     payload = packet.evidence[0].payload if getattr(packet, "evidence", ()) else None
     graph = payload.get("candidateGraph") if isinstance(payload, Mapping) else None
     if not isinstance(graph, Mapping):
         return None
     validate_candidate_evidence_graph_projection(graph)
+    candidate_findings = payload.get("candidateFindings", ()) if isinstance(payload, Mapping) else ()
+    candidate_ids = [
+        str(item.get("candidate_id"))
+        for item in candidate_findings
+        if isinstance(item, Mapping) and item.get("candidate_id")
+    ]
+    # The scanner graph is immutable evidence.  Once the Host has committed
+    # the WorkItem's DomainResult, candidate coverage is resolved at the
+    # semantic boundary; otherwise the terminal report can claim both that a
+    # finding was confirmed/suppressed and that the same candidate is pending.
+    candidate_count = len(candidate_ids) or int(graph["candidateCount"])
+    covered_count = candidate_count if decision_committed else int(graph["coveredCandidateCount"])
+    pending_ids = [] if decision_committed else [str(item) for item in graph["pendingCandidateIds"]]
     return {
         "workItemId": packet.work_item.work_item_id,
-        "candidateCount": int(graph["candidateCount"]),
-        "coveredCandidateCount": int(graph["coveredCandidateCount"]),
-        "pendingCandidateIds": [str(item) for item in graph["pendingCandidateIds"]],
-        "coverageComplete": bool(graph["coverageComplete"]),
+        "candidateCount": candidate_count,
+        "coveredCandidateCount": covered_count,
+        "pendingCandidateIds": pending_ids,
+        "coverageComplete": not pending_ids,
         "rootCauseGroups": [
             {
                 "groupId": str(group["groupId"]),
@@ -331,7 +341,7 @@ def build_canonical_result(
             "receiptId": receipt.commit_id,
         })
         packet = packet_by_id[decision.work_item_id]
-        graph = _canonical_evidence_graph(packet)
+        graph = _canonical_evidence_graph(packet, decision_committed=True)
         if graph is not None:
             evidence_graphs.append(graph)
         delivery_status, decision_remediations, decision_claims = extract_result_delivery_bundle(decision, packet)
@@ -534,6 +544,7 @@ def build_canonical_result(
         } for item in ledger.failures],
         "performance": {
             "wallClock": _timing(performance_bill["measurement"]["wallClock"]),
+            "semanticTask": _timing(performance_bill["measurement"]["semanticTask"]),
             "agentWait": _timing(performance_bill["measurement"]["agentWait"]),
             "transport": _timing(performance_bill["measurement"]["transport"]),
             "host": _timing(performance_bill["measurement"]["hostOperations"]),

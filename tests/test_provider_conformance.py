@@ -17,6 +17,7 @@ from assayer_platform import (
     load_provider_descriptor,
 )
 from assayer_platform.provider_conformance import main
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -219,11 +220,7 @@ class ProviderConformanceTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(status, 1)
         self.assertNotIn("secret.module", payload["providers"][0]["issues"][0]["message"])
-        schemas = {}
-        for path in SCHEMAS.glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
+        schemas = schema_store(SCHEMAS)
         schema = schemas["provider-conformance.schema.json"]
         Draft202012Validator(
             schema,

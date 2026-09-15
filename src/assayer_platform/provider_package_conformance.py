@@ -11,7 +11,6 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from .conformance import _schema_validator
 from .contract import PlatformContractError
 from .provider_conformance import (
     ProviderConformanceIssue,
@@ -19,6 +18,7 @@ from .provider_conformance import (
     inspect_provider_registration,
 )
 from .provider_registry import ProviderRegistration, load_provider_descriptor
+from .registry import schema_validator
 
 
 PROVIDER_RELEASE_DESCRIPTOR = "assayer-provider-release.json"
@@ -114,7 +114,7 @@ def inspect_provider_package(package_root: str | Path) -> ProviderConformanceRep
         return ProviderConformanceReport(root.name, tuple(issues))
 
     schema_errors = sorted(
-        _schema_validator("provider-release.schema.json").iter_errors(release),
+        schema_validator("provider-release.schema.json").iter_errors(release),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
     for error in schema_errors:
@@ -195,8 +195,21 @@ def inspect_provider_package(package_root: str | Path) -> ProviderConformanceRep
                 "The declared provider registration module is absent from runtimeSource.",
                 "Package the module named by the provider registration entry point.",
             ))
+        fixture_runtime_spec = release.get("fixtureRuntime")
+        if isinstance(fixture_runtime_spec, str):
+            fixture_module = fixture_runtime_spec.partition(":")[0]
+            fixture_module_path = runtime_root.joinpath(*fixture_module.split("."))
+            if (
+                not fixture_module_path.with_suffix(".py").is_file()
+                and not (fixture_module_path / "__init__.py").is_file()
+            ):
+                issues.append(_issue(
+                    "PROVIDER_FIXTURE_RUNTIME_SOURCE_MISSING",
+                    "The declared fixture runtime module is absent from runtimeSource.",
+                    "Package the fixture runtime factory inside the provider wheel source.",
+                ))
 
-    fixture_validator = _schema_validator("provider-fixture.schema.json")
+    fixture_validator = schema_validator("provider-fixture.schema.json")
     fixture_ids: set[str] = set()
     fixture_statuses: set[str] = set()
     successful_capabilities: set[str] = set()

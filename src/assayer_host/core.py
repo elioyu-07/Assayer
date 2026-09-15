@@ -12,6 +12,7 @@ from typing import Callable
 from urllib.parse import urlparse
 
 from jsonschema import Draft202012Validator, RefResolver
+from assayer_platform.registry import schema_store
 
 from .auth import CredentialVault, LoginAdapter, LoginCoordinator, UnavailableLoginAdapter
 from .browser_session import BrowserSessionFailure
@@ -51,11 +52,7 @@ class HostCore:
                  scan_id_factory: Callable[[], str] | None = None,
                  entrypoint_adapter: EntrypointAdapter | None = None):
         root = Path(schema_root).resolve() if schema_root else default_schema_root()
-        schemas = {}
-        for path in root.rglob("*.schema.json"):
-            data = json.loads(path.read_text())
-            schemas[data["$id"]] = data
-            schemas[path.name] = data
+        schemas = schema_store(root)
         envelope = schemas["envelope.schema.json"]
         self._envelope_validator = Draft202012Validator(envelope, resolver=RefResolver(envelope["$id"], envelope, store=schemas))
         contracts = schemas["tool-contracts.schema.json"]

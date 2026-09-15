@@ -43,7 +43,6 @@
     },
     "manifest": { "$ref": "#/$defs/relativePath" },
     "scopeSchema": { "$ref": "#/$defs/relativePath" },
-    "reviewPayloadSchema": { "$ref": "#/$defs/relativePath" },
     "runtimeSource": { "$ref": "#/$defs/relativePath" },
     "semanticReview": { "$ref": "#/$defs/relativePath" },
     "releaseAcceptance": {

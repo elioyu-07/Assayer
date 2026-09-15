@@ -70,7 +70,6 @@
     "decisions": { "type": "array", "items": { "type": "object" } },
     "failures": { "type": "array", "items": { "type": "object" } },
     "decision_authority": { "type": "string", "minLength": 1 },
-    "review_checkpoints": { "type": "array", "items": { "type": "object" } },
     "workflow": {
       "type": "object",
       "additionalProperties": false,

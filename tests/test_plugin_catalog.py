@@ -88,27 +88,19 @@ class PluginCatalogParseTests(unittest.TestCase):
             resolve_version(catalog, "test-minimal", "9.9.9")
         self.assertEqual(ctx.exception.code, "PLUGIN_VERSION_UNAVAILABLE")
 
-    def test_rejects_wrong_schema_version(self):
-        payload = json.loads(_catalog())
-        payload["schemaVersion"] = "0.0.1"
-        with self.assertRaises(PlatformContractError):
-            parse_catalog(json.dumps(payload))
-
-    def test_rejects_bad_sha256(self):
-        with self.assertRaises(PlatformContractError):
-            parse_catalog(_catalog({"1.2.0": _version(sha256="not-a-digest")}))
-
-    def test_rejects_non_https_url(self):
-        with self.assertRaises(PlatformContractError):
-            parse_catalog(_catalog({"1.2.0": _version(wheelUrl="ftp://example.com/x.whl")}))
-
-    def test_rejects_empty_versions(self):
-        with self.assertRaises(PlatformContractError):
-            parse_catalog(_catalog(versions={}))
-
-    def test_rejects_version_key_field_mismatch(self):
-        with self.assertRaises(PlatformContractError):
-            parse_catalog(_catalog({"1.2.0": _version(version="1.3.0")}))
+    def test_rejects_invalid_catalog_contracts(self):
+        wrong_schema = json.loads(_catalog())
+        wrong_schema["schemaVersion"] = "0.0.1"
+        cases = {
+            "schema version": json.dumps(wrong_schema),
+            "checksum": _catalog({"1.2.0": _version(sha256="not-a-digest")}),
+            "wheel URL": _catalog({"1.2.0": _version(wheelUrl="ftp://example.com/x.whl")}),
+            "empty versions": _catalog(versions={}),
+            "version identity": _catalog({"1.2.0": _version(version="1.3.0")}),
+        }
+        for name, source in cases.items():
+            with self.subTest(name=name), self.assertRaises(PlatformContractError):
+                parse_catalog(source)
 
     def test_load_catalog_from_path(self):
         import tempfile

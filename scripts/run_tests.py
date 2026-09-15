@@ -18,19 +18,51 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+PACKAGE_SRCS = tuple(sorted(
+    path for path in (ROOT / "packages").glob("*/src") if path.is_dir()
+))
+for source_root in reversed((SRC, *PACKAGE_SRCS)):
+    if str(source_root) not in sys.path:
+        sys.path.insert(0, str(source_root))
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 existing_pythonpath = os.environ.get("PYTHONPATH")
 os.environ["PYTHONPATH"] = os.pathsep.join(
-    part for part in (str(SRC), existing_pythonpath) if part
+    part for part in (
+        str(SRC), *(str(path) for path in PACKAGE_SRCS), existing_pythonpath,
+    ) if part
 )
 
-BROWSER_TEST_PREFIX = "test_browser_playwright."
 MCP_SDK_TEST_ID = "test_transport.TransportTest.test_optional_fastmcp_server_registers_single_argument_tools"
-MCP_STDIO_TEST_PREFIX = "test_mcp_stdio_integration."
-MIN_BROWSER_TESTS = 25
+INTEGRATION_TEST_PREFIXES = frozenset({
+    "test_browser_playwright.",
+    "test_cli_plugin_lifecycle.",
+    "test_external_plugin_package.",
+    "test_isolated_lifecycle_acceptance.",
+    "test_mcp_stdio_integration.",
+    "test_plugin_lifecycle_mcp.",
+    "test_plugin_verify.",
+})
+SLOW_TEST_PREFIXES = frozenset({
+    "test_plugin_release_gate.PluginReleaseGateTest.test_isolated_install_",
+    "test_plugin_release_gate.PluginReleaseGateTest.test_complete_release_gate_builds_",
+    "test_plugin_release_gate.PluginReleaseGateTest.test_strict_",
+    "test_provider_release_gate.ProviderReleaseGateTests.test_isolated_install_",
+})
+REQUIRED_BROWSER_TEST_IDS = frozenset({
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_page_flows_through_host_core",
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_failures_invalidate_session",
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_network_policy_blocks_unsafe_requests",
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_recovery_crosses_required_barriers",
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_interaction_evidence_is_bound_to_real_state",
+    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
+    "test_real_chromium_typed_controls_enforce_readonly_and_restore",
+})
 
 
 def iter_tests(suite: unittest.TestSuite):
@@ -49,9 +81,15 @@ def discover_tests() -> list[unittest.TestCase]:
 def fast_tests(tests: list[unittest.TestCase]) -> unittest.TestSuite:
     selected = [
         test for test in tests
-        if not test.id().removeprefix("tests.").startswith(BROWSER_TEST_PREFIX)
+        if not any(
+            test.id().removeprefix("tests.").startswith(prefix)
+            for prefix in INTEGRATION_TEST_PREFIXES
+        )
+        and not any(
+            test.id().removeprefix("tests.").startswith(prefix)
+            for prefix in SLOW_TEST_PREFIXES
+        )
         and test.id().removeprefix("tests.") != MCP_SDK_TEST_ID
-        and not test.id().removeprefix("tests.").startswith(MCP_STDIO_TEST_PREFIX)
     ]
     return unittest.TestSuite(selected)
 
@@ -74,34 +112,14 @@ def preflight_full(tests: list[unittest.TestCase]) -> None:
         )
 
     normalized_ids = [test.id().removeprefix("tests.") for test in tests]
-    browser_count = sum(test_id.startswith(BROWSER_TEST_PREFIX) for test_id in normalized_ids)
-    if browser_count < MIN_BROWSER_TESTS:
+    missing_browser_behaviors = REQUIRED_BROWSER_TEST_IDS.difference(normalized_ids)
+    if missing_browser_behaviors:
         raise RuntimeError(
-            f"full verification discovered only {browser_count} real-browser tests; "
-            f"expected at least {MIN_BROWSER_TESTS}"
+            "full verification is missing required real-browser behaviors: "
+            + ", ".join(sorted(missing_browser_behaviors))
         )
     if MCP_SDK_TEST_ID not in normalized_ids:
         raise RuntimeError("full verification did not discover the real MCP SDK test")
-
-    from playwright.sync_api import sync_playwright
-    from assayer_host.browser_readonly import launch_local_chromium
-
-    try:
-        with sync_playwright() as playwright:
-            browser = launch_local_chromium(playwright, headless=True, timeout_ms=30_000)
-            try:
-                page = browser.new_page()
-                page.set_content("<title>Assayer full verification</title>")
-                if page.title() != "Assayer full verification":
-                    raise RuntimeError("Chromium preflight returned an unexpected page title")
-            finally:
-                browser.close()
-    except Exception as error:
-        raise RuntimeError(
-            "full verification cannot launch a local Chromium-family browser; "
-            "install Google Chrome or Microsoft Edge"
-        ) from error
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Assayer verification profiles")

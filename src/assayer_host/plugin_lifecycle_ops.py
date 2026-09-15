@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import tempfile
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote, unquote, urlparse
 
 from assayer_platform import PlatformContractError, PlatformRunner, discover_plugin_registry
 from assayer_platform.conformance import RELEASE_DESCRIPTOR
@@ -29,9 +31,11 @@ from assayer_platform.plugin_distribution import materialize_wheel
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.plugin_lifecycle import (
     PluginLifecycleManager,
-    package_checksum,
     read_package_descriptor,
 )
+from assayer_platform.plugin_source import source_tree_checksum
+from assayer_platform.plugin_verify import verify_plugin_source
+from assayer_platform.simple_plugin_compiler import compile_simple_plugin
 
 from .plugin_intent import IntentStep
 
@@ -41,14 +45,130 @@ from .plugin_intent import IntentStep
 # and by-name install read from it. Override with ``--index``.
 DEFAULT_CATALOG_URL = "https://raw.githubusercontent.com/elioyu-07/assayer-registry/main/plugins.json"
 CATALOG_READ_TIMEOUT_SECONDS = 3
+MUTATING_CATALOG_TIMEOUT_SECONDS = 10
 PLUGIN_DOWNLOAD_TIMEOUT_SECONDS = 30
 
 _ALLOWED_OPERATIONS = frozenset({"install", "upgrade", "downgrade", "rollback", "uninstall"})
+_GITHUB_RELEASE_PATH = re.compile(
+    r"^/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/]+)$"
+)
+_GITHUB_RAW_PATH = re.compile(r"^/([^/]+)/([^/]+)/([^/]+)/(.+)$")
+
+
+def _download_github_release_asset(url: str, *, timeout_seconds: int) -> bytes:
+    """Use GitHub's API when the browser release endpoint is unreachable.
+
+    Some managed networks allow ``api.github.com`` and the signed asset CDN
+    while timing out ``github.com/releases/download``. The catalog remains the
+    authority for the expected digest; this fallback only resolves the same
+    public release asset through GitHub's supported API surface.
+    """
+    parsed = urlparse(url)
+    match = _GITHUB_RELEASE_PATH.fullmatch(parsed.path)
+    if parsed.scheme != "https" or parsed.netloc != "github.com" or match is None:
+        raise ValueError("not a GitHub release asset URL")
+    owner, repository, tag, asset_name = (unquote(part) for part in match.groups())
+    api_url = (
+        "https://api.github.com/repos/"
+        f"{quote(owner, safe='')}/{quote(repository, safe='')}/releases/tags/"
+        f"{quote(tag, safe='')}"
+    )
+    metadata_request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "assayer-plugin-lifecycle",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(metadata_request, timeout=timeout_seconds) as response:
+        release = json.loads(response.read().decode("utf-8"))
+    assets = release.get("assets", []) if isinstance(release, dict) else []
+    asset = next(
+        (
+            item for item in assets
+            if isinstance(item, dict)
+            and item.get("name") == asset_name
+            and isinstance(item.get("url"), str)
+        ),
+        None,
+    )
+    if asset is None:
+        raise OSError("the release metadata does not contain the requested asset")
+    asset_request = urllib.request.Request(
+        asset["url"],
+        headers={
+            "Accept": "application/octet-stream",
+            "User-Agent": "assayer-plugin-lifecycle",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(asset_request, timeout=timeout_seconds) as response:
+        return response.read()
+
+
+def _download_github_raw_file(url: str, *, timeout_seconds: int) -> bytes:
+    """Resolve a raw.githubusercontent file through the GitHub Contents API."""
+    parsed = urlparse(url)
+    match = _GITHUB_RAW_PATH.fullmatch(parsed.path)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != "raw.githubusercontent.com"
+        or match is None
+    ):
+        raise ValueError("not a GitHub raw content URL")
+    owner, repository, reference, content_path = (
+        unquote(part) for part in match.groups()
+    )
+    api_url = (
+        "https://api.github.com/repos/"
+        f"{quote(owner, safe='')}/{quote(repository, safe='')}/contents/"
+        f"{quote(content_path, safe='/')}?ref={quote(reference, safe='')}"
+    )
+    request = urllib.request.Request(
+        api_url,
+        headers={
+            "Accept": "application/vnd.github.raw+json",
+            "User-Agent": "assayer-plugin-lifecycle",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        return response.read()
 
 
 def download_bytes(
     url: str, *, timeout_seconds: int = PLUGIN_DOWNLOAD_TIMEOUT_SECONDS,
 ) -> bytes:
+    parsed = urlparse(url)
+    github_release = (
+        parsed.scheme == "https"
+        and parsed.netloc == "github.com"
+        and _GITHUB_RELEASE_PATH.fullmatch(parsed.path) is not None
+    )
+    if github_release:
+        try:
+            return _download_github_release_asset(
+                url, timeout_seconds=timeout_seconds,
+            )
+        except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
+            # API rate limiting or a transient metadata failure must not make
+            # the normal public release URL unusable.
+            github_release = False
+    github_raw = (
+        parsed.scheme == "https"
+        and parsed.netloc == "raw.githubusercontent.com"
+        and _GITHUB_RAW_PATH.fullmatch(parsed.path) is not None
+    )
+    if github_raw:
+        try:
+            return _download_github_raw_file(
+                url, timeout_seconds=timeout_seconds,
+            )
+        except (OSError, ValueError):
+            # Keep the canonical raw URL as a fallback if the API is rate
+            # limited or temporarily unavailable.
+            github_raw = False
     try:
         with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
             return response.read()
@@ -59,12 +179,14 @@ def download_bytes(
         ) from error
 
 
-def _read_catalog_text(index: str) -> str:
+def _read_catalog_text(
+    index: str, *, timeout_seconds: int = CATALOG_READ_TIMEOUT_SECONDS,
+) -> str:
     """Read the raw catalog source text from a URL or a filesystem path."""
     if index.startswith(("http://", "https://")):
         try:
             return download_bytes(
-                index, timeout_seconds=CATALOG_READ_TIMEOUT_SECONDS,
+                index, timeout_seconds=timeout_seconds,
             ).decode("utf-8")
         except UnicodeError as error:
             raise PlatformContractError(
@@ -80,8 +202,10 @@ def _read_catalog_text(index: str) -> str:
         ) from error
 
 
-def load_catalog_source(index: str) -> PluginCatalog:
-    return parse_catalog(_read_catalog_text(index))
+def load_catalog_source(
+    index: str, *, timeout_seconds: int = CATALOG_READ_TIMEOUT_SECONDS,
+) -> PluginCatalog:
+    return parse_catalog(_read_catalog_text(index, timeout_seconds=timeout_seconds))
 
 
 def catalog_index_digest(index: str) -> str:
@@ -91,7 +215,9 @@ def catalog_index_digest(index: str) -> str:
     plan was shown, closing the plan/execute TOCTOU window for by-name installs
     and upgrades.
     """
-    return hashlib.sha256(_read_catalog_text(index).encode("utf-8")).hexdigest()
+    return hashlib.sha256(_read_catalog_text(
+        index, timeout_seconds=MUTATING_CATALOG_TIMEOUT_SECONDS,
+    ).encode("utf-8")).hexdigest()
 
 
 def lifecycle_manager(store_root: str, latest_available=None) -> PluginLifecycleManager:
@@ -126,16 +252,113 @@ def verify_catalog_identity(package_root: str | Path, plugin_id: str, version: s
 
 def add_from_catalog(plugin: str, *, version: str | None, index: str, store_root: str, operation: str = "install") -> dict:
     """Download, verify, materialize, and install (or upgrade) a plugin by name."""
-    catalog = load_catalog_source(index)
+    catalog = load_catalog_source(
+        index, timeout_seconds=MUTATING_CATALOG_TIMEOUT_SECONDS,
+    )
     resolved = resolve_version(catalog, plugin, version)
-    data = download_bytes(resolved.wheel_url)
+    return apply_resolved_catalog_change(
+        operation=operation,
+        plugin_id=resolved.plugin_id,
+        version=resolved.version,
+        source=resolved.wheel_url,
+        checksum=resolved.sha256,
+        store_root=store_root,
+    )
+
+
+def apply_resolved_catalog_change(
+    *, operation: str, plugin_id: str, version: str, source: str,
+    checksum: str, store_root: str,
+) -> dict:
+    """Install the exact catalog artifact already bound into a verified plan."""
+    if operation not in {"install", "upgrade"}:
+        raise PlatformContractError(
+            "INVALID_OPERATION", f"Catalog artifact cannot perform {operation}.",
+        )
+    data = download_bytes(source)
     manager = lifecycle_manager(store_root)
     with tempfile.TemporaryDirectory(prefix="assayer-add-") as tmp:
-        root = materialize_wheel(data, resolved.sha256, Path(tmp))
-        verify_catalog_identity(root, resolved.plugin_id, resolved.version)
+        root = materialize_wheel(data, checksum, Path(tmp))
+        verify_catalog_identity(root, plugin_id, version)
         if operation == "upgrade":
-            return manager.upgrade(root)
-        return manager.install(root)
+            return manager.upgrade(root, wheel_sha256=checksum.lower())
+        return manager.install(root, wheel_sha256=checksum.lower())
+
+
+def apply_local_source_change(
+    *, operation: str, source: str | Path, store_root: str,
+) -> dict:
+    """Build, verify, and install one exact wheel from a local authoring tree."""
+    if operation not in {"install", "upgrade"}:
+        raise PlatformContractError(
+            "INVALID_OPERATION", f"Local source cannot perform {operation}.",
+        )
+    source_root = Path(source).expanduser().resolve()
+    with tempfile.TemporaryDirectory(prefix="assayer-local-plugin-") as tmp:
+        temporary = Path(tmp)
+        verification = verify_plugin_source(
+            source_root, output_dir=temporary / "verified",
+        )
+        if verification.get("status") != "passed":
+            error = verification.get("error", {})
+            code = str(error.get("code", "PLUGIN_VERIFY_FAILED"))
+            message = str(error.get(
+                "message", "The local plugin release did not pass verification.",
+            ))
+            # A rejected plugin contract remains visible as dirty for diagnosis,
+            # but no source tree is ever copied into the store. Environment and
+            # reachability failures do not create a misleading plugin record.
+            if code not in {
+                "PLUGIN_SOURCE_UNREACHABLE",
+                "PLUGIN_WHEEL_BUILDER_UNAVAILABLE",
+                "PLUGIN_WHEEL_BUILD_TIMEOUT",
+            }:
+                try:
+                    descriptor = json.loads(
+                        (source_root / RELEASE_DESCRIPTOR).read_text(encoding="utf-8"),
+                    )
+                except (OSError, UnicodeError, json.JSONDecodeError, PlatformContractError):
+                    descriptor = None
+                if isinstance(descriptor, dict):
+                    plugin_id = descriptor.get("pluginId")
+                    plugin_version = descriptor.get("pluginVersion")
+                    if isinstance(plugin_id, str) and isinstance(plugin_version, str):
+                        try:
+                            return lifecycle_manager(store_root).quarantine(
+                                plugin_id, plugin_version, code, operation=operation,
+                            )
+                        except PlatformContractError:
+                            descriptor = None
+            raise PlatformContractError(code, message)
+        wheel = Path(str(verification["wheel"]))
+        data = wheel.read_bytes()
+        checksum = str(verification["sha256"])
+        materialized = materialize_wheel(
+            data, checksum, temporary / "materialized",
+        )
+        verify_catalog_identity(
+            materialized,
+            str(verification["pluginId"]),
+            str(verification["pluginVersion"]),
+        )
+        manager = lifecycle_manager(store_root)
+        if operation == "upgrade":
+            return manager.upgrade(materialized, wheel_sha256=checksum)
+        return manager.install(materialized, wheel_sha256=checksum)
+
+
+def read_local_source_descriptor(package_root: str | Path) -> dict:
+    """Validate and resolve identity for Advanced or ordinary local sources."""
+    root = Path(package_root).expanduser().resolve()
+    if (root / RELEASE_DESCRIPTOR).is_file():
+        return read_package_descriptor(root)
+    if (root / "plugin.yaml").is_file():
+        with tempfile.TemporaryDirectory(prefix="assayer-local-plan-") as tmp:
+            generated = Path(tmp) / "generated"
+            compile_simple_plugin(root, generated)
+            return read_package_descriptor(generated)
+    # Preserve the established precise missing/invalid descriptor failures.
+    return read_package_descriptor(root)
 
 
 def store_registry(store_root: str):
@@ -201,12 +424,12 @@ def plan_plugin_change(
 
     if package is not None:
         package_path = Path(package).expanduser().resolve()
-        descriptor = read_package_descriptor(package_path)
+        descriptor = read_local_source_descriptor(package_path)
         plugin_id = descriptor["pluginId"]
         target_version = descriptor["pluginVersion"]
         source = str(package_path)
         try:
-            package_digest = package_checksum(package_path)
+            package_digest = source_tree_checksum(package_path)
         except (OSError, PlatformContractError) as error:
             raise PlatformContractError(
                 "PLUGIN_PACKAGE_INVALID",
@@ -231,7 +454,9 @@ def plan_plugin_change(
 
     def resolve_catalog():
         nonlocal target_version, source, checksum, catalog_digest
-        text = _read_catalog_text(catalog_index)
+        text = _read_catalog_text(
+            catalog_index, timeout_seconds=MUTATING_CATALOG_TIMEOUT_SECONDS,
+        )
         resolved = resolve_version(parse_catalog(text), plugin_id, version)
         target_version = resolved.version
         source = resolved.wheel_url
@@ -394,7 +619,7 @@ def verify_plan_binding(plan: dict, store_root: str, catalog_index: str) -> str 
         source = plan.get("source")
         if source:
             try:
-                current_digest = package_checksum(source)
+                current_digest = source_tree_checksum(source)
             except (OSError, PlatformContractError):
                 return "PLAN_STALE"
             if current_digest != plan["packageDigest"]:
@@ -492,11 +717,13 @@ def load_scope(scope_json: str | None, scope_file: str | None):
         except (OSError, UnicodeError, json.JSONDecodeError):
             raise PlatformContractError(
                 "INVALID_SCOPE", "Plugin scope file must contain valid JSON",
-            )
+            ) from None
     try:
         return json.loads(scope_json)
-    except json.JSONDecodeError:
-        raise PlatformContractError("INVALID_SCOPE", "Plugin scope must be valid JSON")
+    except (TypeError, json.JSONDecodeError):
+        raise PlatformContractError(
+            "INVALID_SCOPE", "Plugin scope must be valid JSON",
+        ) from None
 
 
 def execute_intent_step(
@@ -543,14 +770,18 @@ def execute_intent_step(
     try:
         if operation == "install":
             if step.package is not None:
-                result = manager.install(step.package)
+                result = apply_local_source_change(
+                    operation="install", source=step.package, store_root=store_root,
+                )
             else:
                 result = add_from_catalog(
                     step.plugin_id, version=step.version, index=catalog_index, store_root=store_root,
                 )
         elif operation == "upgrade":
             if step.package is not None:
-                result = manager.upgrade(step.package)
+                result = apply_local_source_change(
+                    operation="upgrade", source=step.package, store_root=store_root,
+                )
             else:
                 result = add_from_catalog(
                     step.plugin_id, version=step.version, index=catalog_index,
@@ -571,6 +802,8 @@ def execute_intent_step(
 __all__ = [
     "DEFAULT_CATALOG_URL",
     "add_from_catalog",
+    "apply_local_source_change",
+    "apply_resolved_catalog_change",
     "annotate_upgradable",
     "catalog_index_digest",
     "download_bytes",

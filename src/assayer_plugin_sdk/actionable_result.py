@@ -163,6 +163,7 @@ def build_actionable_result(
     confirmed_status: str,
     actionable_statuses: frozenset[str] | set[str],
     absence_pattern: Any = None,
+    finding_refs_by_dimension: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """Project confirmed decisions into the remediation + claim envelope.
 
@@ -182,11 +183,22 @@ def build_actionable_result(
         dimension = str(finding.get("dimension") or "")
         if checklist_status.get(dimension) not in actionable_statuses:
             continue
+        finding_id = str(finding.get("finding_id") or "")
+        dimensions = [dimension]
+        for linked_dimension, raw_refs in (finding_refs_by_dimension or {}).items():
+            if (
+                checklist_status.get(linked_dimension) not in actionable_statuses
+                or not isinstance(raw_refs, (tuple, list))
+                or finding_id not in raw_refs
+                or linked_dimension in dimensions
+            ):
+                continue
+            dimensions.append(linked_dimension)
         affected = finding.get("affected_elements")
         if not isinstance(affected, (tuple, list)) or not affected:
             affected = [finding.get("object_id")]
         affected = [str(item).strip() for item in affected if str(item or "").strip()]
-        owner = finding.get("resolution_owner")
+        owner = finding.get("resolution_owner") or finding.get("owner")
         owner_value = (
             {"status": "assigned", "identity": str(owner).strip()}
             if isinstance(owner, str) and owner.strip()
@@ -200,7 +212,6 @@ def build_actionable_result(
         if not next_action:
             next_action = f"Assign an accountable owner and implement this recommendation: {recommendation}"
         gap = str(finding.get("gap") or "").strip()
-        finding_id = str(finding.get("finding_id") or "")
         absence = bool(
             absence_pattern.search(gap) if absence_pattern is not None else False
         )
@@ -215,7 +226,9 @@ def build_actionable_result(
                 "startLine": max(1, int(finding.get("line") or 1)),
                 "endLine": end_line,
             },
-            "observed": [str(finding.get("evidence") or gap)],
+            "observed": [str(
+                finding.get("observed_fact") or finding.get("evidence") or gap
+            )],
             "conclusion": gap,
         }
         if absence:
@@ -224,13 +237,18 @@ def build_actionable_result(
                 "A positive, directly observable specification statement in the declared scope",
             ]
         evidence_claims.append(claim)
+        remediation_evidence_refs = list(dict.fromkeys(
+            evidence_ref
+            for linked_dimension in dimensions
+            for evidence_ref in evidence_by_dimension.get(linked_dimension, ())
+        ))
         remediations.append({
             "remediationId": finding_id,
             "title": gap,
             "severity": str(finding.get("severity") or ""),
-            "dimensions": [dimension],
+            "dimensions": dimensions,
             "affectedElements": affected,
-            "evidenceRefs": list(evidence_by_dimension.get(dimension, [])),
+            "evidenceRefs": remediation_evidence_refs,
             "problem": gap,
             "impact": str(finding.get("impact") or "").strip(),
             "recommendation": recommendation,
@@ -239,7 +257,7 @@ def build_actionable_result(
             "owner": owner_value,
             "claimRefs": [claim_id],
         })
-        covered.add(dimension)
+        covered.update(dimensions)
     actionable_dimensions = {
         check_id for check_id, status in checklist_status.items()
         if status in actionable_statuses

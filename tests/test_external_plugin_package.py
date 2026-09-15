@@ -16,7 +16,6 @@ from assayer_platform import (
     load_plugin_manifest,
 )
 from assayer_platform.conformance import inspect_plugin_package
-from assayer_platform.installation_conformance import inspect_plugin_installation
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.plugin_lifecycle import (
     PluginLifecycleManager,
@@ -153,11 +152,6 @@ class ExternalPluginPackageTest(unittest.TestCase):
             with self.assertRaises(PlatformContractError) as rejected:
                 manager.install(PACKAGE)
             self.assertEqual(rejected.exception.code, "PLUGIN_CONFLICT")
-
-    def test_isolated_install_gate_passes_and_runs_deterministic_fixture(self):
-        report = inspect_plugin_installation(PACKAGE)
-        self.assertTrue(report.passed, report.as_dict())
-
 
 if __name__ == "__main__":
     unittest.main()

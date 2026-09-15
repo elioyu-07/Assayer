@@ -2,260 +2,224 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.3.0 |
-| Date | 2026-09-08 |
-| Status | Adopted; public-surface import gate 1.3.0 implemented (see §5) |
-| Authority | Derived from Platform Constitution v1 and Plugin Contract v1 |
-| Scope | Module ownership, dependency direction, compatibility bridges, and governance gates |
+| Document version | 1.4.0 |
+| Date | 2026-09-13 |
+| Status | Simple author boundary frozen; implementation migration pending |
+| Authority | Derived from Platform Constitution v1.1 and Audit Plugin Contract v1.1 |
+| Scope | Ownership, dependency direction, Simple SDK, Advanced SPI, and migration gates |
 
 ## 1. Decision
 
-Assayer uses one stable platform with independently registered domain plugins.
-The platform owns execution, evidence integrity, lifecycle, persistence,
-recovery, validation, observability, and portable result delivery. A plugin owns
-domain semantics and contributes checks through the public plugin contract.
+Assayer has one domain-neutral platform and independently packaged executable
+domain policies. The platform and capability providers close every source,
+identity, Evidence, lifecycle, incremental review, persistence, result, and
+release concern. An ordinary plugin contributes only domain declarations,
+deterministic observations, semantic guidance, invariants, and examples.
 
-This contract governs source dependencies and runtime authority. It does not
-require separate processes or repositories.
+The public authoring boundary is `assayer_plugin_sdk.simple`. Existing
+low-level contracts move behind `assayer_plugin_sdk.advanced` and a versioned
+migration adapter. Package independence alone does not make a low-level SPI a
+Simple SDK.
 
 ## 2. Terms
 
 | Term | Meaning |
 |---|---|
-| Platform kernel | Domain-neutral Run, WorkItem, Evidence, Decision, Result, lifecycle, persistence, and conformance implementation |
-| Shared capability | A controlled source or transformation provider reusable by more than one plugin |
-| Plugin | An independently inspectable package that contributes domain Checks |
-| Host adapter | A product/runtime adapter that binds a provider to a browser, file system, repository, API, or other source |
-| Agent adapter | Skill and model orchestration that requests evidence and submits semantic proposals |
-| Compatibility bridge | Temporary code that translates an older domain-shaped API into the generic platform contract |
+| Policy Pack | A zero-Python executable domain policy |
+| Simple plugin | Domain declarations plus optional deterministic scanning over frozen typed inputs |
+| Advanced plugin | A package using low-level SPI for an exceptional provider, effect, workflow, or result need |
+| SDK compiler | Deterministic compiler from author source to strict internal platform contracts |
+| Source provider | Authorized source acquisition and immutable snapshot boundary |
+| ReviewBatch | One bounded Host-planned semantic unit |
+| CoverageLedger | Host-owned durable coverage across accepted ReviewBatches |
+| Migration adapter | Versioned bridge from a supported Advanced SPI contract to current platform internals |
 
-## 3. Ownership Matrix
+## 3. Ownership matrix
 
-| Concern | Platform kernel | Shared capability | Plugin | Host/runtime adapter | Agent/Skill |
-|---|---:|---:|---:|---:|---:|
-| Run identity and lifecycle | Owns | Uses | Observes | Binds | Reports |
-| WorkItem identity and coverage | Owns validation | Supplies source identity | Defines discovery meaning | Collects source facts | Selects semantic focus |
-| Source access | Authorizes | Implements bounded access | Declares requirements | Supplies runtime binding | Requests through Host |
-| Evidence identity and persistence | Owns | Produces bounded facts | Interprets facts | Collects and sanitizes | References only |
-| Domain rules and dimensions | Must not own | Must not own | Owns | Must not own | Applies through semantic judgment |
-| Semantic decision | Validates shape and proof | Must not decide | Defines allowed meaning | Must not decide | Proposes |
-| Commit and canonical result | Owns | Must not write | Supplies optional domain extension | Supplies compatibility projection | Reads |
-| Recovery and retry | Owns generic barriers | Declares failure policy | Declares safe execution profile | Implements source recovery | Follows required next step |
-| Logs and performance | Owns common telemetry | Reports provider timing | Reports domain labels | Reports runtime timing | May expose turn/model timing |
+| Concern | Platform/Host | Source provider | Ordinary plugin | Agent/Skill |
+|---|---:|---:|---:|---:|
+| Run, WorkItem, Candidate, Evidence, Finding, receipt identity | Owns | Supplies source identity | Does not see | Does not author |
+| Source access and freezing | Authorizes and binds | Owns | Reads typed snapshot | Requests through Host |
+| Rules, applicability, and domain meaning | Must not own | Must not own | Owns | Applies |
+| Candidate/fact/relationship recognition | Validates typed output | Supplies source facts | Owns domain logic | May interpret current batch |
+| Evidence lineage and graph | Owns | Supplies anchors | Supplies typed Support only | References task-local Support |
+| Review Schema, batching, and coverage | Owns | Does not own | Declares dimensions/invariants | Submits current batch only |
+| Decision mapping, commit, and canonical result | Owns | Must not decide | Supplies optional typed extension | Proposes domain verdicts |
+| Recovery, replay, and correction | Owns | Implements source recovery | Does not implement | Follows next step |
+| Build, compatibility, and release mechanics | Owns/compiler | Owns provider release | Supplies business source/cases | Does not own |
 
-## 4. Allowed Dependency Graph
+## 4. Dependency graph
 
-New code must follow this direction:
-
-```text
-Agent/Skill adapter ───────> public platform contracts
-Plugin ────────────────────> public platform contracts
-Plugin ────────────────────> declared shared capabilities
-Host/runtime adapter ─────> public platform contracts
-Host/runtime adapter ─────> provider implementations
-Platform kernel ───────────> platform contracts and internal kernel modules
-Report adapter ────────────> canonical result and ledger read models
-```
-
-The following dependencies are forbidden for new code:
+New ordinary code follows:
 
 ```text
-Platform kernel ─X────────> a concrete domain plugin
-Platform kernel ─X────────> browser or document implementation
-Plugin ─────────X─────────> Host SQLite tables or Host private modules
-Plugin ─────────X─────────> another plugin's implementation
-Plugin ─────────X─────────> direct model SDK, MCP transport, or CLI process
-Agent ──────────X─────────> ledger mutation or provider implementation
-Report adapter ─X─────────> mutation of a Run or Decision
+Policy Pack ─────────────────────> SDK compiler declarations
+Simple plugin ───────────────────> assayer_plugin_sdk.simple
+Agent/Skill ─────────────────────> Host product tools and resources
+Host/platform ───────────────────> generated internal contracts
+Host/platform ───────────────────> capability provider interfaces
+Capability provider ─────────────> authorized source implementation
+Report adapter ──────────────────> canonical result and ledger read models
 ```
 
-Imports of a public registration type are allowed. Imports of a concrete
-implementation are not a substitute for registration.
+Advanced code follows:
 
-## 5. Platform Public Surface
+```text
+Advanced plugin/provider ────────> assayer_plugin_sdk.advanced
+Migration adapter ───────────────> advanced contracts + platform internals
+```
 
-Plugins may depend only on the following stable surfaces:
+Forbidden dependencies include:
 
-- `assayer_platform.contract` entities and versioned enums;
-- top-level `assayer_platform.DomainResultContract` for every current
-  Agent-facing interactive Check contract;
-- plugin registration, manifest, and conformance APIs;
-- capability-provider registration and negotiated provider interfaces;
-- evidence-claim and decision validation APIs;
-- result and staged-delivery contracts;
-- `assayer_platform.plugin_sdk` EntityId validation, JSON-safe projection, and
-  deterministic plugin contract errors;
-- documented platform context and failure types.
+```text
+Simple plugin ─X─> assayer_platform, assayer_host, advanced SPI, MCP, CLI
+Simple plugin ─X─> provider request/response envelopes or concrete providers
+Simple plugin ─X─> filesystem, network, subprocess, clock, random, persistence
+Platform kernel ─X─> concrete domain semantics
+Agent ──────────X─> provider implementation or ledger mutation
+Report adapter ─X─> Run or Decision mutation
+```
 
-Plugins must not import private modules solely because they contain a useful
-helper. A helper becomes public only after it has a documented ownership,
-version, and conformance test.
+## 5. Simple public surface
 
-The concrete, enforceable form of this surface is the symbol-level whitelist
-in `assayer_platform.public_surface` (`PUBLIC_SURFACE`, versioned by
-`PUBLIC_SURFACE_VERSION`). It is converged from the reference plugin
-`ass-spec` and is checked by `assayer-plugin-surface-check`
-(`assayer_platform.surface_conformance`). A plugin may import only the
-modules and symbols listed there; widening the surface requires updating the
-whitelist and this contract together and adding a conformance fixture for the
-newly public symbol.
+The ordinary symbol surface is limited to:
 
-Public-surface version 1.3.0 adds `DomainResultContract` for the domain-only
-Agent result boundary. Plugins MUST use the `assayer_platform.plugin_sdk`
-`validate_entity_id` and `to_json_value` helpers instead of maintaining local
-copies. Unsupported output is rejected with `PluginContractError` before
-persistence or publication; it is never repaired by an Agent retry loop.
+- `policy_plugin`
+- `Document`
+- `Candidate`
+- `Fact`
+- `Relation`
+- `Support`
+- `Unknown`
+- `invariant`
 
-## 6. Plugin Responsibilities and Limits
+The symbol whitelist and import conformance gate MUST reject all other Simple
+imports. Adding a symbol requires an ownership decision, version change,
+documentation, and conformance fixture. Convenience access to an internal type
+is not sufficient justification.
 
-A plugin may:
+The Simple surface contains no `PluginRegistration`, manifest loader,
+compatibility object, execution profile, platform context, provider envelope,
+WorkItem, InvestigationPacket, EvidenceRecord, DomainResultContract,
+DecisionProposal, CommitReceipt, mapper, committer, or lifecycle hook.
 
-- define scope and Check metadata;
-- discover domain WorkItems from authorized capability facts;
-- convert bounded source facts into InvestigationPackets;
-- define semantic-review instructions and domain Findings;
-- declare execution profiles, required capabilities, and invalidation signals;
-- provide an optional namespaced `domainExtension` for the canonical result.
+## 6. Generated internal surface
 
-An interactive plugin MUST publish every Agent-facing JSON Schema and every
-schema-external semantic rejection rule in its immutable
-`DomainResultContract`. The Host returns only the current domain task's schema
-and rules before Agent work begins. A plugin validator MUST identify a violated
-semantic rule with the same stable `ruleId`; hidden runtime-only preconditions
-are contract defects and are never learned through an Agent retry loop.
+The SDK compiler creates the exact low-level declarations required by the Host.
+The Host validates and freezes them before a Run. Generated declarations may
+include manifests, scope and review Schemas, registrations, entry points,
+semantic digests, execution defaults, compatibility identities, release
+descriptors, and acceptance cases.
 
-The Agent submits only `domainResult` through `advance_plugin_run`. The Host
-resolves stable Evidence references against the current immutable packet,
-invokes the plugin validator and mapper, and persists the resulting Decision.
-Run, WorkItem, collection, checkpoint, digest, revision, and finalization
-fields are Host-owned and forbidden in the DomainResult. The old checkpoint,
-preflight, Decision, and finish operations are private migration primitives and
-are rejected at the Agent boundary with `UNSUPPORTED_PROTOCOL`.
+These objects are platform/compiler exchange data. Ordinary plugin code cannot
+import, alter, or replace them. A generated declaration that disagrees with its
+author source or another generated projection is a compiler defect and fails
+before execution.
 
-If a mutating boundary is nevertheless rejected, the terminal
-`AGENT_CORRECTION_BUDGET_EXHAUSTED` response retains the original validation
-error pointers and messages so operators can diagnose the first invalid
-payload rather than receiving only a budget-exhausted summary.
+## 7. Source-provider boundary
 
-A plugin may not:
+The provider owns acquisition, decoding, source-state detection, snapshotting,
+chunking, navigation, anchors, absence search, and source cache invalidation.
+The Host owns authorization, provider selection, Run binding, Evidence identity,
+and lineage.
 
-- write platform or Host persistence directly;
-- create or overwrite Host Evidence IDs;
-- bypass recovery, safety, or coverage gates;
-- publish a terminal status independently;
-- modify common canonical-result fields;
-- invoke a browser, file, network, or subprocess directly when a declared
-  capability provider exists;
-- place domain-specific branches in the generic kernel.
+When a provider exposes `discover_sources`, it returns SDK
+`ProviderSourceSnapshot` values; the Host turns them into WorkItems and caches
+the discovery result for that Run. A plugin may not implement a parallel source
+discovery path for a Check that declares provider-owned discovery.
 
-## 7. Capability Extension Rule
+An ordinary plugin receives only a frozen typed view. It cannot receive a path
+and reopen it. Provider capabilities and authorization scopes are inferred from
+the declared input kind and user scope. A custom provider is an Advanced SPI
+package and remains separate from domain policy.
 
-When a plugin needs a capability that the platform does not provide, the first
-choice is an independent capability provider, not a kernel change.
+## 8. Review and result boundary
 
-The provider must declare:
+Typed Candidates and Facts are projected by the Host into bounded
+ReviewBatches. The Agent returns common domain verdicts for the current batch.
+The Host validates batch membership and Support, persists the review, updates
+CoverageLedger, maps Decisions, commits receipts, and projects the canonical
+result.
 
-- identity and platform API compatibility;
-- capabilities and evidence kinds;
-- scope and authorization requirements;
-- limits and failure policy;
-- algorithm versions and conformance fixtures.
+The plugin does not know the Agent context budget, cursor, checkpoint, task or
+contract digest, review history, result pagination, or completeness state.
+Field-name filtering is not an acceptable trust boundary; only typed projection
+may determine Agent-visible data.
 
-The platform kernel may change only when the missing behavior is a lifecycle,
-integrity, security, or common result concern shared by at least two domains.
-The plugin-specific interpretation of a new fact remains in the plugin.
+The common review model is the only ordinary result language. A namespaced
+typed extension may add domain data but cannot replace or reinterpret common
+coverage, Findings, conclusion validity, or trace fields.
 
-## 8. Compatibility Rule
+## 9. Advanced SPI admission
 
-The removed Agent checkpoint/decision envelope has no compatibility adapter.
-New plugins MUST NOT publish or consume it, and the Host MUST fail fast with
-`UNSUPPORTED_PROTOCOL`. Existing private migration helpers may remain only
-inside the Host until their callers are removed; they are not an Agent or
-plugin extension point. A new compatibility bridge requires an explicit major
-contract decision and is out of scope for SDK v2.
+Advanced SPI admission requires a reviewed design showing at least one of:
 
-## 9. Result and Ledger Authority
+- a new controlled source provider;
+- an authorized write to an external system;
+- a domain lifecycle that cannot be expressed as scan plus incremental review;
+  or
+- result semantics that cannot be represented as the common review model plus
+  a typed extension.
 
-The platform ledger is authoritative. The platform derives common fields in the
-canonical result:
+The design must define permissions, failures, recovery, idempotency,
+compatibility, conformance, and migration. Performance, batching, caching,
+formatting, report generation, packaging, or a missing helper are rejected as
+admission reasons and must be solved in the platform or Simple SDK.
 
-- status and conclusion validity;
-- coverage and outcome counts;
-- Findings, review items, failures, performance, and trace;
-- artifact identity and ledger digest.
+## 10. Versioning and migration
 
-Plugins may contribute only a validated namespaced domain extension or a
-derived human-readable summary. They cannot override common fields, hide
-unverified scope, or turn an invalid Run into a valid result.
+The author declares one plugin business version. The compiler records all
+distinct internal identities and exact compatibility. A compatible platform
+implementation change cannot require author-source edits.
 
-## 10. Versioning and Migration
+Migration order is:
 
-Boundary changes follow the platform constitution:
+1. add common review IR and bounded durable ReviewBatch support;
+2. add frozen typed source snapshots and Support resolution;
+3. add the compiler and Simple public surface;
+4. migrate `minimal` with result equivalence;
+5. migrate `ass-spec` with result equivalence and mechanical-code reduction;
+6. move low-level exports to the advanced namespace; and
+7. deprecate the top-level Advanced SPI only after adapter and installed-wheel
+   acceptance are green.
 
-- changing authority, persistence meaning, safety, evidence closure, or result
-  validity requires a major contract version;
-- adding optional capabilities or metadata is a minor version change;
-- wording-only or implementation-only corrections are patch changes.
+No migration may weaken Evidence closure, recovery, replay, coverage, canonical
+result, or artifact verification.
 
-Migration order:
-
-1. Add the DomainResult contract and conformance tests;
-2. Migrate one plugin without changing domain semantic outcomes;
-3. Verify clean install, resume, replay, and terminal-result publication;
-4. Reject the legacy Agent envelope at the public transport boundary.
-
-No physical package move is allowed to remove a compatibility bridge before the
-generic path is independently verified.
-
-## 11. Governance Gates
-
-The following gates are mandatory for new platform or plugin work:
+## 11. Governance gates
 
 | Gate | Required evidence |
 |---|---|
-| Ownership | The change names its owning layer and rejected alternative layers |
-| Dependency | Import direction passes the boundary test |
-| Authority | The change does not create a second source of truth |
-| Capability | New source access is a provider with scope, limits, and failure policy |
-| Result | Common result fields are derived and validated by the platform |
-| Recovery | Retry, stale state, and unknown-result behavior are explicit |
-| Observability | Run, WorkItem, operation, and failure ownership remain inspectable |
-| Compatibility | Existing plugin and user journey behavior is preserved or versioned |
+| Author surface | Only domain source and Simple imports are maintained |
+| Ownership | Platform mechanics do not appear in plugin code |
+| Source | Supports resolve to one frozen provider snapshot |
+| Constraint | Typed model/invariant generates all equivalent projections |
+| Incrementality | Task bounds are independent of total source size |
+| Result | Common review maps to canonical result without plugin hooks |
+| Release | The exact generated wheel passes the derived lifecycle suite |
+| Migration | Old and new paths produce equivalent domain conclusions |
 
-## 12. Explicit Existing Debt
+## 12. Current implementation debt
 
-The repository does not satisfy every rule in this contract yet. The following
-couplings are recorded as migration debt, not as permitted design:
+The current implementation does not yet conform to this target boundary:
 
-- built-in plugins are imported from `assayer_platform.builtin_plugins`;
-- the Host frontend compatibility path imports frontend plugin types;
-- the Spec runtime still resolves and reads document paths directly in some
-  code paths instead of requesting a file/document capability;
-- generic and domain schemas share a physical directory;
-- browser-shaped Host persistence remains beside generic platform persistence.
+- low-level SDK types remain exposed at top level;
+- plugins construct WorkItems, packets, Evidence, graphs, and DomainResult
+  contracts;
+- source plugins may reopen paths after provider collection;
+- plugin validator, mapper, committer, summary, and acceptance hooks remain;
+- semantic input paging does not provide incremental DomainResult submission;
+- Agent projection still contains name-based filtering paths; and
+- local development installation can materialize a source repository instead
+  of the exact wheel.
 
-These paths remain operational for compatibility. They are frozen: new domain
-behavior must not increase their use, and each one requires a conformance test
-and removal or isolation condition before it can be considered resolved.
+These are migration facts, not permitted patterns for new plugins. Historical
+implementation-slice documents remain evidence of earlier contracts and do not
+override this boundary.
 
-## 13. First Enforcement Scope
+## 13. Acceptance statement
 
-The first implementation slice should enforce only the highest-risk rules:
-
-1. platform modules cannot import concrete plugin semantics;
-2. plugins cannot import `assayer_host` private modules or mutate Host stores;
-3. generic result publication does not require frontend canonical code;
-4. each schema and provider declares ownership;
-5. a non-browser plugin completes through the generic path;
-6. plugins cannot import `assayer_platform` modules or symbols outside the
-   public surface whitelist (enforced by `assayer-plugin-surface-check`).
-
-This slice does not move files, remove built-in plugins, redesign browser
-runtime behavior, or add cross-document semantic analysis.
-
-## 14. Acceptance Statement
-
-The boundary is considered governed when a new plugin can be installed through
-registration, request a declared capability, run through the generic lifecycle,
-submit semantic decisions, and publish a canonical result without importing
-frontend code, browser internals, Host persistence, or another plugin.
+The boundary is complete when a zero-Python Policy Pack and a one-file Simple
+plugin both compile, install, run incrementally over large inputs, resume,
+replay, and publish a valid canonical result without authoring or importing any
+platform lifecycle structure.

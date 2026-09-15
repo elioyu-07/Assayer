@@ -180,11 +180,12 @@ Existing codes are reused where they already match; new codes close the gaps.
 
 ## 7. CLI surface
 
-One NL entry sits above a deterministic substrate. The substrate keeps the
-existing `list`/`run` and gains the four mutations plus `info`.
+One NL entry sits above a deterministic substrate. The public product path uses
+one Host-owned `apply_plugin_change` transaction; the lower-level plan/execute
+pair remains available for advanced clients, CI, and recovery.
 
 ```text
-assayer "…"                                   # NL intent -> plan -> confirm -> execute
+assayer "…"                                   # NL intent -> Host transaction
 assayer plugins list   [--json] [--index <url|path>]   # installed + upgradable markers
 assayer plugins info   <id> [--index <url|path>]       # version, source, gate results, state
 assayer plugins run    <id> <check> <scope-file>  # file, not raw --scope-json
@@ -203,7 +204,9 @@ site-packages.
 ## 8. Exit gate (acceptance criteria)
 
 - A developer can express install/upgrade/rollback/uninstall/run as natural
-  language and get a deterministic plan printed before any mutation.
+  language and the Host applies one deterministic lifecycle transaction; the
+  plan is exposed only when confirmation is required or an advanced client
+  requests the lower-level boundary.
 - Dangerous operations always stop for confirmation; `--yes` is the only bypass.
 - A quarantined (`dirty`) plugin is visible via `info`, refuses to run, and can be
   repaired or removed without leaving half-written state.

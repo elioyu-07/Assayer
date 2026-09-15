@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from dataclasses import fields, is_dataclass
+from collections.abc import Callable
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator, RefResolver
@@ -18,15 +19,15 @@ from .contract import (
     PlatformContractError,
     ProviderCollectionResult,
     ProviderEvidenceExpectation,
-    ProviderFact,
     ProviderFailure,
     ProviderRequest,
     ProviderResponse,
+    ProviderSourceSnapshot,
     WorkItem,
     _freeze,
 )
 from .provider_registry import ProviderRegistration
-from .registry import _schema_root
+from .registry import schema_store
 
 
 _SAFE_FAILURE_MESSAGES = {
@@ -39,6 +40,43 @@ _SAFE_FAILURE_MESSAGES = {
     "source_error": "The source could not provide the requested facts.",
     "result_unknown": "The provider cannot prove whether the request completed.",
 }
+
+
+class ProviderRuntimeLease:
+    """Explicitly transfer one opaque provider runtime lifetime to the Host.
+
+    A plain runtime passed to :class:`BoundCapabilityProvider` remains owned by
+    the embedding product.  Wrapping it in this lease is the opt-in signal that
+    the bound provider must release the runtime when its Run ends.  This keeps
+    existing embeddings compatible while giving per-Run resources, such as a
+    browser Context, one deterministic owner.
+    """
+
+    def __init__(
+        self,
+        runtime: Any,
+        release: Callable[[], None] | None = None,
+    ) -> None:
+        if release is None:
+            release = getattr(runtime, "close", None)
+        if not callable(release):
+            raise TypeError("A provider runtime lease requires a release callback")
+        self.runtime = runtime
+        self._release = release
+        self._lock = threading.Lock()
+        self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        with self._lock:
+            return self._closed
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._release()
 
 
 def _plain(value: Any) -> Any:
@@ -128,38 +166,55 @@ class BoundCapabilityProvider:
         self.negotiation = negotiation
         self.context = negotiation.context(run_id)
         self.scope = _freeze(dict(scope))
-        self.provider = registration.create_provider(runtime)
-        if getattr(self.provider, "descriptor", None) != descriptor:
-            raise PlatformContractError(
-                "PROVIDER_IDENTITY_MISMATCH",
-                "Provider factory returned an implementation with different registered metadata",
+        self._runtime_lease = runtime if isinstance(runtime, ProviderRuntimeLease) else None
+        provider_runtime = self._runtime_lease.runtime if self._runtime_lease is not None else runtime
+        provider = None
+        try:
+            provider = registration.create_provider(provider_runtime)
+            if getattr(provider, "descriptor", None) != descriptor:
+                raise PlatformContractError(
+                    "PROVIDER_IDENTITY_MISMATCH",
+                    "Provider factory returned an implementation with different registered metadata",
+                )
+            if not callable(getattr(provider, "collect", None)):
+                raise PlatformContractError(
+                    "PROVIDER_RUNTIME_INCOMPLETE",
+                    "Provider implementation does not expose collect",
+                )
+            schemas = schema_store()
+            schema = schemas["provider-execution.schema.json"]
+            common = schemas["common.schema.json"]
+            self._validator = Draft202012Validator(
+                schema,
+                resolver=RefResolver(
+                    schema["$id"], schema,
+                    store={common["$id"]: common, "common.schema.json": common},
+                ),
             )
-        if not callable(getattr(self.provider, "collect", None)):
-            raise PlatformContractError(
-                "PROVIDER_RUNTIME_INCOMPLETE",
-                "Provider implementation does not expose collect",
-            )
-        root = _schema_root()
-        schema = json.loads((root / "provider-execution.schema.json").read_text(encoding="utf-8"))
-        common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
-        self._validator = Draft202012Validator(
-            schema,
-            resolver=RefResolver(
-                schema["$id"], schema,
-                store={common["$id"]: common, "common.schema.json": common},
-            ),
-        )
+        except Exception:
+            close = getattr(provider, "close", None)
+            try:
+                if callable(close):
+                    close()
+            finally:
+                if self._runtime_lease is not None:
+                    self._runtime_lease.close()
+            raise
+        self.provider = provider
         self._capabilities = {item.name: item for item in descriptor.capabilities}
         self._failure_policy = {
             str(item["code"]): str(item["retry"]) for item in descriptor.failure_policy
         }
         self._results: dict[str, ProviderCollectionResult] = {}
+        self._source_discoveries: dict[str, tuple[ProviderSourceSnapshot, ...]] = {}
         self._issued_evidence: dict[str, EvidenceRecord] = {}
         self._lock = threading.Lock()
+        self._source_lock = threading.Lock()
         self._active = 0
         self._request_count = 0
         self._summed_request_duration_ms = 0
         self._closed = False
+        self._close_lock = threading.Lock()
 
     @property
     def evidence_expectation(self) -> ProviderEvidenceExpectation:
@@ -250,6 +305,124 @@ class BoundCapabilityProvider:
                 "providerRequestDurationMs": self._summed_request_duration_ms,
             }
 
+    def discover_sources(
+        self,
+        capability: str,
+        scope: Mapping[str, Any] | None = None,
+    ) -> tuple[ProviderSourceSnapshot, ...]:
+        """Discover and freeze provider sources once for this bound Run.
+
+        Source discovery is an optional provider extension.  The Host caches
+        its result by capability and validated provider scope, so inspection
+        and resume code can reuse the same frozen source identities without
+        asking the provider to reopen the source on every batch.
+        """
+        if capability not in self.context.capabilities:
+            raise PlatformContractError(
+                "PROVIDER_CAPABILITY_NOT_GRANTED",
+                "The provider capability is outside the negotiated context",
+            )
+        request_scope = self.scope if scope is None else self._validated_scope(scope)
+        try:
+            cache_key = _digest({"capability": capability, "scope": request_scope})
+        except (TypeError, ValueError) as error:
+            raise PlatformContractError(
+                "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                "Provider source scope is not deterministic JSON data",
+            ) from error
+        with self._source_lock:
+            cached = self._source_discoveries.get(cache_key)
+            if cached is not None:
+                return cached
+            discover = getattr(self.provider, "discover_sources", None)
+            if not callable(discover):
+                raise PlatformContractError(
+                    "PROVIDER_SOURCE_DISCOVERY_UNAVAILABLE",
+                    "The selected provider does not expose Host source discovery",
+                )
+            try:
+                value = discover(request_scope, self.context)
+            except PlatformContractError:
+                raise
+            except Exception as error:
+                raise PlatformContractError(
+                    "PROVIDER_SOURCE_DISCOVERY_FAILED",
+                    "The provider failed to discover source snapshots",
+                ) from error
+            if isinstance(value, ProviderSourceSnapshot):
+                snapshots = (value,)
+            else:
+                try:
+                    snapshots = tuple(value)
+                except TypeError as error:
+                    raise PlatformContractError(
+                        "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                        "Provider source discovery must return a sequence of snapshots",
+                    ) from error
+            if any(not isinstance(item, ProviderSourceSnapshot) for item in snapshots):
+                raise PlatformContractError(
+                    "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                    "Provider source discovery returned an invalid snapshot",
+                )
+            identities = tuple(item.source_identity for item in snapshots)
+            if len(identities) != len(set(identities)):
+                raise PlatformContractError(
+                    "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                    "Provider source identities must be unique within one scope",
+                )
+            try:
+                json.dumps(
+                    _plain([item.metadata for item in snapshots]),
+                    ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                    allow_nan=False,
+                )
+            except (TypeError, ValueError) as error:
+                raise PlatformContractError(
+                    "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                    "Provider source metadata must be finite JSON data",
+                ) from error
+            frozen = tuple(snapshots)
+            self._source_discoveries[cache_key] = frozen
+            return frozen
+
+    def discover_work_items(
+        self,
+        check: CheckContract,
+        capability: str,
+        scope: Mapping[str, Any] | None = None,
+    ) -> tuple[WorkItem, ...]:
+        """Turn provider source snapshots into Host-owned WorkItems."""
+        if len(check.subject_kinds) != 1:
+            raise PlatformContractError(
+                "PROVIDER_SOURCE_DISCOVERY_INVALID",
+                "A provider-discovered Check must declare exactly one subject kind",
+            )
+        snapshots = self.discover_sources(capability, scope)
+        descriptor = self.registration.descriptor
+        work_items: list[WorkItem] = []
+        for snapshot in snapshots:
+            identity_material = "\x1f".join((
+                descriptor.provider_id, descriptor.version, capability,
+                snapshot.source_identity,
+            ))
+            item_id = "provider-source:" + hashlib.sha256(
+                identity_material.encode("utf-8"),
+            ).hexdigest()[:24]
+            metadata = {
+                "providerId": descriptor.provider_id,
+                "providerVersion": descriptor.version,
+                "capability": capability,
+                "sourceMetadata": _plain(snapshot.metadata),
+            }
+            work_items.append(WorkItem(
+                item_id,
+                check.subject_kinds[0],
+                snapshot.source_identity,
+                snapshot.state_digest,
+                metadata,
+            ))
+        return tuple(work_items)
+
     def issued_evidence(self) -> dict[str, EvidenceRecord]:
         """Return the exact Evidence the Host produced for this bound provider.
 
@@ -261,12 +434,18 @@ class BoundCapabilityProvider:
             return dict(self._issued_evidence)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._source_discoveries.clear()
         close = getattr(self.provider, "close", None)
-        if callable(close):
-            close()
+        try:
+            if callable(close):
+                close()
+        finally:
+            if self._runtime_lease is not None:
+                self._runtime_lease.close()
 
     def _request(
         self, work_item: WorkItem, check: CheckContract, capability: str,
@@ -367,8 +546,13 @@ class BoundCapabilityProvider:
                 "Provider response identity does not match the Host request",
             )
         if response.status == "failed":
-            assert response.failure is not None
-            if response.failure.code not in self._failure_policy:
+            failure = response.failure
+            if failure is None:
+                raise PlatformContractError(
+                    "PROVIDER_RESPONSE_INVALID",
+                    "A failed provider response must include failure details",
+                )
+            if failure.code not in self._failure_policy:
                 raise PlatformContractError(
                     "PROVIDER_FAILURE_UNCLASSIFIED",
                     "Provider returned a failure outside its declared taxonomy",
@@ -376,10 +560,10 @@ class BoundCapabilityProvider:
             return ProviderCollectionResult(
                 request,
                 failure=ProviderFailure(
-                    response.failure.code,
-                    _SAFE_FAILURE_MESSAGES[response.failure.code],
+                    failure.code,
+                    _SAFE_FAILURE_MESSAGES[failure.code],
                 ),
-                retry=self._failure_policy[response.failure.code],
+                retry=self._failure_policy[failure.code],
             )
 
         capability = self._capabilities[request.capability]
@@ -427,6 +611,17 @@ class BoundCapabilityProvider:
                     "PROVIDER_STATE_MISMATCH",
                     "Provider fact state digest does not match the WorkItem",
                 )
+            result_schema = self.registration.descriptor.result_schema
+            if result_schema is not None:
+                error = next(
+                    Draft202012Validator(_plain(result_schema)).iter_errors(_plain(fact.payload)),
+                    None,
+                )
+                if error is not None:
+                    raise PlatformContractError(
+                        "PROVIDER_RESULT_INVALID",
+                        "Provider fact payload does not satisfy the published result contract",
+                    )
             evidence_digest = _digest({
                 "requestId": request.request_id,
                 "index": index,
@@ -456,4 +651,5 @@ class BoundCapabilityProvider:
 
 __all__ = [
     "BoundCapabilityProvider",
+    "ProviderRuntimeLease",
 ]

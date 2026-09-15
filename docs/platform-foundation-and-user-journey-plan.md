@@ -2,8 +2,8 @@
 
 | Metadata | Value |
 |---|---|
-| Document version | 1.0.0-draft |
-| Date | 2026-09-04 |
+| Document version | 1.1.0-draft |
+| Date | 2026-09-13 |
 | Status | Planning proposal; implementation sequencing authority pending review |
 | Owner | Assayer Maintainers |
 | Scope | Minimum platform work required to deliver a reliable Alpha user journey |
@@ -325,27 +325,21 @@ The default result remains anchored to the selected Spec. Related documents do
 not become an implicit second audit target, and unrelated repository content is
 not silently pulled into Agent context.
 
-The input and evidence foundation for this boundary is implemented. The Spec
-plugin accepts either the existing independent `files` scope or an exclusive
-cross-document scope containing one `anchor`, explicit `relatedDocuments`, and
-directional `relationships`. It computes and freezes all document digests,
-creates only the anchor WorkItem, invalidates the packet when either side
-changes, and publishes bilateral source material through the pageable
-`cross-document-evidence` collection. `scope.schema.json` and
-`cross-document-evidence.schema.json` are plugin-owned so the generic Host
-remains domain-neutral. Review schema `1.2.0` now admits cross-document
-reviewer-origin findings only with bilateral frozen evidence, relationship
-closure, affected core checks and elements, matching ownership, and a concrete
-next action. Active Host orchestration is now implemented: every declared
-relationship becomes a required semantic checkpoint between candidate review
-and checklist review, interruption resumes at the remaining relationship, and
-finalization cannot bypass the queue. The normal product MCP path exposes the
-bounded read-only Evidence pager needed to inspect both sides without exposing
-checkpoint primitives. Actual model-corpus execution remains open work.
-The portable corpus evaluator is relationship-aware: its cross-document result
-schema distinguishes relationship coverage and outcomes from scanner-candidate
-coverage and compares the admitted semantic finding structure without scoring
-explanation prose.
+The current Advanced SPI path accepts either the existing independent `files`
+scope or an exclusive cross-document scope containing one `anchor`, explicit
+`relatedDocuments`, and directional `relationships`. It still computes
+document digests, creates a WorkItem, declares paging collections, and maintains
+domain result Schemas in plugin code. Those mechanics are migration evidence,
+not the ordinary target.
+
+Under Platform Constitution v1.1, the source provider freezes both sides and
+returns typed snapshots and anchors; the Simple plugin declares relationship
+meaning and deterministic Candidates; the compiler generates input and common
+review contracts; and the Host plans each relationship as a bounded
+ReviewBatch, persists it, and updates CoverageLedger. Interruption resumes from
+the remaining relationship without a plugin-authored checkpoint or
+finalization Schema. The portable corpus evaluator remains relationship-aware
+and compares domain outcomes without scoring explanation prose.
 
 **Exit gate:** a new user can complete the journey and understand every terminal
 state without reading protocol or ledger files. The fixed Spec corpus also meets

@@ -83,6 +83,15 @@ class MarkdownNavigationTest(unittest.TestCase):
             self.assertEqual(filtered.facts[0].payload["coverage"]["discovered"], 5)
             self.assertEqual(filtered.facts[0].payload["coverage"]["selected"], 1)
 
+    def test_descriptor_publishes_the_provider_owned_result_contract(self):
+        schema = MarkdownNavigationProvider.descriptor.result_schema
+        self.assertIsNotNone(schema)
+        self.assertEqual(schema["properties"]["format"], {"const": "markdown"})
+        self.assertEqual(
+            set(schema["required"]),
+            {"format", "document", "sourceDigest", "units", "unitCount", "nextCursor", "coverage"},
+        )
+
     def test_registration_passes_capability_negotiation(self):
         registration = markdown_registration()
         negotiation = CapabilityNegotiator().negotiate(
@@ -107,6 +116,6 @@ class MarkdownNavigationTest(unittest.TestCase):
         registration = registry.select(provider_id="assayer.document-navigation")
         self.assertEqual(registration.descriptor.capabilities[0].name, "document_navigation")
         self.assertEqual(
-            [item.descriptor.provider_id for item in registry.list()],
-            ["assayer.document-navigation"],
+            sorted(item.descriptor.provider_id for item in registry.list()),
+            ["assayer.browser-snapshot", "assayer.document-navigation"],
         )

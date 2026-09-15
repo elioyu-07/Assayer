@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from assayer_platform.contract import (
+from assayer_plugin_sdk.contract import (
     CheckContract,
     DecisionProposal,
     DimensionObservation,
@@ -23,8 +23,8 @@ from assayer_platform.contract import (
     PluginManifest,
     WorkItem,
 )
-from assayer_platform.registry import load_plugin_manifest
-from assayer_platform.evidence_graph import (
+from assayer_plugin_sdk.manifest import load_plugin_manifest
+from assayer_plugin_sdk.evidence_graph import (
     build_candidate_evidence_graph, render_candidate_evidence_graph,
     validate_candidate_evidence_graph_projection,
 )
@@ -143,6 +143,10 @@ class ConfigQualityPlugin:
             )
             packets.append(InvestigationPacket(item, check.check_id, check.version, dimensions, (evidence,), "not_required"))
         return packets
+
+    def map_domain_result(self, result, packet, check, context):
+        del packet, check, context
+        return dict(result)
 
 
 class ConfigurationDecisionProvider:

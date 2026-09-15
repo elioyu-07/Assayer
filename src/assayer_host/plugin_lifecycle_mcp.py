@@ -5,14 +5,13 @@ deterministic lifecycle operation to the same ``execute_intent_step`` path the
 CLI uses, so a natural-language request ("install ass-spec") and a scripted
 tool call land on identical, fail-closed code.
 
-Every mutation follows a two-phase flow: ``plan_plugin_change`` resolves a
-read-only plan (validating preconditions up front) and issues a one-time token;
-``execute_plugin_change`` only runs once the token is presented with
-``confirmed=true``.  The token is bound to the store digest, the catalog digest
-(or package digest for local sources), and the resolved source, so any mutation
-or catalog change underneath the plan invalidates it.  The single-shot mutation
-tools are no longer exposed; callers that still invoke them receive a
-``PLAN_REQUIRED`` rejection rather than a silent execution.
+The product-facing ``apply_plugin_change`` tool collapses the normal mutation
+path into one Host transaction for a trusted additive install. Destructive or
+ambiguous changes still return a compact one-time confirmation token. The
+lower-level ``plan_plugin_change``/``execute_plugin_change`` pair remains
+available for advanced clients, CI, and recovery. The token is bound to the
+store digest, catalog digest (or package digest for local sources), and
+resolved source, so changes underneath a plan invalidate it.
 """
 
 from __future__ import annotations
@@ -25,10 +24,12 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from assayer_platform import PlatformContractError
 from assayer_platform.plugin_catalog import version_key
+from assayer_platform.plugin_verify import verify_plugin_source as run_plugin_source_verification
 
 from .plugin_intent import IntentStep
 from .plugin_lifecycle_ops import (
     DEFAULT_CATALOG_URL,
+    apply_resolved_catalog_change,
     execute_intent_step,
     latest_available_from,
     plan_plugin_change,
@@ -36,10 +37,6 @@ from .plugin_lifecycle_ops import (
     verify_plan_binding,
 )
 
-_LEGACY_MUTATIONS = frozenset({
-    "install_plugin", "upgrade_plugin", "uninstall_plugin",
-    "downgrade_plugin", "rollback_plugin",
-})
 _ALLOWED_OPERATIONS = ("install", "upgrade", "downgrade", "rollback", "uninstall")
 
 
@@ -55,6 +52,13 @@ class PluginLifecycleMcpToolTransport:
         self._plans: dict[str, dict] = {}
 
     _SCHEMAS = {
+        "verify_plugin_source": {
+            "type": "object", "additionalProperties": False,
+            "required": ["source"],
+            "properties": {
+                "source": {"type": "string", "minLength": 1},
+            },
+        },
         "list_plugins": {"type": "object", "additionalProperties": False, "properties": {}},
         "get_plugin_info": {
             "type": "object", "additionalProperties": False,
@@ -75,6 +79,17 @@ class PluginLifecycleMcpToolTransport:
             "type": "object", "additionalProperties": False,
             "required": ["token", "confirmed"],
             "properties": {
+                "token": {"type": "string", "minLength": 1},
+                "confirmed": {"type": "boolean"},
+            },
+        },
+        "apply_plugin_change": {
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "operation": {"type": "string", "enum": sorted(_ALLOWED_OPERATIONS)},
+                "plugin": {"type": "string", "minLength": 1},
+                "pluginId": {"type": "string", "minLength": 1},
+                "version": {"type": "string", "pattern": r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$"},
                 "token": {"type": "string", "minLength": 1},
                 "confirmed": {"type": "boolean"},
             },
@@ -102,7 +117,10 @@ class PluginLifecycleMcpToolTransport:
         return None
 
     def _run(self, step: IntentStep) -> dict:
-        latest_available = latest_available_from(self._catalog_index)
+        latest_available = (
+            latest_available_from(self._catalog_index)
+            if step.operation in {"list", "info"} else None
+        )
         result = execute_intent_step(
             step, self._store_root, "./assayer-output",
             latest_available, self._catalog_index,
@@ -132,7 +150,7 @@ class PluginLifecycleMcpToolTransport:
         return result
 
     def _respond(self, payload: dict) -> dict:
-        failed = payload.get("status") not in {"completed", "quarantined"}
+        failed = payload.get("status") not in {"completed", "passed", "quarantined"}
         return {
             "structuredContent": {"status": "failed" if failed else "ok", "result": payload},
             "content": [{"type": "text", "text": json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)}],
@@ -142,24 +160,76 @@ class PluginLifecycleMcpToolTransport:
     def list_tools(self) -> list[dict]:
         return [
             {
+                "name": "verify_plugin_source",
+                "description": (
+                    "Verify a local Assayer plugin authoring directory as one exact wheel. "
+                    "The Host recognizes Policy Pack, Simple SDK, or Advanced SPI source; "
+                    "then compiles when needed, builds in isolation, validates and exercises "
+                    "the exact wheel, and writes a passed artifact under SOURCE/.assayer/verified. "
+                    "This does not install or publish the plugin."
+                ),
+                "inputSchema": self._SCHEMAS["verify_plugin_source"],
+                "annotations": {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
+            },
+            {
                 "name": "list_plugins",
                 "description": "List installed plugins, their versions and lifecycle state, and mark plugins that have a newer version available in the public catalog as upgradable.",
                 "inputSchema": self._SCHEMAS["list_plugins"],
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
             },
             {
                 "name": "get_plugin_info",
                 "description": "Use this single read-only lookup for an installed plugin's active version, lifecycle state, catalog status, latest available catalog version, and versionRelation. If latestVersionKnown is false, report that the upstream latest version is unknown; do not scan repositories or retry.",
                 "inputSchema": self._SCHEMAS["get_plugin_info"],
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
             },
             {
                 "name": "plan_plugin_change",
                 "description": "Resolve a read-only, deterministic plan for a plugin mutation (install/upgrade/downgrade/rollback/uninstall) and return a one-time token for execute_plugin_change.",
                 "inputSchema": self._SCHEMAS["plan_plugin_change"],
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
             },
             {
                 "name": "execute_plugin_change",
                 "description": "Execute a previously planned plugin mutation. Requires the plan token and confirmed=true.",
                 "inputSchema": self._SCHEMAS["execute_plugin_change"],
+                "annotations": {
+                    "readOnlyHint": False,
+                    "destructiveHint": True,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
+            },
+            {
+                "name": "apply_plugin_change",
+                "description": "Apply one natural-language plugin lifecycle intent. A trusted first-time catalog install completes in one Host transaction; upgrades, downgrades, rollbacks, uninstalls, and local sources return one compact confirmation plan.",
+                "inputSchema": self._SCHEMAS["apply_plugin_change"],
+                "annotations": {
+                    "readOnlyHint": False,
+                    "destructiveHint": True,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
             },
         ]
 
@@ -167,29 +237,10 @@ class PluginLifecycleMcpToolTransport:
         if not isinstance(arguments, dict):
             from .errors import HostError
             raise HostError("INVALID_REQUEST", f"{name} arguments must be an object")
-        if name in _LEGACY_MUTATIONS:
-            return self._respond({"operation": name, "status": "failed",
-                                  "error": {
-                                      "code": "PLAN_REQUIRED",
-                                      "message": "Mutations must go through plan_plugin_change then execute_plugin_change.",
-                                  }})
         schema = self._SCHEMAS.get(name)
         if schema is None:
             from .errors import HostError
             raise HostError("UNKNOWN_TOOL", f"Tool {name} does not exist")
-        if name == "plan_plugin_change" and isinstance(arguments, dict):
-            operation = arguments.get("operation")
-            if operation is not None and operation not in _ALLOWED_OPERATIONS:
-                return self._respond({
-                    "operation": "plan",
-                    "status": "failed",
-                    "error": {
-                        "code": "INVALID_OPERATION",
-                        "message": f"Unsupported plugin lifecycle operation: {operation}",
-                        "retryable": False,
-                        "nextAction": "correct_request",
-                    },
-                })
         if not isinstance(arguments, dict) or next(Draft202012Validator(schema).iter_errors(arguments), None):
             return self._respond({
                 "operation": name,
@@ -204,15 +255,90 @@ class PluginLifecycleMcpToolTransport:
 
         if name == "list_plugins":
             return self._respond(self._run(IntentStep("list")))
+        if name == "verify_plugin_source":
+            return self._verify_plugin_source(arguments)
         if name == "get_plugin_info":
             return self._respond(self._run(IntentStep("info", plugin_id=arguments["pluginId"])))
         if name == "plan_plugin_change":
             return self._plan_change(arguments)
         if name == "execute_plugin_change":
             return self._execute_change(arguments)
+        if name == "apply_plugin_change":
+            return self._apply_change(arguments)
 
         from .errors import HostError
         raise HostError("UNKNOWN_TOOL", f"Tool {name} does not exist")
+
+    def _verify_plugin_source(self, arguments: dict) -> dict:
+        source = Path(arguments["source"]).expanduser().resolve()
+        output = source / ".assayer" / "verified"
+        try:
+            report = run_plugin_source_verification(source, output_dir=output)
+        except PlatformContractError as error:
+            report = {
+                "schemaVersion": "1.0.0",
+                "status": "failed",
+                "error": {"code": error.code, "message": error.message},
+                "stages": [],
+            }
+        except (OSError, UnicodeError) as error:
+            report = {
+                "schemaVersion": "1.0.0",
+                "status": "failed",
+                "error": {
+                    "code": "PLUGIN_VERIFY_IO_FAILED",
+                    "message": f"Plugin verification could not access its local files: {error}",
+                },
+                "stages": [],
+            }
+        return self._respond({"operation": "verify_plugin_source", **report})
+
+    def _apply_change(self, arguments: dict) -> dict:
+        """Collapse the normal Agent lifecycle path into one Host transaction."""
+        token = arguments.get("token")
+        if token is not None:
+            if arguments.get("confirmed") is not True:
+                return self._respond({
+                    "operation": "apply", "status": "failed",
+                    "error": {
+                        "code": "CONFIRMATION_REQUIRED",
+                        "message": "This lifecycle change requires confirmed=true.",
+                    },
+                })
+            return self._execute_change({"token": token, "confirmed": True})
+
+        operation = arguments.get("operation")
+        if operation is None:
+            return self._respond({
+                "operation": "apply", "status": "failed",
+                "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "apply_plugin_change requires operation or a confirmation token.",
+                },
+            })
+        planned_response = self._plan_change(arguments)
+        planned = planned_response.get("structuredContent", {}).get("result", {})
+        plan = planned.get("plan") if isinstance(planned, dict) else None
+        plan_token = planned.get("token") if isinstance(planned, dict) else None
+        if not isinstance(plan, dict) or not isinstance(plan_token, str):
+            return planned_response
+        # An explicit by-name first install from the trusted catalog is
+        # additive and completes without another Agent round trip. Local
+        # packages and every replacement/removal operation retain confirmation.
+        plugin = arguments.get("plugin")
+        safe_install = (
+            operation == "install"
+            and isinstance(plugin, str)
+            and not Path(plugin).expanduser().is_dir()
+            and arguments.get("confirmed") is not False
+        )
+        if safe_install:
+            return self._execute_change({"token": plan_token, "confirmed": True})
+        return self._respond({
+            "operation": "apply", "status": "confirmation_required",
+            "token": plan_token,
+            "plan": plan,
+        })
 
     def _plan_change(self, arguments: dict) -> dict:
         operation = arguments["operation"]
@@ -295,12 +421,31 @@ class PluginLifecycleMcpToolTransport:
         if blocked is not None:
             return self._respond(blocked)
         entry["used"] = True
-        result = self._run(entry["step"])
+        plan = entry["plan"]
+        step = entry["step"]
+        if plan.get("catalogDigest") is not None and step.operation in {"install", "upgrade"}:
+            try:
+                result = apply_resolved_catalog_change(
+                    operation=step.operation,
+                    plugin_id=plan["pluginId"],
+                    version=plan["targetVersion"],
+                    source=plan["source"],
+                    checksum=plan["checksum"],
+                    store_root=self._store_root,
+                )
+            except PlatformContractError as error:
+                result = {
+                    "operation": step.operation,
+                    "status": "failed",
+                    "error": {"code": error.code, "message": error.message},
+                }
+        else:
+            result = self._run(step)
         if result.get("status") == "completed":
-            result["resultingState"] = "absent" if entry["step"].operation == "uninstall" else "installed"
+            result["resultingState"] = "absent" if step.operation == "uninstall" else "installed"
         elif result.get("status") == "quarantined":
             result["resultingState"] = "dirty"
-        result.setdefault("previousVersion", entry["plan"].get("currentVersion"))
+        result.setdefault("previousVersion", plan.get("currentVersion"))
         result.setdefault("activeVersion", None if result.get("resultingState") == "absent" else result.get("version"))
         result.setdefault("retryable", result.get("status") not in {"completed", "quarantined"})
         result.setdefault(

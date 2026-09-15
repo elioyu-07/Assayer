@@ -10,14 +10,17 @@ from assayer_host.observability import render_observability, render_performance_
 from assayer_host.reporting import DerivedReportBuilder
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class RuntimeObservabilityStoreTest(unittest.TestCase):
     @staticmethod
     def render_fixture(name: str) -> dict[str, bytes]:
-        ledger = json.loads((Path("examples") / name).read_text(encoding="utf-8"))
+        ledger = json.loads((ROOT / "examples" / name).read_text(encoding="utf-8"))
         return DerivedReportBuilder().render(ledger)
 
     def test_audit_log_is_a_human_readable_run_diary(self):
-        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        ledger = json.loads((ROOT / "examples" / "minimal-ledger.json").read_text(encoding="utf-8"))
         rendered = DerivedReportBuilder().render(ledger)
         diary = rendered["audit.log"].decode("utf-8")
         self.assertIn("Assayer Run Diary", diary)
@@ -30,7 +33,7 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
         self.assertNotIn("succeeded operation-", diary.lower())
 
     def test_audit_log_explains_failed_operation(self):
-        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        ledger = json.loads((ROOT / "examples" / "minimal-ledger.json").read_text(encoding="utf-8"))
         operation = ledger["operations"][0]
         operation["status"] = "rejected"
         operation["reason"] = {
@@ -82,7 +85,7 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
         self.assertIn("REQUEST_RESULT_UNKNOWN", diagnostics["attributions"][0]["reason"])
 
     def test_needs_review_result_names_gap_and_checks_completed(self):
-        ledger = json.loads(Path("examples/minimal-ledger.json").read_text(encoding="utf-8"))
+        ledger = json.loads((ROOT / "examples" / "minimal-ledger.json").read_text(encoding="utf-8"))
         assessment = ledger["assessments"][0]
         assessment.update({
             "result": "needs_review",
@@ -209,7 +212,14 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
             conn.execute("CREATE TABLE operations (operation_id TEXT PRIMARY KEY, scan_id TEXT NOT NULL, request_id TEXT NOT NULL, tool TEXT NOT NULL, operation_kind TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL, status TEXT NOT NULL, accepted_at_revision INTEGER NOT NULL, error_code TEXT, error_message TEXT, result_json TEXT, case_ref TEXT)")
             conn.commit(); conn.close()
             store = SQLiteStore(path)
-            columns = {row[1] for row in store._conn.execute("PRAGMA table_info(operations)")}
+            inspection = sqlite3.connect(path)
+            try:
+                columns = {
+                    row[1]
+                    for row in inspection.execute("PRAGMA table_info(operations)")
+                }
+            finally:
+                inspection.close()
             self.assertTrue({"accepted_at", "ended_at", "accepted_monotonic_ns", "duration_ms"}.issubset(columns))
             store.close()
 
@@ -252,9 +262,23 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
             "RULE_CONTRACT_UNAVAILABLE": "rule_contract", "AGENT_LEASE_EXPIRED": "transport_runtime",
             "PERSISTENT_WRITE_OBSERVED": "target_application", "UNKNOWN_FAILURE": "unattributed",
         }
-        failed = [{"operationId": f"operation-{index:03d}", "tool": "test", "status": "failed_known",
-                   "reason": {"code": code, "message": code}} for index, code in enumerate(codes, 1)]
-        attributed = DerivedReportBuilder._attributions(failed)
+        ledger = json.loads(
+            (ROOT / "examples" / "minimal-ledger.json").read_text(encoding="utf-8")
+        )
+        operation = ledger["operations"][0]
+        ledger["operations"] = [
+            {
+                **operation,
+                "operationId": f"operation-{index:03d}",
+                "status": "failed_known",
+                "reason": {"code": code, "message": code},
+            }
+            for index, code in enumerate(codes, 1)
+        ]
+        diagnostics = json.loads(
+            DerivedReportBuilder().render(ledger)["run-diagnostics.json"]
+        )
+        attributed = diagnostics["attributions"]
         self.assertEqual([item["layer"] for item in attributed], list(codes.values()))
         self.assertTrue(all(item["recommendation"] and item["operationRefs"] for item in attributed))
 

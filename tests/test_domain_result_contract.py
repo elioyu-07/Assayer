@@ -10,6 +10,7 @@ import tempfile
 import unittest
 
 from assayer_platform import (
+    CommitReceipt,
     DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION,
     DomainResultContract,
     PlatformContractError,
@@ -59,6 +60,73 @@ def domain_contract(**overrides) -> DomainResultContract:
 
 
 class DomainResultContractTests(unittest.TestCase):
+    def test_host_bounds_large_domain_evidence_without_plugin_pagination(self):
+        """Large packets stay in the Host ledger, not in one Agent payload."""
+        class LargeEvidencePlugin(ConfigQualityPlugin):
+            def inspect(self, work_items, check, context):
+                packets = super().inspect(work_items, check, context)
+                packet = packets[0]
+                evidence = packet.evidence[0]
+                payload = dict(evidence.payload)
+                payload["sourceChunks"] = [
+                    {
+                        "source_chunk_id": f"source:fixture:{index}",
+                        "excerpt": "x" * 1800,
+                    }
+                    for index in range(220)
+                ]
+                payload["navigation"] = [
+                    {"title": f"Section {index}", "content": "y" * 900}
+                    for index in range(180)
+                ]
+                payload["dimensionEvidence"] = [
+                    {"dimension": "value_types", "mapping": "z" * 700}
+                    for _ in range(300)
+                ]
+                return [replace(
+                    packet,
+                    evidence=(replace(evidence, payload=payload),),
+                )]
+
+        registration = replace(
+            config_quality_registration(),
+            plugin_factory=lambda _runtime=None: LargeEvidencePlugin(),
+            execution_modes=frozenset({"interactive"}),
+            domain_result_contracts=(domain_contract(),),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            controller = InteractivePluginController(
+                PluginRegistry((registration,)), Path(directory) / "output",
+            )
+            controller.start(
+                plugin_id="test.config-quality", check_id="CFG-001",
+                scope={"files": [{"path": str(source)}]},
+            )
+            pending = controller.advance(controller.active_run_id)
+            task = pending["result"]["semanticTask"]
+            encoded = json.dumps(task, ensure_ascii=False).encode("utf-8")
+            self.assertLessEqual(len(encoded), 24 * 1024)
+            serialized = encoded.decode("utf-8")
+            self.assertNotIn("source_chunk_id", serialized)
+            self.assertNotIn("sourceDigest", serialized)
+            self.assertIn("truncated", serialized)
+            paging = task["agentView"]["evidencePaging"]
+            self.assertEqual(paging["pageSize"], 4)
+            self.assertEqual(paging["total"], 220)
+            self.assertIsNotNone(paging["nextCursor"])
+            expanded = controller.expand_semantic_evidence(
+                controller.active_run_id,
+                cursor=paging["nextCursor"], page_size=20,
+            )
+            self.assertEqual(expanded["status"], "semantic_evidence_expanded")
+            self.assertEqual(expanded["result"]["page"]["count"], 20)
+            self.assertTrue(all(
+                item["evidenceRef"].startswith("R")
+                for item in expanded["result"]["evidence"]
+            ))
+
     def test_domain_input_failures_are_owned_by_agent_with_one_explicit_correction(self):
         for code in ("DOMAIN_RESULT_INVALID", "DOMAIN_EVIDENCE_REFERENCE_INVALID"):
             policy = boundary_error_policy(code)
@@ -95,10 +163,11 @@ class DomainResultContractTests(unittest.TestCase):
                 Path(directory) / "output",
                 plugin_registry=PluginRegistry((registered,)),
             )
-            transport.call_tool("start_plugin_run", {
+            started = transport.call_tool("start_plugin_run", {
                 "pluginId": "test.config-quality", "checkId": "CFG-001",
                 "scope": {"files": [{"path": str(source)}]},
             })
+            run_id = started["structuredContent"]["result"]["runId"]
             transport.call_tool("advance_plugin_run", {})
             with self.assertRaises(HostError) as first:
                 transport.call_tool("advance_plugin_run", {"domainResult": {}})
@@ -111,6 +180,14 @@ class DomainResultContractTests(unittest.TestCase):
                 transport.call_tool("advance_plugin_run", {"domainResult": {}})
             self.assertEqual(second.exception.code, "AGENT_CORRECTION_BUDGET_EXHAUSTED")
             self.assertEqual(second.exception.terminal_status, "partial")
+            self.assertIn("Original validation errors:", second.exception.message)
+            self.assertIn("/reason", second.exception.message)
+            coverage = json.loads((
+                Path(directory) / "output" / run_id
+                / f"{run_id}.review-coverage.json"
+            ).read_text(encoding="utf-8"))
+            self.assertEqual(coverage["terminalStatus"], "partial")
+            self.assertEqual(coverage["entries"][0]["status"], "blocked")
 
     def test_digest_is_deterministic_and_schema_is_detached(self):
         source = domain_contract().result_schema
@@ -194,8 +271,12 @@ class DomainResultContractTests(unittest.TestCase):
         self.assertTrue(report.passed, report.as_dict())
 
     def test_missing_domain_mapper_fails_before_run_state_is_created(self):
+        class NoMapperPlugin(ConfigQualityPlugin):
+            map_domain_result = None
+
         registered = replace(
             config_quality_registration(),
+            plugin_factory=lambda _runtime=None: NoMapperPlugin(),
             execution_modes=frozenset({"interactive"}),
             domain_result_contracts=(domain_contract(result_schema={
                 "type": "object",
@@ -227,29 +308,6 @@ class DomainResultContractTests(unittest.TestCase):
         codes = {issue.code for issue in inspect_plugin_registration(registration).issues}
         self.assertIn("PLUGIN_DOMAIN_RESULT_CONTRACT_CHECK_UNKNOWN", codes)
         self.assertIn("PLUGIN_DOMAIN_RESULT_CONTRACT_CHECK_COVERAGE_INCOMPLETE", codes)
-
-    def test_registration_gate_rejects_mixed_legacy_and_domain_contracts(self):
-        from dataclasses import replace
-        from assayer_platform.agent_contract import AgentContractBundle
-
-        legacy = AgentContractBundle(
-            contract_id="dev.assayer.fixture.legacy",
-            contract_version="1.0.0",
-            check_id="CFG-001",
-            check_version="1.0.0",
-            checkpoint_payload_schemas={},
-            finalization_schema=None,
-            semantic_instructions_path="legacy.md",
-            semantic_instructions_sha256=INSTRUCTIONS_SHA256,
-        )
-        with self.assertRaises(PlatformContractError) as rejected:
-            replace(
-                config_quality_registration(),
-                execution_modes=frozenset({"interactive"}),
-                agent_contracts=(legacy,),
-                domain_result_contracts=(domain_contract(),),
-            )
-        self.assertEqual(rejected.exception.code, "PLUGIN_LEGACY_CONTRACT_UNSUPPORTED")
 
     def test_host_binds_domain_result_to_the_current_task_without_platform_fields(self):
         class DomainPlugin(ConfigQualityPlugin):
@@ -288,11 +346,6 @@ class DomainResultContractTests(unittest.TestCase):
             plugin_factory=lambda _runtime=None: DomainPlugin(),
             execution_modes=frozenset({"interactive"}),
             domain_result_contracts=(contract,),
-            protocol_min_version="1.2.0",
-            protocol_max_version="1.2.0",
-            protocol_capabilities=frozenset({
-                "task_local_evidence_handles", "domain_result",
-            }),
         )
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "config.json"
@@ -307,11 +360,19 @@ class DomainResultContractTests(unittest.TestCase):
             )
             pending = controller.advance(controller.active_run_id)
             task = pending["result"]["semanticTask"]
+            progress = controller.progress(controller.active_run_id)
+            self.assertEqual(progress["status"], "running")
+            self.assertIn("pendingCandidateIds", progress["result"]["evidenceGraph"])
             self.assertEqual(task["kind"], "domain_review")
             self.assertNotIn("workItemId", task)
             self.assertNotIn("taskDigest", task)
             self.assertIn("domainContract", task)
+            self.assertNotIn("agentContract", task)
             self.assertIn("semanticInstructions", task["domainContract"])
+            self.assertEqual(
+                task["domainContract"]["semanticInstructions"]["uri"],
+                "assayer://plugins/test.config-quality/checks/CFG-001/1.0.0/semantic-instructions",
+            )
             self.assertEqual(
                 task["domainContract"]["resultShape"]["requiredPaths"],
                 ["/findings", "/findings/*/dimension", "/findings/*/reason", "/findings/*/status", "/reason", "/result"],
@@ -325,7 +386,7 @@ class DomainResultContractTests(unittest.TestCase):
             ))
             serialized_task = json.dumps(task)
             for forbidden in (
-                "workItemId", "taskDigest", "contractDigest", "checkpointId",
+                "workItemId", "taskDigest", "contractDigest",
                 "evidenceId", "sourceDigest", "source_chunk_id", "document_path",
             ):
                 self.assertNotIn(forbidden, serialized_task)
@@ -341,6 +402,14 @@ class DomainResultContractTests(unittest.TestCase):
                 },
             )
             self.assertEqual(result["status"], "completed")
+            bill_path = (
+                Path(directory) / "output" / result["runId"]
+                / f"{result['runId']}.platform-performance-bill.json"
+            )
+            bill = json.loads(bill_path.read_text(encoding="utf-8"))
+            self.assertEqual(bill["measurement"]["semanticTask"]["status"], "captured")
+            self.assertEqual(bill["measurement"]["agentWait"]["status"], "captured")
+            self.assertLessEqual(bill["source"]["semanticTaskBytes"], 24 * 1024)
 
     def test_host_resolves_task_handle_into_decision_details(self):
         class DomainPlugin(ConfigQualityPlugin):
@@ -354,7 +423,7 @@ class DomainResultContractTests(unittest.TestCase):
 
         contract = domain_contract(result_schema={
             "type": "object", "additionalProperties": False,
-            "required": ["result", "findings", "reason", "evidenceRefs"],
+            "required": ["result", "findings", "reason", "supportedBy"],
             "properties": {
                 "result": {"enum": ["scanned_no_issue"]},
                 "reason": {"type": "string", "minLength": 1},
@@ -367,7 +436,7 @@ class DomainResultContractTests(unittest.TestCase):
                         "reason": {"type": "string", "minLength": 1},
                     },
                 }},
-                "evidenceRefs": {"type": "array", "items": {"type": "string"}},
+                "supportedBy": {"type": "array", "items": {"type": "string"}},
             },
         })
         registration = replace(
@@ -387,9 +456,10 @@ class DomainResultContractTests(unittest.TestCase):
                 scope={"files": [{"path": str(source)}]},
             )
             pending = controller.advance(controller.active_run_id)
-            evidence_id = pending["result"]["semanticTask"]["investigation"]["evidence"][0]["evidenceId"]
-            handles = pending["result"]["semanticTask"]["evidenceHandles"]
-            self.assertEqual(handles[0]["evidenceRef"], "R1")
+            task = pending["result"]["semanticTask"]
+            self.assertNotIn("investigation", task)
+            self.assertNotIn("evidenceHandles", task)
+            self.assertEqual(task["agentView"]["evidence"][0]["evidenceRef"], "R1")
             result = controller.advance(
                 controller.active_run_id,
                 domain_result={
@@ -399,13 +469,236 @@ class DomainResultContractTests(unittest.TestCase):
                         {"dimension": name, "status": "satisfied", "reason": "ok"}
                         for name in ("parseable", "required_keys", "value_types")
                     ],
-                    "evidenceRefs": ["R1"],
+                    "supportedBy": ["R1"],
                 },
             )
             self.assertEqual(result["status"], "completed")
             ledger_path = Path(directory) / "output" / controller.terminal_run_id / f"{controller.terminal_run_id}.platform-ledger.json"
             ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            evidence_id = ledger["investigations"][0]["evidence"][0]["evidence_id"]
             self.assertEqual(ledger["decisions"][0]["details"]["evidenceRefs"], [evidence_id])
+
+    def test_successful_interactive_transport_is_billed_but_rejected_input_is_not(self):
+        """Transport timing follows successful boundaries, never Agent correction failures."""
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            registration = replace(
+                config_quality_registration(),
+                execution_modes=frozenset({"interactive"}),
+                domain_result_contracts=(domain_contract(result_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["result", "findings", "reason"],
+                    "properties": {
+                        "result": {"const": "scanned_no_issue"},
+                        "reason": {"type": "string", "minLength": 1},
+                        "findings": {"type": "array", "minItems": 1, "items": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["dimension", "status", "reason"],
+                            "properties": {
+                                "dimension": {"type": "string"},
+                                "status": {"const": "satisfied"},
+                                "reason": {"type": "string", "minLength": 1},
+                            },
+                        }},
+                    },
+                }),),
+            )
+            transport = InteractivePlatformMcpToolTransport(
+                Path(directory) / "output", plugin_registry=PluginRegistry((registration,)),
+            )
+            started = transport.call_tool("start_plugin_run", {
+                "pluginId": "test.config-quality", "checkId": "CFG-001",
+                "scope": {"files": [{"path": str(source)}]},
+            })
+            run_id = started["structuredContent"]["result"]["runId"]
+            transport.call_tool("advance_plugin_run", {})
+            ledger_path = Path(directory) / "output" / run_id / f"{run_id}.platform-ledger.json"
+            before = json.loads(ledger_path.read_text(encoding="utf-8"))["metrics"]
+            with self.assertRaises(HostError) as rejected:
+                transport.call_tool("advance_plugin_run", {"domainResult": {}})
+            self.assertEqual(rejected.exception.code, "DOMAIN_RESULT_INVALID")
+            after_rejection = json.loads(ledger_path.read_text(encoding="utf-8"))["metrics"]
+            self.assertEqual(after_rejection["transportSamples"], before["transportSamples"])
+            result = transport.call_tool("advance_plugin_run", {"domainResult": {
+                "result": "scanned_no_issue", "reason": "All dimensions are satisfied.",
+                "findings": [
+                    {"dimension": name, "status": "satisfied", "reason": "ok"}
+                    for name in ("parseable", "required_keys", "value_types")
+                ],
+            }})
+            self.assertEqual(result["structuredContent"]["result"]["status"], "completed")
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+            metrics = ledger["metrics"]
+            # Only successful advance boundaries are timed; start itself does
+            # not force another synchronous ledger write.
+            self.assertGreaterEqual(metrics["transportSamples"], 2)
+            self.assertGreater(metrics["transportMs"], 0)
+            self.assertEqual(metrics["agentWaitSamples"], 1)
+            bill = json.loads(
+                (Path(directory) / "output" / run_id / f"{run_id}.platform-performance-bill.json").read_text(
+                    encoding="utf-8",
+                )
+            )
+            self.assertEqual(bill["measurement"]["transport"]["status"], "captured")
+            self.assertEqual(bill["measurement"]["agentWait"]["status"], "captured")
+
+    def test_resume_preserves_semantic_and_transport_metrics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sources = []
+            for index in (1, 2):
+                source = Path(directory) / f"config-{index}.json"
+                source.write_text(json.dumps({"enabled": True, "index": index}), encoding="utf-8")
+                sources.append({"path": str(source)})
+            registration = replace(
+                config_quality_registration(),
+                execution_modes=frozenset({"interactive"}),
+                domain_result_contracts=(domain_contract(result_schema={
+                    "type": "object", "additionalProperties": False,
+                    "required": ["result", "findings", "reason"],
+                    "properties": {
+                        "result": {"const": "scanned_no_issue"},
+                        "reason": {"type": "string", "minLength": 1},
+                        "findings": {"type": "array", "minItems": 1, "items": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["dimension", "status", "reason"],
+                            "properties": {
+                                "dimension": {"type": "string"},
+                                "status": {"const": "satisfied"},
+                                "reason": {"type": "string", "minLength": 1},
+                            },
+                        }},
+                    },
+                }),),
+            )
+            output = Path(directory) / "output"
+            transport = InteractivePlatformMcpToolTransport(output, plugin_registry=PluginRegistry((registration,)))
+            started = transport.call_tool("start_plugin_run", {
+                "pluginId": "test.config-quality", "checkId": "CFG-001",
+                "scope": {"files": sources},
+            })
+            run_id = started["structuredContent"]["result"]["runId"]
+            first = transport.call_tool("advance_plugin_run", {})
+            self.assertEqual(first["structuredContent"]["result"]["status"], "awaiting_agent_decision")
+            base = {
+                "result": "scanned_no_issue", "reason": "Satisfied.",
+                "findings": [
+                    {"dimension": name, "status": "satisfied", "reason": "ok"}
+                    for name in ("parseable", "required_keys", "value_types")
+                ],
+            }
+            second = transport.call_tool("advance_plugin_run", {"domainResult": base})
+            self.assertEqual(second["structuredContent"]["result"]["status"], "awaiting_agent_decision")
+            coverage_path = output / run_id / f"{run_id}.review-coverage.json"
+            self.assertTrue(coverage_path.is_file())
+            first_coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(first_coverage["batches"]), 2)
+            self.assertEqual(first_coverage["batches"][0]["status"], "accepted")
+            self.assertEqual(first_coverage["batches"][1]["status"], "offered")
+            transport.close()
+            resumed_transport = InteractivePlatformMcpToolTransport(
+                output, plugin_registry=PluginRegistry((registration,)),
+            )
+            resumed = resumed_transport.call_tool("resume_plugin_run", {"runId": run_id})
+            self.assertEqual(resumed["structuredContent"]["result"]["status"], "awaiting_agent_decision")
+            resumed_coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(resumed_coverage["batches"]), 2)
+            ledger_path = output / run_id / f"{run_id}.platform-ledger.json"
+            metrics = json.loads(ledger_path.read_text(encoding="utf-8"))["metrics"]
+            # Resume reconstructs and republishes the active semantic boundary,
+            # so the durable counter includes that fresh Host compilation.
+            self.assertGreaterEqual(metrics["semanticTaskBuilds"], 2)
+            self.assertGreater(metrics["semanticTaskBytes"], 0)
+            self.assertEqual(metrics["agentWaitSamples"], 1)
+            # The resume call reconstructs the boundary internally; only the
+            # two successful advance requests so far have crossed a timed
+            # semantic boundary.
+            self.assertGreaterEqual(metrics["transportSamples"], 2)
+            resumed_transport.call_tool("advance_plugin_run", {"domainResult": base})
+            final_coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(final_coverage["batches"]), 2)
+            self.assertEqual(final_coverage["terminalStatus"], "completed")
+            self.assertTrue(all(
+                batch["status"] == "terminal" for batch in final_coverage["batches"]
+            ))
+
+    def test_coverage_replays_after_commit_failure_and_process_resume(self):
+        class DomainPlugin(ConfigQualityPlugin):
+            def map_domain_result(self, result, packet, check, context):
+                del result, packet, check, context
+                return {
+                    "result": "scanned_no_issue",
+                    "findings": [
+                        {"dimension": name, "status": "satisfied", "reason": "ok"}
+                        for name in ("parseable", "required_keys", "value_types")
+                    ],
+                    "reason": "Satisfied.",
+                }
+
+        class FlakyCommitter:
+            attempts = 0
+
+            def commit(self, proposal, packet, check, context):
+                del packet, check, context
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise RuntimeError("temporary commit failure")
+                return CommitReceipt(
+                    f"commit:{proposal.work_item_id}",
+                    proposal.work_item_id,
+                    proposal.check_id,
+                    proposal.check_version,
+                    proposal.result,
+                    "memory",
+                )
+
+        committer = FlakyCommitter()
+        registration = replace(
+            config_quality_registration(),
+            plugin_factory=lambda _runtime=None: DomainPlugin(),
+            committer_factory=lambda _runtime=None: committer,
+            execution_modes=frozenset({"interactive"}),
+            domain_result_contracts=(domain_contract(result_schema={
+                "type": "object", "additionalProperties": False,
+                "required": ["reason"],
+                "properties": {"reason": {"type": "string", "minLength": 1}},
+            }),),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "config.json"
+            source.write_text(json.dumps({"enabled": True}), encoding="utf-8")
+            output = Path(directory) / "output"
+            run_id = "run:coverage-crash"
+            controller = InteractivePluginController(
+                PluginRegistry((registration,)), output,
+            )
+            controller.start(
+                plugin_id="test.config-quality",
+                check_id="CFG-001",
+                scope={"files": [{"path": str(source)}]},
+                run_id=run_id,
+            )
+            controller.advance(run_id)
+            with self.assertRaises(PlatformContractError) as failed:
+                controller.advance(run_id, domain_result={"reason": "Satisfied."})
+            self.assertEqual(failed.exception.code, "COMMIT_FAILED")
+            coverage_path = output / run_id / f"{run_id}.review-coverage.json"
+            before_resume = json.loads(coverage_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(before_resume["verdicts"]), 1)
+            self.assertEqual(before_resume["batches"][0]["status"], "accepted")
+            controller.close()
+
+            resumed = InteractivePluginController(
+                PluginRegistry((registration,)), output,
+            )
+            boundary = resumed.resume(run_id)
+            self.assertEqual(boundary["status"], "awaiting_agent_decision")
+            terminal = resumed.advance(run_id, domain_result={"reason": "Satisfied."})
+            self.assertEqual(terminal["status"], "completed")
+            after_resume = json.loads(coverage_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(after_resume["verdicts"]), 1)
+            self.assertEqual(after_resume["terminalStatus"], "completed")
+            self.assertEqual(committer.attempts, 2)
 
     def test_later_task_does_not_reuse_an_earlier_handle(self):
         class DomainPlugin(ConfigQualityPlugin):
@@ -454,7 +747,7 @@ class DomainResultContractTests(unittest.TestCase):
                 scope={"files": sources},
             )
             first = controller.advance(controller.active_run_id)
-            self.assertEqual(first["result"]["semanticTask"]["evidenceHandles"][0]["evidenceRef"], "R1")
+            self.assertEqual(first["result"]["semanticTask"]["agentView"]["evidence"][0]["evidenceRef"], "R1")
             base = {
                 "result": "scanned_no_issue", "reason": "Satisfied.",
                 "findings": [
@@ -466,7 +759,7 @@ class DomainResultContractTests(unittest.TestCase):
                 controller.active_run_id,
                 domain_result={**base, "supportedBy": ["R1"]},
             )
-            self.assertEqual(second["result"]["semanticTask"]["evidenceHandles"][0]["evidenceRef"], "R2")
+            self.assertEqual(second["result"]["semanticTask"]["agentView"]["evidence"][0]["evidenceRef"], "R2")
             run_id = controller.active_run_id
             controller.close()
             controller = InteractivePluginController(
@@ -474,7 +767,7 @@ class DomainResultContractTests(unittest.TestCase):
             )
             resumed = controller.resume(run_id)
             self.assertEqual(
-                resumed["result"]["semanticTask"]["evidenceHandles"][0]["evidenceRef"],
+                resumed["result"]["semanticTask"]["agentView"]["evidence"][0]["evidenceRef"],
                 "R2",
             )
             with self.assertRaises(PlatformContractError) as rejected:
@@ -507,7 +800,7 @@ class DomainResultContractTests(unittest.TestCase):
 
         contract = domain_contract(result_schema={
             "type": "object", "additionalProperties": False,
-            "required": ["result", "findings", "reason", "evidenceRefs"],
+            "required": ["result", "findings", "reason", "supportedBy"],
             "properties": {
                 "result": {"const": "scanned_no_issue"},
                 "reason": {"type": "string", "minLength": 1},
@@ -520,7 +813,7 @@ class DomainResultContractTests(unittest.TestCase):
                         "reason": {"type": "string", "minLength": 1},
                     },
                 }},
-                "evidenceRefs": {"type": "array", "items": {"type": "string"}},
+                "supportedBy": {"type": "array", "items": {"type": "string"}},
             },
         })
         registration = replace(
@@ -549,7 +842,7 @@ class DomainResultContractTests(unittest.TestCase):
                         {"dimension": name, "status": "satisfied", "reason": "ok"}
                         for name in ("parseable", "required_keys", "value_types")
                     ],
-                    "evidenceRefs": ["chunk:config:1"],
+                    "supportedBy": ["R1"],
                 },
             )
             self.assertEqual(result["status"], "completed")
@@ -566,7 +859,7 @@ class DomainResultContractTests(unittest.TestCase):
 
         contract = domain_contract(result_schema={
             "type": "object", "additionalProperties": False,
-            "required": ["result", "findings", "reason", "evidenceRefs"],
+            "required": ["result", "findings", "reason", "supportedBy"],
             "properties": {
                 "result": {"const": "scanned_no_issue"},
                 "reason": {"type": "string", "minLength": 1},
@@ -579,7 +872,7 @@ class DomainResultContractTests(unittest.TestCase):
                         "reason": {"type": "string", "minLength": 1},
                     },
                 }},
-                "evidenceRefs": {"type": "array", "items": {"type": "string"}},
+                "supportedBy": {"type": "array", "items": {"type": "string"}},
             },
         })
         registration = replace(
@@ -612,8 +905,8 @@ class DomainResultContractTests(unittest.TestCase):
             }
             for refs in (["evidence:unknown"], ["evidence:unknown", "evidence:unknown"]):
                 with self.assertRaises(PlatformContractError) as rejected:
-                    controller.advance(run_id, domain_result={**base, "evidenceRefs": refs})
-                self.assertEqual(rejected.exception.code, "DOMAIN_EVIDENCE_REFERENCE_INVALID")
+                    controller.advance(run_id, domain_result={**base, "supportedBy": refs})
+                self.assertEqual(rejected.exception.code, "PLATFORM_EVIDENCE_REFERENCE_FORBIDDEN")
                 self.assertEqual(ledger_path.read_text(encoding="utf-8"), before)
 
     def test_mapper_cross_packet_evidence_reference_is_rejected(self):

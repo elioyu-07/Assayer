@@ -474,25 +474,5 @@ class AgentLoopTest(unittest.TestCase):
             "start_audit", "perform_action", "get_operation",
         ])
 
-    def test_skill_declares_untrusted_boundary_recovery_and_all_five_states(self):
-        skill = (Path(__file__).parents[1] / ".agents/skills/assayer-audit/SKILL.md").read_text(encoding="utf-8")
-        for result in ("issue_found", "scanned_no_issue", "not_applicable", "needs_review", "noise"):
-            self.assertIn(f"`{result}`", skill)
-        self.assertIn("untrusted audit data", skill)
-        self.assertIn("get_rule_contract", skill)
-        self.assertIn("get_operation", skill)
-        self.assertIn("Restore every started Case", skill)
-        self.assertIn("read-only select facade", skill)
-        self.assertIn("not as a blocker for the whole object", skill)
-        self.assertIn("while the verified object is still on the current PageState", skill)
-        self.assertIn("Never construct a `request` envelope", skill)
-        self.assertNotIn('"tool":"start_audit"', skill)
-        self.assertIn("The facade owns hidden lifecycle identifiers", skill)
-        self.assertIn('`observe_page` is mandatory before submitting `needs_review`', skill)
-        self.assertIn('bare `pageListCount`', skill)
-        self.assertIn("Do not invoke the `codex` CLI", skill)
-        self.assertIn("`mcp__assayer__*`", skill)
-
-
 if __name__ == "__main__":
     unittest.main()

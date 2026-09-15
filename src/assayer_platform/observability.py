@@ -58,17 +58,16 @@ def build_platform_observability(ledger: PlatformLedger) -> dict[str, Any]:
         if str(event.outcome) in {"failed", "uncertain", "rejected", "blocked"}
     ]
     host_ms, host_count = _duration(events, ("host.", "operation."))
+    semantic_ms, semantic_count = _duration(events, ("semantic.",))
     agent_ms, agent_count = _duration(events, ("agent.",))
     model_ms, model_count = _duration(events, ("model.",))
     transport_ms, transport_count = _duration(events, ("transport.",))
     workflow = ledger.workflow if isinstance(ledger.workflow, Mapping) else {}
-    checkpointed = {
-        item_id for checkpoint in ledger.review_checkpoints for item_id in checkpoint.item_ids
-    }
     graph_items: list[dict[str, Any]] = []
     pending_ids: list[str] = []
     total_candidates = 0
     covered_candidates = 0
+    decided_work_items = {item.work_item_id for item in ledger.decisions}
     for packet in ledger.investigations:
         payload = packet.evidence[0].payload if packet.evidence else None
         graph = payload.get("candidateGraph") if isinstance(payload, Mapping) else None
@@ -77,7 +76,7 @@ def build_platform_observability(ledger: PlatformLedger) -> dict[str, Any]:
             continue
         validate_candidate_evidence_graph_projection(graph)
         ids = [str(item.get("candidate_id")) for item in candidates if isinstance(item, Mapping) and item.get("candidate_id")]
-        pending = [] if graph.get("coverageComplete") is True else [item_id for item_id in ids if item_id not in checkpointed]
+        pending = [] if graph.get("coverageComplete") is True or packet.work_item.work_item_id in decided_work_items else list(ids)
         total_candidates += len(ids)
         covered_candidates += len(ids) - len(pending)
         pending_ids.extend(pending)
@@ -132,6 +131,8 @@ def build_platform_observability(ledger: PlatformLedger) -> dict[str, Any]:
         },
         "timing": {
             "host": {"status": "captured", "durationMs": host_ms, "eventCount": host_count},
+            "semanticTask": ({"status": "captured", "durationMs": semantic_ms, "eventCount": semantic_count}
+                             if semantic_count else {"status": "not_exposed", "reason": "Semantic task compilation was not recorded."}),
             "agent": ({"status": "captured", "durationMs": agent_ms, "eventCount": agent_count}
                       if agent_count else {"status": "not_exposed", "reason": "Agent turn timing was not recorded."}),
             "model": ({"status": "captured", "durationMs": model_ms, "eventCount": model_count}
@@ -170,6 +171,7 @@ def render_platform_observability(ledger: PlatformLedger) -> tuple[bytes, bytes,
         "## Timing",
         "",
         f"- Host: {timing['host']['durationMs']} ms across {timing['host']['eventCount']} event(s)",
+        f"- Semantic task: {timing['semanticTask'].get('durationMs', 'not exposed')}",
         f"- Agent: {timing['agent'].get('durationMs', 'not exposed')}",
         f"- Model: {timing['model'].get('durationMs', 'not exposed')}",
         f"- Transport: {timing['transport'].get('durationMs', 'not exposed')}",

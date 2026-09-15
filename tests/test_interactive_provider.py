@@ -9,6 +9,7 @@ from assayer_platform import (
     CapabilityProfile,
     DecisionProposal,
     DimensionObservation,
+    DomainResultContract,
     EvidenceRecord,
     Finding,
     InteractivePluginController,
@@ -20,6 +21,7 @@ from assayer_platform import (
     ProviderRegistration,
     ProviderRegistry,
     ProviderResponse,
+    ProviderSourceSnapshot,
     WorkItem,
     load_plugin_manifest,
     load_provider_descriptor,
@@ -84,10 +86,32 @@ class RecordingNavigationProvider:
         self.closed = True
 
 
+class RuntimeAwareNavigationProvider(RecordingNavigationProvider):
+    """Provider fixture that proves the Host runtime reaches its factory."""
+
+    def __init__(self, runtime) -> None:
+        super().__init__()
+        self.runtime = runtime
+
+
+class SourceDiscoveringNavigationProvider(RecordingNavigationProvider):
+    def discover_sources(self, scope, context):
+        del context
+        return (ProviderSourceSnapshot(
+            "spec-source", "state-1", {"format": scope.get("format", "markdown")},
+        ),)
+
+
 MANIFEST = load_plugin_manifest({
     "pluginId": "fixture.navigation-plugin",
     "version": "1.0.0",
     "platformApiVersion": "1.0.0",
+    "compatibility": {
+        "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+        "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+        "capabilities": ["domain_result", "supported_by", "task_local_evidence_handles"],
+        "domainContractVersion": "1.0.0",
+    },
     "domains": ["spec"],
     "subjectKinds": ["spec_document"],
     "checks": [{
@@ -104,9 +128,28 @@ MANIFEST = load_plugin_manifest({
     "executionProfile": {
         "discoverBatching": "forbidden", "inspectBatching": "forbidden",
         "decisionBatching": "forbidden", "parallelism": "forbidden",
-        "cacheReuse": "forbidden", "checkpoint": "required",
+        "cacheReuse": "forbidden",
     },
 })
+
+DOMAIN_RESULT_CONTRACT = DomainResultContract(
+    contract_id="test.fixture.navigation.review",
+    contract_version="1.0.0",
+    check_id="NAV-001",
+    check_version="1.0.0",
+    result_schema={
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["result", "findings", "reason"],
+        "properties": {
+            "result": {"enum": ["scanned_no_issue", "needs_review"]},
+            "findings": {"type": "array", "minItems": 1},
+            "reason": {"type": "string", "minLength": 1},
+        },
+    },
+    semantic_instructions_path="tests/interactive-provider.md",
+    semantic_instructions_sha256="0" * 64,
+)
 
 
 class NavigationPlugin:
@@ -142,6 +185,10 @@ class NavigationPlugin:
             item, check.check_id, check.version, (observation,), (evidence,), "not_required",
         ),)
 
+    def map_domain_result(self, result, packet, check, context):
+        del packet, check, context
+        return result
+
 
 class NavigationDecisionProvider:
     def decide(self, packets, check, context):
@@ -165,6 +212,7 @@ def registration(*, provider_scope_resolver=None) -> PluginRegistration:
         provider_scope_resolver=provider_scope_resolver,
         execution_modes=frozenset({"interactive"}),
         scope_schema={"type": "object", "additionalProperties": True},
+        domain_result_contracts=(DOMAIN_RESULT_CONTRACT,),
     )
 
 
@@ -182,6 +230,7 @@ def host_granted_registration() -> PluginRegistration:
         capabilities=frozenset({CAPABILITY}),
         execution_modes=frozenset({"interactive"}),
         scope_schema={"type": "object", "additionalProperties": True},
+        domain_result_contracts=(DOMAIN_RESULT_CONTRACT,),
     )
 
 
@@ -225,6 +274,10 @@ class ForgingNavigationPlugin:
             item, check.check_id, check.version, (observation,), (evidence,), "not_required",
         ),)
 
+    def map_domain_result(self, result, packet, check, context):
+        del packet, check, context
+        return result
+
 
 def forging_registration() -> PluginRegistration:
     return PluginRegistration(
@@ -236,12 +289,19 @@ def forging_registration() -> PluginRegistration:
         provider_scope_resolver=navigation_scope,
         execution_modes=frozenset({"interactive"}),
         scope_schema={"type": "object", "additionalProperties": True},
+        domain_result_contracts=(DOMAIN_RESULT_CONTRACT,),
     )
 
 
 def provider_registration(provider) -> ProviderRegistration:
     return ProviderRegistration(
         PROVIDER_DESCRIPTOR, provider_factory=lambda runtime=None: provider,
+    )
+
+
+def runtime_aware_provider_registration() -> ProviderRegistration:
+    return ProviderRegistration(
+        PROVIDER_DESCRIPTOR, provider_factory=RuntimeAwareNavigationProvider,
     )
 
 
@@ -329,6 +389,84 @@ class InteractiveProviderBindingTest(unittest.TestCase):
         # A non-provider capability without a provider registry keeps the prior
         # host-granted lifecycle and exposes no CapabilityAccess.
         self.assertEqual(started["status"], "started")
+
+    def test_host_injects_provider_runtime_without_controller_ownership(self):
+        runtime = object()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "output"
+            controller = InteractivePluginController(
+                PluginRegistry((registration(provider_scope_resolver=navigation_scope),)),
+                output,
+                provider_registry=ProviderRegistry((runtime_aware_provider_registration(),)),
+                provider_runtime=runtime,
+                **PROFILES,
+            )
+            started = controller.start(
+                plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
+            )
+            run_id = started["runId"]
+            controller.discover(run_id)
+            controller.inspect(run_id)
+            bound = controller._runs[run_id]["capability_provider"]
+            self.assertIs(bound.provider.runtime, runtime)
+            controller.close()
+
+    def test_host_can_resolve_one_provider_runtime_per_run(self):
+        resolved = []
+
+        def runtime_resolver(registration_value, check_value, scope_value):
+            resolved.append((registration_value.manifest.plugin_id, check_value.check_id, scope_value))
+            return {"runSource": "browser-session"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            controller = InteractivePluginController(
+                PluginRegistry((registration(provider_scope_resolver=navigation_scope),)),
+                Path(directory) / "output",
+                provider_registry=ProviderRegistry((runtime_aware_provider_registration(),)),
+                provider_runtime_resolver=runtime_resolver,
+                **PROFILES,
+            )
+            started = controller.start(
+                plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={"url": "https://example.test"},
+            )
+            bound = controller._runs[started["runId"]]["capability_provider"]
+            self.assertEqual(resolved, [("fixture.navigation-plugin", "NAV-001", {"url": "https://example.test"})])
+            self.assertEqual(bound.provider.runtime, {"runSource": "browser-session"})
+            controller.close()
+
+    def test_host_uses_provider_source_discovery_for_work_items(self):
+        class HostDiscoveredPlugin(NavigationPlugin):
+            def discover(self, scope, context):
+                del scope, context
+                raise AssertionError("plugin discovery must not be called")
+
+        registration_value = PluginRegistration(
+            MANIFEST,
+            plugin_factory=lambda runtime=None: HostDiscoveredPlugin(runtime),
+            decision_provider_factory=lambda runtime=None: NavigationDecisionProvider(),
+            capabilities=frozenset({CAPABILITY}),
+            provider_capabilities=frozenset({CAPABILITY}),
+            provider_source_capabilities=frozenset({CAPABILITY}),
+            provider_scope_resolver=navigation_scope,
+            execution_modes=frozenset({"interactive"}),
+            scope_schema={"type": "object", "additionalProperties": True},
+            domain_result_contracts=(DOMAIN_RESULT_CONTRACT,),
+        )
+        provider = SourceDiscoveringNavigationProvider()
+        with tempfile.TemporaryDirectory() as directory:
+            controller = InteractivePluginController(
+                PluginRegistry((registration_value,)), Path(directory) / "output",
+                provider_registry=ProviderRegistry((provider_registration(provider),)),
+                **PROFILES,
+            )
+            started = controller.start(
+                plugin_id="fixture.navigation-plugin", check_id="NAV-001", scope={},
+            )
+            discovered = controller.discover(started["runId"])
+            controller.close()
+
+        self.assertEqual(discovered["result"]["workItems"][0]["identity"], "spec-source")
+        self.assertEqual(discovered["result"]["workItems"][0]["stateDigest"], "state-1")
 
 
 class AlternateNavigationProvider:
@@ -444,6 +582,7 @@ class ShippedEntryProviderWiringTest(unittest.TestCase):
             transport_module.create_interactive_mcp_server = original
 
         self.assertIsNotNone(captured.get("provider_registry"))
+        self.assertTrue(callable(captured.get("provider_runtime_resolver")))
         self.assertIsNotNone(captured.get("platform_profile"))
         self.assertIsNotNone(captured.get("user_profile"))
         self.assertEqual(captured.get("transport"), "stdio")

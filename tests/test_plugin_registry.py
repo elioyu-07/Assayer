@@ -32,7 +32,9 @@ from tests.helpers.config_quality import (
 class InstalledFixturePlugin:
     manifest = load_plugin_manifest({
         "pluginId": "fixture.installed-plugin", "version": "1.0.0",
-        "platformApiVersion": "1.0.0", "domains": ["fixture-domain"],
+        "platformApiVersion": "1.0.0",
+        "compatibility": {"protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0", "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2"},
+        "domains": ["fixture-domain"],
         "subjectKinds": ["fixture_item"],
         "checks": [{
             "checkId": "FIX-001", "version": "1.0.0",
@@ -44,7 +46,7 @@ class InstalledFixturePlugin:
         "executionProfile": {
             "discoverBatching": "forbidden", "inspectBatching": "forbidden",
             "decisionBatching": "forbidden", "parallelism": "forbidden",
-            "cacheReuse": "forbidden", "checkpoint": "required",
+            "cacheReuse": "forbidden",
         },
     })
 
@@ -183,7 +185,7 @@ class PluginRegistryTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (distribution / "entry_points.txt").write_text(
-                "[assayer.plugins]\nfixture = test_plugin_registry:installed_fixture_registration\n",
+                f"[assayer.plugins]\nfixture = {__name__}:installed_fixture_registration\n",
                 encoding="utf-8",
             )
             with patch.object(sys, "path", [directory, *sys.path]):
@@ -251,7 +253,9 @@ class PluginRegistryTest(unittest.TestCase):
     def test_manifest_requiring_newer_platform_api_is_rejected(self):
         manifest = {
             "pluginId": "example.future-plugin", "version": "1.0.0",
-            "platformApiVersion": "2.0.0", "domains": ["future"],
+            "platformApiVersion": "2.0.0",
+            "compatibility": {"protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0", "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2"},
+            "domains": ["future"],
             "subjectKinds": ["future_item"],
             "checks": [{
                 "checkId": "FUT-001", "version": "1.0.0",
@@ -264,31 +268,13 @@ class PluginRegistryTest(unittest.TestCase):
             "executionProfile": {
                 "discoverBatching": "allowed", "inspectBatching": "allowed",
                 "decisionBatching": "allowed", "parallelism": "forbidden",
-                "cacheReuse": "allowed", "checkpoint": "required",
+                "cacheReuse": "allowed",
             },
         }
 
         with self.assertRaisesRegex(PlatformContractError, "platform API"):
             from assayer_platform import load_plugin_manifest
             load_plugin_manifest(manifest)
-
-    def test_interactive_review_payload_schema_is_rejected(self):
-        registration = config_quality_registration()
-        self.assertEqual(registration.review_payload_schema, {})
-
-        schema = {"type": "object", "properties": {"status": {"enum": ["PASS"]}}}
-        from assayer_platform import PluginRegistration
-        with self.assertRaisesRegex(PlatformContractError, "review_payload_schema is unsupported"):
-            PluginRegistration(
-                registration.manifest,
-                scope_schema={"type": "object"},
-                execution_modes=frozenset({"interactive"}),
-                review_payload_schema=schema,
-            )
-
-        with self.assertRaisesRegex(PlatformContractError, "review payload schema must be an object"):
-            PluginRegistration(registration.manifest, scope_schema={"type": "object"}, review_payload_schema="not-an-object")
-
 
 if __name__ == "__main__":
     unittest.main()

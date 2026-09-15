@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator, RefResolver
 
 from .contract import ExecutionProfile, PlatformContractError
-from .registry import _schema_root
+from .registry import schema_store
 
 
 @dataclass(frozen=True)
@@ -37,9 +36,9 @@ class ParallelExecutionPlanner:
     """Compute the safe execution mode without widening plugin or runtime policy."""
 
     def __init__(self) -> None:
-        root = _schema_root()
-        schema = json.loads((root / "parallel-execution.schema.json").read_text(encoding="utf-8"))
-        common = json.loads((root / "common.schema.json").read_text(encoding="utf-8"))
+        schemas = schema_store()
+        schema = schemas["parallel-execution.schema.json"]
+        common = schemas["common.schema.json"]
         self._validator = Draft202012Validator(
             schema,
             resolver=RefResolver(

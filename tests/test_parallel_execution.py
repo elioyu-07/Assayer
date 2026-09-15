@@ -31,6 +31,7 @@ from assayer_platform import (
     load_plugin_manifest,
     load_provider_descriptor,
 )
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +42,10 @@ MANIFEST = load_plugin_manifest({
     "pluginId": "fixture.parallel-plugin",
     "version": "1.0.0",
     "platformApiVersion": "1.0.0",
+    "compatibility": {
+        "protocolMinVersion": "1.2.0", "protocolMaxVersion": "1.2.0",
+        "sdkMinVersion": "0.1.2", "sdkMaxVersion": "0.1.2",
+    },
     "domains": ["fixture"],
     "subjectKinds": ["fixture_item"],
     "checks": [{
@@ -60,7 +65,6 @@ MANIFEST = load_plugin_manifest({
         "decisionBatching": "allowed",
         "parallelism": "allowed",
         "cacheReuse": "forbidden",
-        "checkpoint": "required",
         "maxBatchSize": 2,
         "ordering": "independent",
         "failureSplitting": "forbidden",
@@ -293,11 +297,7 @@ class ParallelExecutionTests(unittest.TestCase):
         self.assertEqual(decisions(parallel), decisions(serial))
 
     def test_public_parallel_plan_schema_accepts_every_planner_result(self):
-        schemas = {}
-        for path in SCHEMAS.glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
+        schemas = schema_store(SCHEMAS)
         schema = schemas["parallel-execution.schema.json"]
         validator = Draft202012Validator(
             schema,

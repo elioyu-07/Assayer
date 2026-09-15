@@ -4,10 +4,15 @@
 |---|---|
 | Document version | 1.2.0 |
 | Date | 2026-09-03 |
-| Status | J00-J03 and J06b confirmed; J04-J05 implementation complete, acceptance pending |
+| Status | J00-J03 and J06b confirmed; J04-J05 implementation complete, deterministic evidence recorded, operator acceptance pending |
 | Owner | Product Owner / Agent Runtime / Host Core |
 
 This document is the sole user-journey baseline for the Assayer productization phase. It defines whether a user can actually use the product and when completion may be claimed. Plugin, Skill, MCP, Host, tests, and observability are implementation means and cannot independently prove product completion.
+
+J04, J05, and J08 are executed and recorded through the subordinate
+[Operator Release Gate v1](operator-release-gate-v1.md). That profile fixes the
+clean environment, status vocabulary, scenario inventory, and evidence bundle;
+it does not redefine this document's journey or completion authority.
 
 ## 1. Alpha User and Scope
 
@@ -94,13 +99,6 @@ Alpha end-to-end user-journey completion may be claimed only when all conditions
 | UAT-08 | Upgrade and uninstall | Installation environment | New sessions load the upgraded version; uninstall leaves no stale broken MCP configuration |
 | UAT-09 | Interruption and resume | CLI | Interrupt before and after a checkpoint acknowledgement, then continue; the Host resumes from the unique durable boundary with no duplicate decision or Evidence loss |
 
-J08a read-only diagnosis is implemented through `get_installation_status`:
-the operation is Run-independent, does not start a browser, reports release
-identity and consistency, and returns only safe Run IDs and allowlisted
-relative diagnostic artifact names. UAT-08 remains open until upgrade,
-rollback, uninstall, and cleanup are proven through the official Codex plugin
-management boundary.
-
 J08b lifecycle planning is implemented as a fail-closed, schema-validated
 transaction plan. It requires immutable verified current and target releases,
 blocks while a Run is active, prevents simultaneously installed Assayer
@@ -162,6 +160,7 @@ B07c (automatic sensitive-region identification and pixel sanitization) is defer
 - [Product contract](product-contract.md) owns product goals, rule scope, and user-visible safety commitments; this document owns the Alpha delivery boundary, user journey, and sole completion gate;
 - [LLM Agent investigation plan](llm-agent-integration-plan.md) records implementation slices and must map them to J01-J08; it cannot independently claim product completion;
 - [Observability governance](observability-governance.md) defines the fact and diagnostic closure required by J04-J08;
+- [Operator Release Gate v1](operator-release-gate-v1.md) defines the clean operator execution and evidence profile for J04, J05, and J08;
 - Legacy C/B slices are historical implementation records. When they conflict, this document's user journey and Definition of Done take precedence.
 
 ## 8. Current CLI Acceptance Record

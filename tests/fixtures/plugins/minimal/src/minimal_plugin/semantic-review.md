@@ -2,7 +2,7 @@
 
 Review the current configuration `agentView` and return only the fields in
 `domainContract.resultSchema`. Cite Evidence through `supportedBy` using the
-current task's opaque handle. Do not return Run, WorkItem, checkpoint,
+current task's opaque handle. Do not return Run, WorkItem,
 contract-digest, task-digest, revision, Decision, or finalization fields.
 
 Use `scanned_no_issue` when the required keys are present, `issue_found` when

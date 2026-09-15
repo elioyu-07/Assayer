@@ -9,12 +9,12 @@ After installing the Assayer Plugin, a new Codex Desktop task or CLI session rec
 On 2026-09-01, a real fresh Codex CLI session automatically discovered `assayer:assayer-audit`, resolved the local Plugin MCP, and directly called `mcp__assayer__start_audit` for a formal lease-mock audit. CLI primary acceptance passed; Desktop remains a later compatibility check, not the current primary gate.
 
 - `assayer@personal` is `installed, enabled`; its version may include `+codex.<cachebuster>`;
-- Plugin cache contains manifest, Skill, MCP launcher, offline wheelhouse, and bundle manifest;
+- Plugin cache contains manifest, Skill, lightweight MCP launcher, explicit runtime preparer, offline wheelhouse, and bundle manifest;
 - Legacy user `mcp_servers.assayer` and repository `.codex/config.toml` absolute-path wiring was removed;
 - `codex mcp list` no longer shows Assayer as a manually configured external MCP; Plugin manages its source;
 - Open tasks do not refresh Plugin catalogs dynamically; acceptance requires a new task or app-server restart;
 - Codex CLI may defer local Plugin MCP startup; after Skill selection it must resolve the deferred `assayer` catalog before formal audit;
-- Launcher selects a matching Python minor from the bundle manifest and cannot use a PATH Python below 3.11 or with incompatible ABI.
+- Runtime preparation selects a matching Python minor from the bundle manifest and cannot use a PATH Python below 3.11 or with incompatible ABI; normal MCP launch performs no environment installation.
 
 ## Fresh-Task Acceptance
 

@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from jsonschema import Draft202012Validator, ValidationError
+
 from assayer_plugin_sdk import (
     CapabilityProviderDescriptor,
     ProviderCapability,
@@ -36,6 +38,56 @@ _INCLUDE_KINDS = {
     "code": "code_block", "code_block": "code_block", "code_blocks": "code_block",
     "quote": "blockquote", "quotes": "blockquote", "blockquote": "blockquote",
     "front_matter": "front_matter", "front-matter": "front_matter",
+}
+
+
+# This is intentionally provider-owned.  The platform only transports an
+# opaque ProviderFact; plugins can rely on this published shape without
+# importing the Markdown parser or any platform implementation module.
+MARKDOWN_RESULT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["format", "document", "sourceDigest", "units", "unitCount", "nextCursor", "coverage"],
+    "properties": {
+        "format": {"const": "markdown"},
+        "document": {
+            "type": "object", "additionalProperties": False,
+            "required": ["path", "lineCount"],
+            "properties": {
+                "path": {"type": "string", "minLength": 1},
+                "lineCount": {"type": "integer", "minimum": 0},
+            },
+        },
+        "sourceDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "units": {
+            "type": "array",
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["unitId", "kind", "headingPath", "startLine", "endLine", "excerpt"],
+                "properties": {
+                    "unitId": {"type": "string", "minLength": 1},
+                    "kind": {"type": "string", "minLength": 1},
+                    "headingPath": {"type": "array", "items": {"type": "string"}},
+                    "startLine": {"type": "integer", "minimum": 1},
+                    "endLine": {"type": "integer", "minimum": 1},
+                    "excerpt": {"type": "string"},
+                    "metadata": {"type": "object"},
+                },
+            },
+        },
+        "unitCount": {"type": "integer", "minimum": 0},
+        "nextCursor": {"type": ["string", "null"]},
+        "coverage": {
+            "type": "object", "additionalProperties": False,
+            "required": ["discovered", "selected", "returned", "cursor"],
+            "properties": {
+                "discovered": {"type": "integer", "minimum": 0},
+                "selected": {"type": "integer", "minimum": 0},
+                "returned": {"type": "integer", "minimum": 0},
+                "cursor": {"type": "string"},
+            },
+        },
+    },
 }
 
 
@@ -209,6 +261,7 @@ def _descriptor() -> CapabilityProviderDescriptor:
             "source_changed", "stale_state", "source_error", "result_unknown",
         )],
         "algorithmVersions": {"markdownParser": "1.0.0", "sourceIdentity": "1.0.0", "stateDigest": "1.0.0"},
+        "resultSchema": MARKDOWN_RESULT_SCHEMA,
     })
 
 
@@ -278,8 +331,19 @@ class MarkdownNavigationProvider:
                 "discovered": len(all_units), "selected": len(filtered_units),
                 "returned": len(page_units), "cursor": str(cursor),
             }}
+            # Keep the provider boundary self-checking.  A parser change that
+            # silently alters the published payload fails as a classified
+            # provider error instead of leaking an incompatible fact to a
+            # plugin.
+            Draft202012Validator(self.descriptor.result_schema).validate(payload)
             fact = ProviderFact("structured", request.source_identity, request.state_digest, payload)
             return ProviderResponse(request.request_id, request.provider_id, request.provider_version, request.capability, "succeeded", (fact,))
+        except ValidationError:
+            return ProviderResponse(
+                request.request_id, request.provider_id, request.provider_version,
+                request.capability, "failed",
+                failure=ProviderFailure("source_error", "Markdown provider output violated its published result contract."),
+            )
         except (OSError, UnicodeError, ValueError) as error:
             return ProviderResponse(request.request_id, request.provider_id, request.provider_version, request.capability, "failed", failure=ProviderFailure("source_error", str(error)))
 

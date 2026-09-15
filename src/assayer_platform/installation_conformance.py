@@ -23,7 +23,6 @@ from .conformance import (
     PluginConformanceIssue,
     PluginConformanceReport,
     _package_issue,
-    _schema_validator,
     inspect_plugin_package,
     inspect_plugin_registration,
     inspect_plugin_lifecycle,
@@ -38,10 +37,11 @@ from .contract import (
 )
 from .kernel import PlatformKernel
 from .interactive import InteractivePluginController
+from .incremental_review import JsonCoverageLedgerStore
 from .plugin_registry import PluginRegistration, PluginRegistry
 from .provider_catalog import installed_provider_registry
 from .provider_binding import bind_capability_provider, check_for, grant_check_capabilities
-from .registry import load_plugin_manifest
+from .registry import load_plugin_manifest, schema_validator
 from .result_conformance import inspect_result_conformance
 
 
@@ -205,6 +205,7 @@ class _ReleaseAcceptanceTransport:
     """Small platform-only adapter used by installed release fixtures."""
     def __init__(
         self, root: Path, registry: PluginRegistry, tracker: dict[str, Any],
+        *, provider_runtime: Any = None,
     ) -> None:
         # A release fixture may require capability providers; bind them from the
         # installed entry-point catalog so the same provider contract used in
@@ -213,6 +214,7 @@ class _ReleaseAcceptanceTransport:
         self._controller = InteractivePluginController(
             registry, root,
             provider_registry=installed_provider_registry(),
+            provider_runtime=provider_runtime,
             platform_profile=grant_check_capabilities,
             user_profile=grant_check_capabilities,
         )
@@ -252,19 +254,23 @@ class _ReleaseAcceptanceTransport:
             if self._active_run_id is None:
                 if self._terminal_run_id is None:
                     raise PlatformContractError("RUN_NOT_STARTED", "No release acceptance Run is active")
-                if "domainResult" in arguments:
+                if "domainResult" in arguments or "reviewSubmission" in arguments:
                     raise PlatformContractError("RUN_TERMINAL", "The release acceptance Run is terminal")
                 result = self._controller.terminal_status(self._terminal_run_id)
                 self._tracker["replayed"].add(self._terminal_run_id)
             else:
                 submitted_domain_result = "domainResult" in arguments
+                submitted_review_batch = "reviewSubmission" in arguments
                 result = self._controller.advance(
                     self._active_run_id,
                     domain_result=arguments.get("domainResult"),
+                    review_submission=arguments.get("reviewSubmission"),
                     page_size=arguments.get("pageSize"),
                 )
                 if submitted_domain_result:
                     self._tracker["domainResultSubmissions"] += 1
+                if submitted_review_batch:
+                    self._tracker["reviewBatchSubmissions"] += 1
                 if result.get("status") in {"completed", "partial", "failed"}:
                     self._terminal_run_id = result["runId"]
                     self._active_run_id = None
@@ -309,8 +315,8 @@ def _run_release_acceptance(
     if not acceptance_spec:
         return [_fixture_issue(
             "PLUGIN_INTERACTIVE_RELEASE_ACCEPTANCE_MISSING",
-            "An interactive DomainResult plugin does not declare releaseAcceptance.",
-            "Publish an installed acceptance driver that completes DomainResult submission, resume, replay, and terminal publication.",
+            "An interactive plugin does not declare releaseAcceptance.",
+            "Publish an installed acceptance driver that completes semantic submission, resume, replay, and terminal publication.",
         )]
     driver, issues = _entry_point_release_acceptance(
         target, acceptance_spec, descriptor["pluginVersion"],
@@ -322,13 +328,13 @@ def _run_release_acceptance(
         registry = PluginRegistry((registration,))
         tracker: dict[str, Any] = {
             "resumed": set(), "replayed": set(), "resultPaged": set(),
-            "domainResultSubmissions": 0,
+            "domainResultSubmissions": 0, "reviewBatchSubmissions": 0,
         }
         result = driver(
             registration=registration,
             output_root=output_root,
-            transport_factory=lambda root: _ReleaseAcceptanceTransport(
-                root, registry, tracker,
+            transport_factory=lambda root, **kwargs: _ReleaseAcceptanceTransport(
+                root, registry, tracker, **kwargs,
             ),
         )
     except Exception as error:
@@ -338,7 +344,7 @@ def _run_release_acceptance(
             "Make the installed acceptance journey deterministic and satisfy every strict lifecycle assertion.",
         )]
     errors = sorted(
-        _schema_validator("plugin-release-acceptance.schema.json").iter_errors(result),
+        schema_validator("plugin-release-acceptance.schema.json").iter_errors(result),
         key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
     if errors:
@@ -353,6 +359,8 @@ def _run_release_acceptance(
         contract.check_ref: contract
         for contract in registration.domain_result_contracts
     }
+    if "common_review" in registration.result_features:
+        expected = {check.ref: check for check in registration.manifest.checks}
     actual = {
         (item["checkId"], item["checkVersion"]): item
         for item in result["checks"]
@@ -360,17 +368,30 @@ def _run_release_acceptance(
     if set(actual) != set(expected) or len(actual) != len(result["checks"]):
         return [_fixture_issue(
             "PLUGIN_RELEASE_ACCEPTANCE_COVERAGE_INCOMPLETE",
-            "The release-acceptance result does not cover every DomainResult contract exactly once.",
+            "The release-acceptance result does not cover every interactive Check exactly once.",
             "Return one acceptance record for every interactive Check and contract version.",
         )]
-    ledger_validator = _schema_validator("platform-ledger.schema.json")
-    declared_domain_result_submissions = 0
+    ledger_validator = schema_validator("platform-ledger.schema.json")
+    common_review = "common_review" in registration.result_features
+    submission_key = (
+        "reviewBatchSubmissions" if common_review else "domainResultSubmissions"
+    )
+    forbidden_submission_key = (
+        "domainResultSubmissions" if common_review else "reviewBatchSubmissions"
+    )
+    declared_submissions = 0
     for check_ref, contract in expected.items():
         del contract
         item = actual[check_ref]
-        declared_domain_result_submissions += item["domainResultSubmissions"]
+        if submission_key not in item or forbidden_submission_key in item:
+            return [_fixture_issue(
+                "PLUGIN_RELEASE_ACCEPTANCE_RESULT_MODE_MISMATCH",
+                f"The acceptance record does not use {submission_key} for this plugin mode.",
+                f"Declare exactly {submission_key} for every covered Check.",
+            )]
+        declared_submissions += item[submission_key]
         ledger_run_ids: set[str] = set()
-        observed_decisions = 0
+        observed_submissions = 0
         for relative in item["ledgerPaths"]:
             ledger_path = (output_root / relative).resolve()
             try:
@@ -399,14 +420,28 @@ def _run_release_acceptance(
                     "Return ledgers produced by the installed plugin and declared Check.",
                 )]
             ledger_run_ids.add(ledger["run"]["run_id"])
-            observed_decisions += len(ledger.get("decisions", ()))
+            if common_review:
+                coverage = JsonCoverageLedgerStore(ledger_path.parent).load(
+                    ledger["run"]["run_id"],
+                )
+                if coverage is None or coverage.terminal_status != "completed":
+                    return [_fixture_issue(
+                        "PLUGIN_RELEASE_ACCEPTANCE_COVERAGE_INVALID",
+                        "A common-review acceptance Run lacks terminal coverage.",
+                        "Complete every generated review batch before publication.",
+                    )]
+                observed_submissions += sum(
+                    verdict.status == "accepted" for verdict in coverage.verdicts
+                )
+            else:
+                observed_submissions += len(ledger.get("decisions", ()))
         if (
             len(ledger_run_ids) != item["completedRuns"]
-            or observed_decisions != item["domainResultSubmissions"]
+            or observed_submissions != item[submission_key]
         ):
             return [_fixture_issue(
                 "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
-                "Declared completed Run or DomainResult submission counts differ from the durable ledgers.",
+                "Declared completed Run or semantic submission counts differ from the durable ledgers.",
                 "Derive acceptance metrics from the exact terminal ledgers returned to the platform.",
             )]
         if not ledger_run_ids.intersection(tracker["resumed"]):
@@ -427,11 +462,11 @@ def _run_release_acceptance(
                 "The platform-owned acceptance transport did not page every terminal result.",
                 "Read a bounded result page from every published terminal Run.",
             )]
-    if declared_domain_result_submissions != tracker["domainResultSubmissions"]:
+    if declared_submissions != tracker[submission_key]:
         return [_fixture_issue(
             "PLUGIN_RELEASE_ACCEPTANCE_METRICS_MISMATCH",
-            "The acceptance driver DomainResult count differs from Host-observed submissions.",
-            "Report the exact number of DomainResults accepted by the platform-owned transport.",
+            "The acceptance driver semantic submission count differs from Host-observed submissions.",
+            "Report the exact number of submissions accepted by the platform-owned transport.",
         )]
     return []
 
@@ -576,8 +611,30 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                 "Keep the validated semantic instructions available to the isolated release worker.",
             ))
         else:
-            for contract in registration.domain_result_contracts:
-                installed_semantic_path = (target / contract.semantic_instructions_path).resolve()
+            semantic_resources = [
+                (
+                    contract.semantic_instructions_path,
+                    contract.semantic_instructions_sha256,
+                )
+                for contract in registration.domain_result_contracts
+            ]
+            if "common_review" in registration.result_features:
+                if (
+                    registration.semantic_instructions_path is None
+                    or registration.semantic_instructions_sha256 is None
+                ):
+                    issues.append(_package_issue(
+                        "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_MISSING",
+                        "The common-review registration does not freeze its semantic instructions.",
+                        "Compile the plugin so its semantic instruction path and digest are registered.",
+                    ))
+                else:
+                    semantic_resources.append((
+                        registration.semantic_instructions_path,
+                        registration.semantic_instructions_sha256,
+                    ))
+            for semantic_path, declared_digest in semantic_resources:
+                installed_semantic_path = (target / semantic_path).resolve()
                 try:
                     installed_semantic_path.relative_to(target)
                 except ValueError:
@@ -598,10 +655,10 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                         "Include semanticInstructions.path in the built wheel package data.",
                     ))
                     continue
-                if contract.semantic_instructions_sha256 != installed_semantic_digest:
+                if declared_digest != installed_semantic_digest:
                     issues.append(_package_issue(
                         "PLUGIN_INSTALLED_SEMANTIC_INSTRUCTIONS_DIGEST_MISMATCH",
-                        "The installed semantic-instructions bytes do not match the registered DomainResult contract digest.",
+                        "The installed semantic-instructions bytes do not match the registered digest.",
                         "Generate the digest from the exact semantic-instructions file included in the wheel.",
                     ))
                 if expected_semantic_digest != installed_semantic_digest:
@@ -610,22 +667,14 @@ def _worker(target: Path, package_root: Path, result_path: Path) -> int:
                         "The installed semantic-instructions bytes differ from the statically validated release resource.",
                         "Build the wheel from the same reviewed semantic-instructions resource.",
                     ))
-        review_payload_path = descriptor.get("reviewPayloadSchema")
-        if review_payload_path:
-            review_payload_schema = json.loads(
-                (package_root / review_payload_path).read_text(encoding="utf-8")
-            )
-            if dict(registration.review_payload_schema) != review_payload_schema:
-                issues.append(_package_issue(
-                    "PLUGIN_INSTALLED_REVIEW_PAYLOAD_SCHEMA_MISMATCH",
-                    "The installed registration review payload schema differs from the packaged review payload schema.",
-                    "Publish the same checkpoint payload schema in the descriptor and registration.",
-                ))
-        if not issues and registration.domain_result_contracts:
+        if not issues and (
+            registration.domain_result_contracts
+            or "common_review" in registration.result_features
+        ):
             issues.extend(_run_release_acceptance(
                 registration, descriptor, target, result_path.parent / "acceptance",
             ))
-        if not issues:
+        if not issues and "common_review" not in registration.result_features:
             for relative in descriptor["fixtures"]:
                 fixture = json.loads((package_root / relative).read_text(encoding="utf-8"))
                 issues.extend(_run_fixture(registration, fixture))
@@ -691,7 +740,16 @@ def inspect_plugin_installation(
         # ``assayer_platform.installation_conformance``.  Point it at the
         # platform distribution that is executing this gate (the plugin under
         # test remains first on sys.path inside the worker).
-        isolated_env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        platform_source = Path(__file__).resolve().parents[1]
+        # Provider distributions are platform inputs, not plugin source.  The
+        # repository checkout keeps the browser provider beside the platform;
+        # expose that installed provider source to the isolated worker so a
+        # browser-backed ordinary plugin can exercise its real provider gate.
+        provider_source = platform_source.parent / "packages" / "assayer-provider-browser" / "src"
+        python_paths = [str(platform_source)]
+        if provider_source.is_dir():
+            python_paths.append(str(provider_source))
+        isolated_env["PYTHONPATH"] = os.pathsep.join(python_paths)
         isolated_env.update({
             "PYTHONNOUSERSITE": "1",
             "UV_CACHE_DIR": str(temporary / "uv-cache"),
@@ -807,7 +865,7 @@ def inspect_plugin_installation(
             ),))
         payload = json.loads(result_path.read_text(encoding="utf-8"))
         try:
-            _schema_validator("plugin-conformance.schema.json").validate({
+            schema_validator("plugin-conformance.schema.json").validate({
                 "schemaVersion": "1.0.0",
                 "status": "passed" if not payload["issues"] else "failed",
                 "plugins": [payload],

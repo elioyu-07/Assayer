@@ -14,6 +14,7 @@ from assayer_platform import (
     ProviderRegistry,
     load_provider_descriptor,
 )
+from assayer_platform.registry import schema_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -211,11 +212,7 @@ class CapabilityNegotiationTests(unittest.TestCase):
             user_profile=CapabilityProfile(frozenset({"structured_read"})),
             scope={"sources": []},
         )
-        schemas = {}
-        for path in SCHEMAS.glob("*.schema.json"):
-            schema = json.loads(path.read_text(encoding="utf-8"))
-            schemas[path.name] = schema
-            schemas[schema["$id"]] = schema
+        schemas = schema_store(SCHEMAS)
         schema = schemas["capability-negotiation.schema.json"]
         Draft202012Validator(
             schema,
