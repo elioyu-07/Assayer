@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "assayer-provider-browser"
+version = "0.1.0"
+description = "The Assayer read-only browser snapshot capability provider"
+requires-python = ">=3.11"
+dependencies = ["assayer-plugin-sdk==0.1.2"]
+
+[project.entry-points."assayer.providers"]
+browser = "assayer_browser_provider:browser_registration"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["assayer_browser_provider"]
+
+[tool.setuptools.package-data]
+assayer_browser_provider = ["descriptor.json"]

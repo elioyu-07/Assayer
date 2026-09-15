@@ -1,0 +1,160 @@
+{
+  "algorithmVersions": {
+    "browserSnapshot": "1.0.0",
+    "sourceIdentity": "1.0.0",
+    "stateDigest": "1.0.0"
+  },
+  "authorization": {
+    "secretHandling": "none",
+    "userScopeRequired": true
+  },
+  "capabilities": [
+    {
+      "accessMode": "read_only",
+      "evidenceKinds": [
+        "browser_snapshot"
+      ],
+      "name": "browser_snapshot",
+      "version": "1.0.0"
+    }
+  ],
+  "failurePolicy": [
+    {
+      "code": "capability_unavailable",
+      "retry": "never"
+    },
+    {
+      "code": "authorization_denied",
+      "retry": "never"
+    },
+    {
+      "code": "timeout",
+      "retry": "never"
+    },
+    {
+      "code": "budget_exceeded",
+      "retry": "never"
+    },
+    {
+      "code": "source_changed",
+      "retry": "never"
+    },
+    {
+      "code": "stale_state",
+      "retry": "never"
+    },
+    {
+      "code": "source_error",
+      "retry": "never"
+    },
+    {
+      "code": "result_unknown",
+      "retry": "resolve_unknown_first"
+    }
+  ],
+  "limits": {
+    "maxBytes": 10000000,
+    "maxConcurrency": 1,
+    "maxItems": 1,
+    "timeoutMs": 30000
+  },
+  "platformApiVersion": "1.0.0",
+  "providerId": "assayer.browser-snapshot",
+  "resultSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "activeTab": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "candidates": {
+        "items": {
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "domDigest": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "entrypoints": {
+        "items": {
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "format": {
+        "const": "browser_snapshot"
+      },
+      "networkSummary": {
+        "type": "object"
+      },
+      "origin": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "route": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "stateDigest": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "stateKind": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "structureSummary": {
+        "type": "object"
+      },
+      "title": {
+        "type": "string"
+      },
+      "url": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "visibleText": {
+        "type": "string"
+      },
+      "visualDigest": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "format",
+      "url",
+      "origin",
+      "title",
+      "route",
+      "stateKind",
+      "visibleText",
+      "entrypoints",
+      "candidates",
+      "networkSummary",
+      "structureSummary",
+      "activeTab",
+      "domDigest",
+      "visualDigest",
+      "stateDigest"
+    ],
+    "type": "object"
+  },
+  "scopeSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "url": {
+        "format": "uri",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "version": "0.1.0"
+}

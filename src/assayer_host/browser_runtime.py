@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
+
+from assayer_platform import ProviderRuntimeLease
+from assayer_plugin_sdk import BrowserSnapshot
 
 from .action_safety import ActionSafetyPolicy
 from .auth import LoginResult
-from .browser_readonly import BrowserReadOnlyPageAdapter, PlaywrightBrowserBackend
+from .browser_readonly import (
+    BrowserReadOnlyPageAdapter,
+    PlaywrightBrowserBackend,
+    create_readonly_browser_adapters,
+)
 from .browser_recovery import create_recoverable_browser_adapter_bundle
-from .browser_session import BrowserProfile, BrowserSession
+from .browser_session import BrowserBackend, BrowserProfile, BrowserSession
 from .core import HostCore
 from .errors import HostError
 from .evidence import EvidenceSanitizer
@@ -44,8 +54,100 @@ class AnonymousBrowserLoginAdapter:
         )
 
 
+class BrowserSnapshotHostRuntime:
+    """Own the minimal real-browser boundary required by snapshot providers.
+
+    All Playwright operations run on one dedicated worker because its sync API
+    is thread-affine.  The provider receives only ``observe_snapshot`` and
+    cannot reach the managed Page or BrowserSession.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        profile: BrowserProfile | None = None,
+        backend: BrowserBackend | None = None,
+    ) -> None:
+        parsed = urlparse(url)
+        try:
+            origin = BrowserReadOnlyPageAdapter._origin(parsed)
+        except HostError as error:
+            raise ValueError("url must be an http(s) URL without credentials") from error
+        self.entry_url = url
+        self._executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="assayer-browser-provider",
+        )
+        self._closed = False
+        try:
+            self._session, self._source = self._executor.submit(
+                self._open,
+                url,
+                origin,
+                profile or BrowserProfile(),
+                backend if backend is not None else PlaywrightBrowserBackend(),
+            ).result()
+        except Exception:
+            self._executor.shutdown(wait=True)
+            raise
+
+    @staticmethod
+    def _open(
+        url: str,
+        origin: str,
+        profile: BrowserProfile,
+        backend: BrowserBackend,
+    ) -> tuple[BrowserSession, BrowserReadOnlyPageAdapter]:
+        session = BrowserSession(f"provider-{uuid.uuid4().hex}", profile, backend=backend)
+        try:
+            session.open()
+            source, _ = create_readonly_browser_adapters(
+                session,
+                allowed_origin=origin,
+            )
+            source.navigate(url)
+            source.settle_readonly()
+            return session, source
+        except Exception:
+            session.close()
+            raise
+
+    def observe_snapshot(self) -> BrowserSnapshot:
+        if self._closed:
+            raise RuntimeError("browser snapshot runtime is closed")
+        return self._executor.submit(self._source.observe_snapshot).result()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._executor.submit(self._session.close).result()
+        finally:
+            self._executor.shutdown(wait=True)
+
+
+def browser_provider_runtime_resolver(
+    registration: Any,
+    check: Any,
+    scope: Any,
+    *,
+    runtime_factory: Callable[[str], BrowserSnapshotHostRuntime] = BrowserSnapshotHostRuntime,
+) -> ProviderRuntimeLease | None:
+    """Lazily lease a real browser only for a browser-snapshot Check."""
+    del registration
+    required = frozenset(getattr(check, "required_capabilities", ()))
+    if "browser_snapshot" not in required:
+        return None
+    if not isinstance(scope, Mapping) or not isinstance(scope.get("url"), str):
+        raise ValueError("browser snapshot scope requires a URL")
+    runtime = runtime_factory(scope["url"])
+    return ProviderRuntimeLease(runtime)
+
+
 class BrowserHostRuntime:
-    """Own one real Chromium Session and the HostCore using its adapters."""
+    """Own one browser Context and the HostCore using its adapters."""
 
     def __init__(
         self,
@@ -54,6 +156,7 @@ class BrowserHostRuntime:
         *,
         profile: BrowserProfile | None = None,
         scan_id: str | None = None,
+        backend: BrowserBackend | None = None,
     ):
         parsed = urlparse(url)
         try:
@@ -66,7 +169,9 @@ class BrowserHostRuntime:
         self.store_path = Path(self.output_dir) / "host-ledger.sqlite3"
         scan_id = scan_id or f"scan-{uuid.uuid4().hex}"
         self.session = BrowserSession(
-            scan_id, profile or BrowserProfile(), backend=PlaywrightBrowserBackend()
+            scan_id,
+            profile or BrowserProfile(),
+            backend=backend if backend is not None else PlaywrightBrowserBackend(),
         )
         store = None
         try:
@@ -138,6 +243,17 @@ class BrowserHostRuntime:
         ) in {"completed", "partial", "failed"}:
             self.session.close()
         return response
+
+    @property
+    def browser_snapshot_source(self):
+        """Expose the Host-owned read-only snapshot boundary to providers.
+
+        The returned adapter is intentionally the SDK-shaped source boundary;
+        callers must not reach through it to the managed Playwright page.  The
+        BrowserHostRuntime remains responsible for its lifetime and must stay
+        open while a provider-backed plugin Run is active.
+        """
+        return self.bundle.page
 
     def close(self):
         try:

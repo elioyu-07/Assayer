@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "fixtureId": "browser.snapshot.stale-state",
+  "description": "A snapshot whose state changed after WorkItem freezing is rejected.",
+  "capability": "browser_snapshot",
+  "scope": {
+    "url": "https://example.test/orders"
+  },
+  "sourceIdentity": "https://example.test/orders",
+  "stateDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expected": {
+    "status": "failed",
+    "failureCode": "stale_state"
+  }
+}

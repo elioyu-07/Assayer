@@ -1,8 +1,11 @@
+import hashlib
 import unittest
+
+from assayer_plugin_sdk import BrowserSnapshot, BrowserSnapshotSource
 
 from assayer_host import (BrowserProfile, BrowserSession, CredentialVault,
                           DeterministicLoginAdapter, HostCore, LoginSecret,
-                          ObjectMatch)
+                          ObjectMatch, SQLiteStore)
 from assayer_host.browser_readonly import (BrowserLocatorRegistry,
                                            BrowserObjectIdentityAdapter,
                                            BrowserReadOnlyPageAdapter,
@@ -91,6 +94,26 @@ class BrowserReadonlyAdapterTest(unittest.TestCase):
         self.assertIn("querySelectorAll", page.evaluated[0])
         session.close()
 
+    def test_observe_snapshot_returns_frozen_sdk_boundary(self):
+        session, _, page = self.make()
+        adapter = BrowserReadOnlyPageAdapter(session, allowed_origin="https://test.example.com")
+
+        snapshot = adapter.observe_snapshot()
+
+        self.assertIsInstance(snapshot, BrowserSnapshot)
+        self.assertIsInstance(adapter, BrowserSnapshotSource)
+        self.assertEqual(snapshot.url, "https://test.example.com/orders")
+        self.assertEqual(snapshot.origin, "https://test.example.com")
+        self.assertEqual(snapshot.title, "Orders")
+        self.assertEqual(
+            snapshot.dom_digest,
+            hashlib.sha256(page.content().encode("utf-8")).hexdigest(),
+        )
+        self.assertEqual(len(snapshot.state_digest), 64)
+        with self.assertRaises(TypeError):
+            snapshot.candidates[0]["kind"] = "button"
+        session.close()
+
     def test_factory_refreshes_registry_before_object_verification(self):
         session, _, page = self.make()
         page_adapter, identity = create_readonly_browser_adapters(
@@ -110,7 +133,9 @@ class BrowserReadonlyAdapterTest(unittest.TestCase):
         )
         vault = CredentialVault()
         vault.put("credential-browser", LoginSecret("browser-user", "browser-password"))
+        store = SQLiteStore()
         core = HostCore(
+            store=store,
             credential_vault=vault, login_adapter=DeterministicLoginAdapter(),
             page_adapter=page_adapter, object_identity_adapter=identity_adapter,
         )
@@ -136,7 +161,7 @@ class BrowserReadonlyAdapterTest(unittest.TestCase):
             })
             self.assertEqual(verified["status"], "ok")
             self.assertEqual(verified["result"]["rebindStatus"], "matched")
-            stored_candidate = core._store.get_candidate(inspected["candidateRefs"][0])
+            stored_candidate = store.get_candidate(inspected["candidateRefs"][0])
             self.assertNotIn("locator_material", stored_candidate)
             self.assertNotIn("orders-filter", str(stored_candidate))
         finally:

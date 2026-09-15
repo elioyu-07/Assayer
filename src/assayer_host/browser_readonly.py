@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
 from threading import RLock
-from typing import Callable, Protocol, Sequence
+from typing import Any, Callable, Protocol, Sequence
 from urllib.parse import urlparse
+
+from assayer_plugin_sdk import BrowserSnapshot
 
 from .browser_session import BrowserBackend, BrowserProfile, BrowserSession, BrowserSessionFailure
 from .errors import HostError
@@ -36,6 +38,17 @@ class ReadonlyBrowserContext(Protocol):
 
 LOCAL_BROWSER_CHANNELS = ("chrome", "msedge")
 _MIN_PLAYWRIGHT_VERSION = (1, 40, 0)
+
+
+def _plain(value: object) -> Any:
+    """Convert SDK-frozen mappings into JSON-compatible Host data."""
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_plain(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return [_plain(item) for item in value]
+    return value
 
 
 def _load_sync_playwright():
@@ -89,18 +102,21 @@ def launch_local_chromium(playwright, *, headless: bool = True, timeout_ms: int 
 class PlaywrightBrowserBackend:
     """Launch a locally installed Chromium-family browser from ``BrowserProfile``."""
 
-    def __init__(self):
+    def __init__(self, *, shared_browser: object | None = None):
         self._playwright = None
-        self._browser = None
+        self._browser = shared_browser
+        self._owns_browser = shared_browser is None
 
     def launch(self, profile: BrowserProfile) -> object:
         profile.validate()
-        self._playwright = _load_sync_playwright()().start()
+        if self._owns_browser:
+            self._playwright = _load_sync_playwright()().start()
         try:
-            self._browser = launch_local_chromium(
-                self._playwright, headless=profile.headless,
-                timeout_ms=max(profile.operation_timeout_ms, 1_000),
-            )
+            if self._owns_browser:
+                self._browser = launch_local_chromium(
+                    self._playwright, headless=profile.headless,
+                    timeout_ms=max(profile.operation_timeout_ms, 1_000),
+                )
             context = self._browser.new_context(
                 viewport={"width": profile.viewport_width, "height": profile.viewport_height},
                 locale=profile.locale,
@@ -111,9 +127,10 @@ class PlaywrightBrowserBackend:
             context.set_default_navigation_timeout(profile.navigation_timeout_ms)
             return context
         except Exception:
-            if self._browser is not None:
+            if self._owns_browser and self._browser is not None:
                 self._browser.close()
-            self._playwright.stop()
+            if self._playwright is not None:
+                self._playwright.stop()
             self._browser = None
             self._playwright = None
             raise
@@ -125,7 +142,7 @@ class PlaywrightBrowserBackend:
         except Exception as caught:
             errors.append(caught)
         try:
-            if self._browser is not None:
+            if self._owns_browser and self._browser is not None:
                 self._browser.close()
         except Exception as caught:
             errors.append(caught)
@@ -139,20 +156,6 @@ class PlaywrightBrowserBackend:
             self._playwright = None
         if errors:
             raise errors[0]
-
-
-@dataclass(frozen=True)
-class BrowserSnapshot:
-    """Host-side shape returned by the fixed browser probe."""
-
-    visible_text: str
-    entrypoints: tuple[dict, ...] = ()
-    candidates: tuple[dict, ...] = ()
-    network_summary: dict | None = None
-    route: str | None = None
-    state_kind: str = "page"
-    structure_summary: dict | None = None
-    active_tab: str | None = None
 
 
 class BrowserLocatorRegistry:
@@ -374,23 +377,52 @@ class BrowserReadOnlyPageAdapter:
 
         def operation(context):
             page = self._get_page(context)
-            url = page.url
-            parsed = urlparse(url)
-            try:
-                origin = self._origin(parsed)
-            except HostError as error:
-                raise HostError("INTERNAL_FAILURE", "The current browser page URL is invalid") from error
-            if self._allowed_origin and origin != self._allowed_origin:
-                raise HostError("NAVIGATION_BLOCKED", "The current page is outside the allowed origin")
-            title = page.title()
-            dom = page.content()
-            if not isinstance(dom, str) or len(dom.encode("utf-8")) > self.MAX_DOM_BYTES:
-                raise HostError("INTERNAL_FAILURE", "Page DOM exceeds the read-only collection limit")
-            snapshot = self._probe(page)
-            safe_url = f"{origin}{parsed.path or '/'}"
-            return self._materialize(page_state_id, safe_url, origin, parsed.path or "/", title, dom, snapshot)
+            safe_url, origin, route, title, dom, snapshot = self._capture(page)
+            return self._materialize(page_state_id, safe_url, origin, route, title, dom, snapshot)
 
         return self._session.run_serial(operation)
+
+    def observe_snapshot(self) -> BrowserSnapshot:
+        """Return one immutable browser probe for an SDK/provider consumer."""
+        return self._session.run_serial(
+            lambda context: self._capture(self._get_page(context))[-1],
+        )
+
+    def _capture(
+        self,
+        page: ReadonlyBrowserPage,
+    ) -> tuple[str, str, str, str, str, BrowserSnapshot]:
+        url = page.url
+        parsed = urlparse(url)
+        try:
+            origin = self._origin(parsed)
+        except HostError as error:
+            raise HostError("INTERNAL_FAILURE", "The current browser page URL is invalid") from error
+        if self._allowed_origin and origin != self._allowed_origin:
+            raise HostError("NAVIGATION_BLOCKED", "The current page is outside the allowed origin")
+        raw_title = page.title()
+        title = raw_title if isinstance(raw_title, str) else str(raw_title)
+        dom = page.content()
+        if not isinstance(dom, str) or len(dom.encode("utf-8")) > self.MAX_DOM_BYTES:
+            raise HostError("INTERNAL_FAILURE", "Page DOM exceeds the read-only collection limit")
+        snapshot = self._probe(page, dom_material=dom)
+        safe_url = f"{origin}{parsed.path or '/'}"
+        snapshot = BrowserSnapshot(
+            visible_text=snapshot.visible_text,
+            entrypoints=snapshot.entrypoints,
+            candidates=snapshot.candidates,
+            network_summary=snapshot.network_summary,
+            route=snapshot.route,
+            state_kind=snapshot.state_kind,
+            structure_summary=snapshot.structure_summary,
+            active_tab=snapshot.active_tab,
+            dom_digest=snapshot.dom_digest,
+            visual_digest=snapshot.visual_digest,
+            url=safe_url,
+            origin=origin,
+            title=str(title),
+        )
+        return safe_url, origin, parsed.path or "/", title, dom, snapshot
 
     def _get_page(self, context: object) -> ReadonlyBrowserPage:
         if self._page is None:
@@ -403,7 +435,12 @@ class BrowserReadOnlyPageAdapter:
         """Return the managed Page; callers must already hold BrowserSession serialization."""
         return self._get_page(context)
 
-    def _probe(self, page: ReadonlyBrowserPage) -> BrowserSnapshot:
+    def _probe(
+        self,
+        page: ReadonlyBrowserPage,
+        *,
+        dom_material: str | None = None,
+    ) -> BrowserSnapshot:
         try:
             value = page.evaluate(self.PROBE)
         except Exception as error:
@@ -425,6 +462,10 @@ class BrowserReadOnlyPageAdapter:
             state_kind=value.get("stateKind") if isinstance(value.get("stateKind"), str) else "page",
             structure_summary=value.get("structureSummary") if isinstance(value.get("structureSummary"), dict) else {},
             active_tab=value.get("activeTab") if isinstance(value.get("activeTab"), str) else None,
+            dom_digest=(
+                hashlib.sha256(dom_material.encode("utf-8")).hexdigest()
+                if dom_material is not None else None
+            ),
         )
         if self._network_summary_provider is not None:
             snapshot = BrowserSnapshot(
@@ -432,6 +473,7 @@ class BrowserReadOnlyPageAdapter:
                 candidates=snapshot.candidates, network_summary=self._network_summary_provider(),
                 route=snapshot.route, state_kind=snapshot.state_kind,
                 structure_summary=snapshot.structure_summary, active_tab=snapshot.active_tab,
+                dom_digest=snapshot.dom_digest, visual_digest=snapshot.visual_digest,
             )
         return snapshot
 
@@ -447,8 +489,10 @@ class BrowserReadOnlyPageAdapter:
         return PageObservation(
             url=url, origin=origin, route=safe_route, title=str(title), state_kind=snapshot.state_kind,
             dom_material=dom, identity_material=identity_material, visible_text=snapshot.visible_text,
-            entrypoints=entries, candidates=candidates, network_summary=snapshot.network_summary,
-            structure_summary=snapshot.structure_summary, active_tab=snapshot.active_tab,
+            entrypoints=entries, candidates=candidates,
+            network_summary=_plain(snapshot.network_summary) if snapshot.network_summary is not None else None,
+            structure_summary=_plain(snapshot.structure_summary) if snapshot.structure_summary is not None else None,
+            active_tab=snapshot.active_tab,
         )
 
     def settle_readonly(self) -> None:
@@ -459,8 +503,8 @@ class BrowserReadOnlyPageAdapter:
         self._session.run_serial(operation)
 
     @staticmethod
-    def _entrypoint(item: dict) -> EntrypointObservation:
-        if not isinstance(item, dict):
+    def _entrypoint(item: Mapping[str, object]) -> EntrypointObservation:
+        if not isinstance(item, Mapping):
             raise HostError("INTERNAL_FAILURE", "A read-only probe entrypoint is not an object")
         required = ("kind", "label", "intent")
         if any(not isinstance(item.get(key), str) or not item[key] for key in required):
@@ -482,8 +526,8 @@ class BrowserReadOnlyPageAdapter:
                                      target_locator_material=target_material)
 
     @staticmethod
-    def _candidate(item: dict) -> tuple[CandidateObservation, tuple[str, ObjectMatch]]:
-        if not isinstance(item, dict):
+    def _candidate(item: Mapping[str, object]) -> tuple[CandidateObservation, tuple[str, ObjectMatch]]:
+        if not isinstance(item, Mapping):
             raise HostError("INTERNAL_FAILURE", "A read-only probe candidate is not an object")
         required = ("kind", "label", "role", "locator_material", "host_locator_id", "identity_material",
                     "accessible_name", "visible_text")
@@ -496,10 +540,20 @@ class BrowserReadOnlyPageAdapter:
             raise HostError("INTERNAL_FAILURE", "A read-only probe candidate has invalid bounds")
         if len(item["locator_material"]) > 2_000 or len(item["identity_material"]) > 2_000:
             raise HostError("INTERNAL_FAILURE", "Read-only probe identity material exceeds the limit")
-        controls = item.get("controls", [])
-        lists = item.get("lists", [])
-        if not isinstance(controls, list) or not isinstance(lists, list):
-                raise HostError("INTERNAL_FAILURE", "Read-only probe controls or lists have an invalid format")
+        controls = item.get("controls", ())
+        lists = item.get("lists", ())
+        if (
+            not isinstance(controls, Sequence)
+            or isinstance(controls, (str, bytes, bytearray))
+            or not isinstance(lists, Sequence)
+            or isinstance(lists, (str, bytes, bytearray))
+            or any(not isinstance(control, Mapping) for control in controls)
+            or any(not isinstance(candidate_list, Mapping) for candidate_list in lists)
+        ):
+            raise HostError(
+                "INTERNAL_FAILURE",
+                "Read-only probe controls or lists have an invalid format",
+            )
         candidate = CandidateObservation(item["kind"], item["label"], item["role"], item["locator_material"])
         match = ObjectMatch(item["host_locator_id"], item["identity_material"], item["role"], item["accessible_name"],
                             item["visible_text"], item["x"], item["y"], item["width"], item["height"],
