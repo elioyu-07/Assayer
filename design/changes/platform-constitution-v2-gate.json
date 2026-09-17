@@ -3,7 +3,7 @@
   "changeId": "platform-constitution-v2-gate",
   "changeType": "contract_change",
   "title": "Adopt the unified platform/plugin boundary and design preflight",
-  "summary": "Replace parallel plugin escape paths with one zero-Python contract, platform-owned providers, exhaustive review coverage, and a mandatory machine-readable design gate.",
+  "summary": "Replace parallel plugin escape paths with one zero-Python contract, platform-owned providers, exhaustive review coverage, and a mandatory machine-readable design gate. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "AGENTS.md",
     "README.md",
@@ -88,5 +88,5 @@
     "approvedAt": "2026-09-15T00:00:00+08:00",
     "decision": "Approved during the architecture grill; implementation must follow the confirmed hard boundaries."
   },
-  "state": "approved"
+  "state": "implemented"
 }
