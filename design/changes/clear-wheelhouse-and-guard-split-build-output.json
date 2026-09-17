@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "clear-wheelhouse-and-guard-split-build-output",
+  "changeType": "platform_change",
+  "title": "Clear the install-matrix wheelhouse and guard split build output by name",
+  "summary": "The clean-venv install matrix is the platform's proof that a split installation is reproducible, but its wheelhouse was a persistent directory that was never cleared and its split build only compared wheel counts, and only from build_distributions.main(). Because install_matrix.build_wheelhouse called build() instead of main(), the count guard never ran on the acceptance path: three retired distributions (assayer_plugin_frontend_audit, assayer_plugin_frontend_audit_shadow, assayer_provider_browser) plus a stale assayer_provider_markdown wheel sat in dist/wheelhouse while the matrix still returned 0. This change makes clearing the wheelhouse the default behaviour and moves the guard into build(), where it matches requested distributions by normalized name and count and rejects any unexpected assayer-owned wheel in the output directory.",
+  "changedPaths": [
+    "scripts/build_distributions.py",
+    "scripts/install_matrix.py",
+    "tests/test_install_matrix.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Repository verification tooling owns the wheelhouse lifecycle and the split-build guard"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The guard must not weaken the root-wheel or SDK-schema leak checks",
+    "The wheelhouse clear must not depend on a flag; it is the default for the acceptance path",
+    "The guard must not reject third-party wheels that the matrix downloads after the split build",
+    "This change must not touch the frozen v1 contracts or the plugin skills"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "scripts/install_matrix.py returns 0 on a clean tree",
+    "scripts/install_matrix.py removes pre-existing wheels from its wheelhouse before building, so a planted retired wheel cannot be selected",
+    "scripts/build_distributions.py rejects a build output directory that contains an unexpected assayer-owned wheel, naming the offending distributions",
+    "scripts/build_distributions.py rejects a missing or duplicated wheel for a requested distribution",
+    "no new workflow job or CI matrix entry is added"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only strengthening of existing verification tooling, carried out under the mandate in #assayer-group:4c84ee19; @assayer_rev confirmed the classification because docs/ci-support-matrix-v1.md only states that the install-matrix job builds and validates split-distribution installation, so clearing the wheelhouse implements the stated intent instead of changing the contract."
+  },
+  "state": "approved"
+}

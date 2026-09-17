@@ -77,5 +77,53 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
             self.assertFalse((root / "src" / "assayer.egg-info").exists())
             self.assertFalse((root / "packages" / "x" / "build").exists())
 
+    def test_built_wheels_guard_matches_requested_names_not_just_count(self):
+        import tempfile
+
+        import build_distributions as build_dists
+
+        requested = build_dists.DISTRIBUTIONS
+        clean = [f"{name.replace('-', '_')}-0.1.2-py3-none-any.whl" for name in requested]
+        retired = "assayer_plugin_frontend_audit-0.1.0-py3-none-any.whl"
+
+        with tempfile.TemporaryDirectory() as directory:
+            path_root = Path(directory)
+
+            def write_wheels(filenames):
+                for existing in path_root.glob("*.whl"):
+                    existing.unlink()
+                for filename in filenames:
+                    (path_root / filename).write_text("", encoding="utf-8")
+
+            cases = {
+                "missing": clean[:-1],
+                "duplicate": clean + [clean[0].replace("0.1.2", "0.1.1")],
+                "retired": clean + [retired],
+            }
+            for name, wheels in cases.items():
+                with self.subTest(name=name):
+                    write_wheels(wheels)
+                    with self.assertRaises(SystemExit):
+                        build_dists.assert_built_wheels(path_root)
+
+            write_wheels(clean + ["assayer-0.1.2-py3-none-any.whl"])
+            built = build_dists.assert_built_wheels(path_root)
+            self.assertEqual([wheel.name for wheel in built], clean)
+
+    def test_reset_wheelhouse_removes_stale_and_retired_artifacts(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            wheelhouse = Path(directory) / "wheelhouse"
+            (wheelhouse / "nested").mkdir(parents=True)
+            for name in (
+                "assayer_plugin_frontend_audit-0.1.0-py3-none-any.whl",
+                "assayer_provider_browser-0.1.0-py3-none-any.whl",
+            ):
+                (wheelhouse / name).write_text("", encoding="utf-8")
+            matrix.reset_wheelhouse(wheelhouse)
+            self.assertTrue(wheelhouse.is_dir())
+            self.assertEqual([], sorted(wheelhouse.iterdir()))
+
 if __name__ == "__main__":
     unittest.main()

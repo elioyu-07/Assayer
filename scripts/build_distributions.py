@@ -32,6 +32,45 @@ DISTRIBUTIONS = (
     "assayer-platform",
 )
 
+def _normalized(name: str) -> str:
+    return re.sub(r"[-_.]+", "_", name).lower()
+
+
+def assert_built_wheels(
+    output: Path, distributions: tuple[str, ...] = DISTRIBUTIONS
+) -> list[Path]:
+    """Assert the build output holds exactly the requested distributions.
+
+    Every caller shares this guard, so an install/acceptance path cannot skip
+    it. Matching is by normalized distribution name, not by wheel count alone,
+    so a stale or retired ``assayer_*`` wheel sitting in a reused output
+    directory is rejected instead of silently surviving.
+    """
+    wheels = sorted(output.glob("*.whl"))
+    requested = {_normalized(name) for name in distributions}
+    observed: dict[str, list[Path]] = {}
+    for wheel in wheels:
+        observed.setdefault(_normalized(wheel.name.split("-", 1)[0]), []).append(wheel)
+    missing = sorted(requested - observed.keys())
+    if missing:
+        raise SystemExit(f"missing wheels for requested distributions: {missing}")
+    duplicated = {
+        name: [wheel.name for wheel in matches]
+        for name, matches in observed.items()
+        if name in requested and len(matches) != 1
+    }
+    if duplicated:
+        raise SystemExit(f"expected exactly one wheel per requested distribution: {duplicated}")
+    # ``assayer`` is the root meta wheel, built separately by ``build_root``.
+    unexpected = sorted(
+        name for name in observed
+        if name not in requested and name.startswith("assayer") and name != "assayer"
+    )
+    if unexpected:
+        raise SystemExit(f"unexpected assayer wheels in build output: {unexpected}")
+    return [observed[_normalized(name)][0] for name in distributions]
+
+
 def clean_staging(root: Path = ROOT) -> None:
     """Remove only known setuptools staging paths below an explicit root."""
     root = root.resolve()
@@ -62,7 +101,7 @@ def build(
     try:
         for distribution in distributions:
             subprocess.run(command + [str(ROOT / "packages" / distribution)], cwd=ROOT, check=True)
-        built = sorted(output.glob("*.whl"))
+        built = assert_built_wheels(output, distributions)
     finally:
         clean_staging()
     return built
@@ -115,8 +154,6 @@ def main() -> int:
     wheels = build(args.output.resolve(), python=args.python, isolated=args.isolated)
     for wheel in wheels:
         print(wheel.name)
-    if len(wheels) != len(DISTRIBUTIONS):
-        raise SystemExit(f"expected {len(DISTRIBUTIONS)} wheels, found {len(wheels)}")
     return 0
 
 

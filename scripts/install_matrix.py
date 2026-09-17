@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -126,8 +127,19 @@ def assert_platform_wheel_owns_only_platform_schemas(wheelhouse: Path) -> None:
     _assert_no_sdk_schema_leak(matches[0])
 
 
-def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
+def reset_wheelhouse(wheelhouse: Path) -> None:
+    """Clear the wheelhouse so only this build's wheels can be installed.
+
+    The wheelhouse is a persistent directory by default, so without this a
+    retired or stale distribution can live there indefinitely and still be
+    resolvable by ``--no-index --find-links``.
+    """
+    shutil.rmtree(wheelhouse, ignore_errors=True)
     wheelhouse.mkdir(parents=True, exist_ok=True)
+
+
+def build_wheelhouse(wheelhouse: Path, *, python: str) -> None:
+    reset_wheelhouse(wheelhouse)
     build_split(wheelhouse, python=python, isolated=False)
     build_root(wheelhouse, python=python, isolated=False, no_deps=True)
     assert_root_wheel_is_platform_only(wheelhouse)
