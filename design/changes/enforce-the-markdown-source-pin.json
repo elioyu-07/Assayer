@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "enforce-the-markdown-source-pin",
+  "changeType": "provider_change",
+  "title": "Enforce the Host-discovered source pin in the Markdown provider",
+  "summary": "The Markdown provider bound the WorkItem it returned facts to the request state digest, but it accepted a caller-declared scope sourceDigest as an equivalent alternative to the Host-discovered pin. A caller that passed the contract's sourceDigest equal to the current (already changed) file digest could therefore defeat source-change detection: the provider parsed the new bytes and returned them tagged with the stale Host digest, which the Host then accepted because the fact digest matched the WorkItem. This change makes the Host-discovered WorkItem state digest the only authoritative pin: the provider normalizes an optional sha256: prefix, requires the frozen pin to equal the digest of the bytes it actually read, allows a scope-declared sourceDigest only to repeat that same pin, and binds the issued fact to the digest of the verified bytes. The provider still re-reads the path rather than retaining a durable immutable snapshot, so this closes the bypass without yet freezing bytes at discovery.",
+  "changedPaths": [
+    "src/assayer_document_navigation/markdown.py",
+    "packages/assayer-provider-markdown/README.md",
+    "tests/test_markdown_navigation.py",
+    "design/changes/enforce-the-markdown-source-pin.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Host-discovered WorkItem state digest as the only authoritative source pin", "fact state-digest validation against the WorkItem"],
+    "plugin": ["Markdown input declaration and semantic Check meaning (unchanged)"],
+    "provider": ["Reading the frozen source, verifying it against the Host pin, and binding issued facts to the verified byte digest"],
+    "agent": ["Semantic review decisions after the Host provides Evidence (unchanged)"]
+  },
+  "capabilities": {"inputKinds": ["markdown"], "required": ["document_navigation", "typed_snapshot"]},
+  "forbiddenResponsibilities": ["Host file parsing fallback", "plugin-owned source discovery", "domain decisions in the Provider", "provider accepting a scope digest that differs from the Host pin", "browser or lifecycle changes"],
+  "publicContractImpact": "safety",
+  "acceptance": [
+    "the Markdown provider verifies the bytes it reads against the Host-discovered WorkItem state digest",
+    "a scope-declared sourceDigest that equals the current file digest can no longer defeat source-change detection",
+    "a scope-declared sourceDigest that repeats the frozen pin still collects the same Evidence",
+    "an unchanged source and a changed source keep their existing success and source_changed outcomes",
+    "the compiled Markdown Run still binds, discovers, collects and completes end to end",
+    "focused Markdown and compiled runtime tests pass and the repository gates return zero"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "于旸", "approvedAt": "2026-09-17T21:05:00+08:00", "decision": "Carried out under the standing authorization of the refactor mandate and the platform de-plugin and capability special project opened by 于旸 in #assayer-group, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. Classified as a safety fix: the public scope shape is unchanged, but a source-change detection bypass is removed. @assayer_rev independently reviews the change."},
+  "state": "implemented"
+}

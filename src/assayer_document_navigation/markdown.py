@@ -302,27 +302,19 @@ class MarkdownNavigationProvider:
             path = Path(str(scope["path"])).expanduser().resolve()
             raw = path.read_bytes()
             digest_value = _digest(raw)
-            digest = f"sha256:{digest_value}"
-            # WorkItems in the platform kernel historically carry the raw
-            # SHA-256 value, while the provider payload uses an algorithm-
-            # qualified digest.  Accept both equivalent spellings at this
-            # boundary.  A composite WorkItem (its state digest covers several
-            # sources) may instead declare the single source digest in
-            # ``sourceDigest``; the file is still verified against it, and the
-            # returned Evidence stays bound to the exact request state digest
-            # validated by the Host.
-            #
-            # Trust note: the provider cannot prove that the WorkItem is
-            # composite, because the WorkItem is produced by the plugin.  For a
-            # single-source WorkItem the Host-validated ``state_digest`` is the
-            # authoritative pin; a plugin that supplies a ``sourceDigest`` equal
-            # to the *current* file digest can defeat source-change detection
-            # here.  Restoring a Host-enforced single-source pin requires a
-            # Host-known member-source digest on the WorkItem (tracked as a
-            # phase 5/6 residual).
-            declared = scope.get("sourceDigest")
-            accepted = {digest_value, digest}
-            if request.state_digest not in accepted and declared not in accepted:
+            # The Host-discovered WorkItem state digest is the only
+            # authoritative source pin.  WorkItems carry the raw SHA-256 value
+            # while other callers may use the algorithm-qualified spelling, so
+            # an optional ``sha256:`` prefix is normalized before comparing.  A
+            # scope-declared ``sourceDigest`` may only repeat that same pin; it
+            # can never substitute a newer file digest for the frozen one, which
+            # is what previously let a caller with a current digest defeat
+            # source-change detection.
+            def _bare(value: Any) -> Any:
+                return value.split(":", 1)[1] if isinstance(value, str) and value.startswith("sha256:") else value
+            pinned = _bare(request.state_digest)
+            declared = _bare(scope.get("sourceDigest"))
+            if pinned != digest_value or (declared is not None and declared != digest_value):
                 return ProviderResponse(request.request_id, request.provider_id, request.provider_version, request.capability, "failed", failure=ProviderFailure("source_changed", "The Markdown source changed after discovery."))
             payload = parse_markdown(raw, path=str(path))
             page = scope.get("page") or {}
@@ -359,7 +351,7 @@ class MarkdownNavigationProvider:
             # provider error instead of leaking an incompatible fact to a
             # plugin.
             Draft202012Validator(self.descriptor.result_schema).validate(payload)
-            fact = ProviderFact("structured", request.source_identity, request.state_digest, payload)
+            fact = ProviderFact("structured", request.source_identity, digest_value, payload)
             return ProviderResponse(request.request_id, request.provider_id, request.provider_version, request.capability, "succeeded", (fact,))
         except ValidationError:
             return ProviderResponse(

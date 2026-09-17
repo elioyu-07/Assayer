@@ -63,12 +63,21 @@ ReviewBatch submission, recovery, or canonical-result publication.
 
 ## Known gaps to address before audit acceptance
 
+Status note (2026-09-17): items 1, 3, 4 and 5 below are now covered by the
+compiled-path tests in `tests/test_markdown_navigation.py` and
+`tests/test_compiled_interactive.py`; item 2 is partly closed and still needs
+the durable snapshot. The end-to-end acceptance target at the end of this file
+remains the gate that decides audit acceptance, not these component results.
+
 1. Repeated identical paragraphs under the same heading receive identical unit
    IDs. Existing duplicate tests only cover different headings. The element
    model also needs explicit hierarchy and parser-version guarantees.
 2. The Provider rereads files rather than retaining a durable immutable
-   snapshot. Its legacy `sourceDigest` override can override the request digest;
-   that behavior must not undermine Host-owned source identity.
+   snapshot. Its legacy `sourceDigest` override can no longer override the
+   request digest as of `enforce-the-markdown-source-pin`: the Host-discovered
+   WorkItem state digest is now the only pin and a scope digest may only repeat
+   it. Retaining bytes from discovery (a durable immutable snapshot) is still
+   open.
 3. The compiled controller enumerates JSON nodes rather than consuming the
    Provider's Markdown unit model, and does not drain navigation pages into an
    exhaustive review universe. Parent objects can repeat whole-document data.

@@ -175,6 +175,49 @@ class MarkdownNavigationTest(unittest.TestCase):
                 finally:
                     bound.close()
 
+    def test_scope_supplied_digest_cannot_defeat_source_change_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spec.md"
+            path.write_text("# Original\n", encoding="utf-8")
+            bound, check, item = self._bound_source(path)
+            try:
+                path.write_text("# Changed\n", encoding="utf-8")
+                current = hashlib.sha256(path.read_bytes()).hexdigest()
+                self.assertNotEqual(current, item.state_digest)
+                result = bound.collect(
+                    item, check, "document_navigation",
+                    scope={
+                        "path": str(path),
+                        "format": "markdown",
+                        "sourceDigest": current,
+                    },
+                )
+                self.assertEqual(result.failure.code, "source_changed")
+                self.assertEqual(result.evidence, ())
+                self.assertEqual(bound.issued_evidence(), {})
+            finally:
+                bound.close()
+
+    def test_scope_supplied_digest_matching_the_pin_still_collects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "spec.md"
+            path.write_text("# Overview\n\nA bounded document.\n", encoding="utf-8")
+            bound, check, item = self._bound_source(path)
+            try:
+                result = bound.collect(
+                    item, check, "document_navigation",
+                    scope={
+                        "path": str(path),
+                        "format": "markdown",
+                        "sourceDigest": item.state_digest,
+                    },
+                )
+                self.assertIsNone(result.failure)
+                self.assertEqual(len(result.evidence), 1)
+                self.assertEqual(result.evidence[0].source_state_digest, item.state_digest)
+            finally:
+                bound.close()
+
     def test_provider_discovers_frozen_markdown_source(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "spec.md"
