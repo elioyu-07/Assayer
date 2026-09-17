@@ -31,7 +31,6 @@ jobs:
       - run: >-
           python -m pip install
           -e packages/assayer-provider-markdown
-          -e packages/assayer-provider-browser
           -e .
       - run: python scripts/resilience_scan.py --root .
       - run: python scripts/run_tests.py fast --quiet
@@ -58,9 +57,7 @@ jobs:
       - run: >-
           python -m pip install
           -e packages/assayer-provider-markdown
-          -e packages/assayer-provider-browser
           -e '.[test]'
-      - run: python -m playwright install --with-deps chrome
       - run: python scripts/run_tests.py full --quiet
 
   install-matrix:

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "align-ci-workflow-with-browser-removal",
+  "changeType": "release_change",
+  "title": "Align the CI verification workflow with the retired browser runtime",
+  "summary": ".github/workflows/verification.yml still installs -e packages/assayer-provider-browser in the fast and full jobs and runs `python -m playwright install --with-deps chrome` in the full job. The provider-browser package was deleted in b5921f9 and remove-browser-runtime-and-playwright removed Playwright from the dependency graph, so both jobs fail before running any test. No design record covers .github/**, and remove-browser-runtime-and-playwright is implemented and immutable, so this needs its own record. The fix removes the two provider-browser install lines and the Playwright install step, leaving the rest of the workflow unchanged. No public contract, artifact, or test behavior changes; CI is only made consistent with the already-approved browser removal. CI is release behavior, which contract §3/§4 lists as a human-approval trigger, so the record is classified `compatible` rather than `internal_only` and carries an explicit human approval.",
+  "changedPaths": [
+    ".github/workflows/verification.yml"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the CI verification workflow and its dependency install set"],
+    "plugin": ["No plugin change"],
+    "provider": ["The workflow stops installing the already-deleted browser provider; the markdown provider stays"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The workflow must not reintroduce the browser provider or Playwright without a new approved browser capability record",
+    "The change must not weaken the fast, full, or install-matrix jobs beyond removing the retired browser steps"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "The fast and full jobs no longer reference packages/assayer-provider-browser",
+    "The full job no longer installs Playwright or Chromium",
+    "The workflow still installs the markdown provider, the SDK, and the test extra",
+    "scripts/run_tests.py fast and full pass locally without a browser"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T14:47:41+08:00",
+    "decision": "User replied '删并 push' in #assayer-group:4c84ee19, approving removal of the retired provider-browser install lines and the Playwright install step in the CI workflow and authorizing the push."
+  },
+  "state": "approved"
+}
