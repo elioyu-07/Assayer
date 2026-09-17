@@ -77,6 +77,17 @@ def fast_tests(tests: list[unittest.TestCase]) -> unittest.TestSuite:
     return unittest.TestSuite(selected)
 
 
+def preflight_authored_text() -> None:
+    from scripts.check_english_text import scan
+
+    findings = scan(ROOT)
+    if findings:
+        raise RuntimeError(
+            f"authored repository text must be English: {len(findings)} finding(s); "
+            "run python scripts/check_english_text.py for details"
+        )
+
+
 def preflight_full() -> None:
     missing = []
     for module in ("jsonschema", "mcp"):
@@ -99,6 +110,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("profile", choices=("fast", "full"))
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args(argv)
+
+    try:
+        preflight_authored_text()
+    except RuntimeError as error:
+        print(f"verification preflight failed: {error}", file=sys.stderr)
+        return 2
 
     tests = discover_tests()
     if args.profile == "full":
