@@ -3,7 +3,7 @@
   "changeId": "register-plugin-sdk-in-uv-workspace-and-relock",
   "changeType": "release_change",
   "title": "Register the SDK in the uv workspace and regenerate the lock",
-  "summary": "The root pyproject.toml depends on assayer-plugin-sdk==0.1.2, a workspace package under packages/assayer-plugin-sdk that was neither a uv workspace member nor a declared source and is not published to a registry. As a result uv lock could not resolve the project and uv.lock could not be regenerated; the lock was missing the SDK dependency and earlier changes had to hand-edit it. This change registers the packages/ distributions as uv workspace members, declares assayer-plugin-sdk as a workspace source, and regenerates uv.lock with uv lock. The regenerated lock adds only the workspace packages; there are no unrelated version changes. The change is uv-only: the added [tool.uv.*] configuration affects local workspace resolution and lock generation, not the pip distribution split, the published dependency metadata, or any runtime contract, so the release surface is unchanged despite the release-engineering change type.",
+  "summary": "The root pyproject.toml depends on assayer-plugin-sdk==0.1.2, a workspace package under packages/assayer-plugin-sdk that was neither a uv workspace member nor a declared source and is not published to a registry. As a result uv lock could not resolve the project and uv.lock could not be regenerated; the lock was missing the SDK dependency and earlier changes had to hand-edit it. This change registers the packages/ distributions as uv workspace members, declares assayer-plugin-sdk as a workspace source, and regenerates uv.lock with uv lock. The regenerated lock adds only the workspace packages; there are no unrelated version changes. The change is uv-only: the added [tool.uv.*] configuration affects local workspace resolution and lock generation, not the pip distribution split, the published dependency metadata, or any runtime contract, so the release surface is unchanged despite the release-engineering change type. Implementation evidence: this change landed in 73fa617, the commit that added this record, and remains in force at 66e7e45; 73fa617 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "pyproject.toml",
     "uv.lock"
@@ -41,5 +41,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only packaging reproducibility fix carried out under the mandate in #assayer-group:4c84ee19; the unresolvable lock was confirmed and scoped with @assayer_rev on 2026-09-17."
   },
-  "state": "approved"
+  "state": "implemented"
 }
