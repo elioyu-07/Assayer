@@ -9,7 +9,7 @@
 
 > C05 implementation note: the dynamic MCP/JSON Router exposes one complete tool catalog, including `get_operation`. It creates a Scan Runtime on `start_audit`, routes by `scanId/runId`, and never interprets rules or generates conclusions.
 
-Envelope fields are constrained by [`schemas/protocol/envelope.schema.json`](../schemas/protocol/envelope.schema.json); tool-specific input/output is constrained by [`schemas/protocol/tool-contracts.schema.json`](../schemas/protocol/tool-contracts.schema.json). Both must pass; a broad `input: {}` cannot replace a tool contract.
+Envelope fields and tool-specific input/output were constrained by the retired `schemas/protocol` envelope and tool-contract schemas, which this repository removed; both had to pass, and a broad `input: {}` could not replace a tool contract.
 
 | Tool | Input definition | Output definition | OperationKind |
 |---|---|---|---|

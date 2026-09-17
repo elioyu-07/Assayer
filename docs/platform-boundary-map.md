@@ -8,6 +8,8 @@
 | Owner | Assayer Maintainers |
 
 This file records the extraction state that produced the current Advanced SPI.
+It also lists the `src/assayer_agent` loop as it existed then; that
+implementation was retired and no longer exists.
 Its author-facing SDK and execution-profile statements are not requirements for
 new ordinary plugins. The current target is
 [Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).

@@ -8,7 +8,9 @@
 | Owner | Agent Runtime / Assayer Maintainers |
 
 > **Superseded.** This document predates the Platform Constitution v2 and is
-> retained as a historical migration reference. The Platform Constitution v2
+> retained as a historical migration reference. The `assayer_agent` loop it
+> describes was retired; the Agent role is owned by the platform and the
+> external Host client. The Platform Constitution v2
 > and the v1 contracts govern current platform work; this content is not
 > current implementation guidance.
 

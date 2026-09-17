@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-the-dangling-platform-wheel-protocol-data-files",
+  "changeType": "release_change",
+  "title": "Remove the dangling protocol data-files declaration from the platform wheel",
+  "summary": "retire-the-agent-distribution-and-retired-protocol-surface deleted schemas/protocol and removed the protocol data-files entry from the root pyproject.toml, but packages/assayer-platform/pyproject.toml declared the same directory as \"share/assayer/schemas/protocol\" = [\"../../schemas/protocol/*.json\"]. That record's changedPaths did not cover the platform pyproject, so the declaration survived while its own forbiddenResponsibilities claimed no dangling reference to schemas/protocol would remain. The platform wheel is the distribution the install-matrix platform-only case installs, so the residue was on a real installed surface: building the wheel succeeds because setuptools silently ignores a glob whose directory is gone, and the wheel ships zero protocol entries while carrying the platform schemas, which is why nothing failed. This change removes that declaration, so the platform wheel no longer names a removed directory, and adds retirement notes and cleaned references to the documents that still described the removed surface: schemas/README.md linked the deleted envelope and tool-contract schemas, docs/tool-contracts.md linked them as well, docs/verification-and-traceability.md and docs/ws3-distribution-baseline.md cited them in their historical tables, and docs/architecture-governance-baseline.md, docs/platform-boundary-map.md, and docs/llm-agent-orchestration.md still described src/assayer_agent as present. Artifact content does not change, because no protocol entries were being packaged, so this is compatible rather than breaking.",
+  "changedPaths": [
+    "docs/architecture-governance-baseline.md",
+    "docs/llm-agent-orchestration.md",
+    "docs/platform-boundary-map.md",
+    "docs/tool-contracts.md",
+    "docs/verification-and-traceability.md",
+    "docs/ws3-distribution-baseline.md",
+    "packages/assayer-platform/pyproject.toml",
+    "schemas/README.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Release engineering owns every wheel's data-files declaration and the schema directory it ships"],
+    "plugin": ["No plugin change; ordinary plugins are unaffected"],
+    "provider": ["No provider change"],
+    "agent": ["Documentation now states that the retired Agent loop is not present"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "No wheel in the repository may declare a data-files source that does not exist",
+    "No document may link or cite the retired protocol schemas as a current artifact",
+    "The change must not remove a schema, module, distribution, or entry that a live path uses",
+    "The change must not alter the platform wheel's remaining schema payload"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "packages/assayer-platform/pyproject.toml declares no share/assayer/schemas/protocol entry and the platform wheel still carries the platform schemas",
+    "no file under schemas/ or docs/ links to schemas/protocol as an existing artifact",
+    "the design confirmation, architecture, document, plugin-source, English text, and resilience gates all return 0",
+    "the fast and full profiles still pass and the install-matrix platform-only case still installs and imports the platform"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface correction carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is compatible because building the platform wheel already packaged zero protocol entries, so this removes a declaration rather than an artifact; @assayer_rev independently found the residue and proved that setuptools silently ignores the empty glob."
+  },
+  "state": "approved"
+}

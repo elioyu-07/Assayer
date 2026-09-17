@@ -10,7 +10,9 @@
 > **Superseded.** This document predates the Platform Constitution v2 and is
 > retained as a historical migration reference. The Platform Constitution v2
 > and the v1 contracts govern current platform work; this content is not
-> current implementation guidance.
+> current implementation guidance. The protocol tool contracts and their
+> schemas named below were retired with the vertical audit protocol, so those
+> rows are traceability for a removed surface, not current interfaces.
 
 
 ## 1. Purpose

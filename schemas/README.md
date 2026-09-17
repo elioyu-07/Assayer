@@ -129,7 +129,12 @@ JSON Schema validates field types, enums, required properties, and local conditi
 
 ## Boundary Between Protocol and Ledger
 
-Protocol requests, responses, and PendingDecision are runtime interaction objects, not final ledger entities. Operation preserves idempotent execution facts. PendingDecision exists only until the commit transaction completes and does not enter the final formal ledger. Machine constraints for protocol envelopes are in `schemas/protocol/envelope.schema.json`; tool-specific input/output constraints are in `schemas/protocol/tool-contracts.schema.json`.
+> **Historical note.** The protocol envelope and tool-contract schemas this
+> section referenced were retired with the vertical audit protocol and no
+> longer exist in this repository. The distinction below is retained for
+> traceability only and constrains no current interface.
+
+Protocol requests, responses, and PendingDecision are runtime interaction objects, not final ledger entities. Operation preserves idempotent execution facts. PendingDecision exists only until the commit transaction completes and does not enter the final formal ledger. Machine constraints for protocol envelopes and tool-specific input/output were defined by the retired `schemas/protocol` schemas, which no longer ship.
 
 ## Extension Rule
 

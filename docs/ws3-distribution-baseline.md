@@ -3,7 +3,9 @@
 > **Superseded.** This document predates the Platform Constitution v2 and is
 > retained as a historical migration reference. The Platform Constitution v2
 > and the v1 contracts govern current platform work; this content is not
-> current implementation guidance.
+> current implementation guidance. The protocol envelope schema named below
+> was retired with the vertical audit protocol, and the assayer-agent
+> distribution was later retired as well.
 
 
 | Metadata | Value |

@@ -26,4 +26,3 @@ packages = ["assayer_platform", "assayer_host"]
 
 [tool.setuptools.data-files]
 "share/assayer/schemas" = ["../../schemas/*.json"]
-"share/assayer/schemas/protocol" = ["../../schemas/protocol/*.json"]

@@ -9,7 +9,9 @@
 | Evidence | Source tree and import relationships in `src/` |
 
 > **Superseded.** This document predates the Platform Constitution v2 and is
-> retained as a historical migration reference. The Platform Constitution v2
+> retained as a historical migration reference. Its `src/assayer_agent` entry
+> describes a distribution that was retired; the Agent role is owned by the
+> platform and the external Host client. The Platform Constitution v2
 > and the v1 contracts govern current platform work; this content is not
 > current implementation guidance.
 
