@@ -93,7 +93,6 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
         wheel_dir, python=python, isolated=False,
         distributions=(
             "assayer-plugin-sdk",
-            "assayer-agent",
         ),
     )
     build_root(

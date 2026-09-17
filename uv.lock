@@ -5,7 +5,6 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "assayer",
-    "assayer-agent",
     "assayer-platform",
     "assayer-plugin-sdk",
     "assayer-provider-markdown",
@@ -58,17 +57,6 @@ requires-dist = [
     { name = "mcp", marker = "extra == 'test'", specifier = "==1.27.0" },
 ]
 provides-extras = ["mcp", "test"]
-
-[[package]]
-name = "assayer-agent"
-version = "0.1.2"
-source = { editable = "packages/assayer-agent" }
-dependencies = [
-    { name = "assayer-plugin-sdk" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "assayer-plugin-sdk", editable = "packages/assayer-plugin-sdk" }]
 
 [[package]]
 name = "assayer-platform"

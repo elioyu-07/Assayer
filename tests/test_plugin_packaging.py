@@ -47,10 +47,11 @@ class PluginPackagingContractTests(unittest.TestCase):
             "transport": "stdio",
         }])
 
-    def test_distribution_preserves_protocol_schema_directory(self):
+    def test_distribution_ships_no_retired_protocol_schema_directory(self):
         setuptools = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
         data_files = setuptools["data-files"]
-        self.assertEqual(data_files["share/assayer/schemas/protocol"], ["schemas/protocol/*.json"])
+        self.assertNotIn("share/assayer/schemas/protocol", data_files)
+        self.assertFalse((ROOT / "schemas" / "protocol").exists())
         self.assertNotIn("share/assayer/rules", data_files)
 
     def test_platform_only_root_ships_no_plugin_packages(self):

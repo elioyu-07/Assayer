@@ -32,20 +32,18 @@ class Case:
     packages: tuple[str, ...]
     ordinary_plugins: int
     providers: int
-    agent: bool = False
     platform: bool = True
 
 
 CASES = (
     Case("platform-only", ("assayer-platform",), 0, 0),
     Case("platform+sdk", ("assayer-platform", "assayer-plugin-sdk"), 0, 0),
-    Case("agent-only", ("assayer-agent",), 0, 0, agent=True, platform=False),
     Case(
         "all-split",
         (
-            "assayer-platform", "assayer-plugin-sdk", "assayer-agent",
+            "assayer-platform", "assayer-plugin-sdk",
         ),
-        0, 0, agent=True,
+        0, 0,
     ),
     Case("root-meta", ("assayer",), 0, 0),
 )
@@ -78,7 +76,6 @@ print(json.dumps({
     "providers": [entry.name for entry in providers],
     "origins": origins,
     "purelib": sysconfig.get_paths()["purelib"],
-    "agent": importlib.util.find_spec("assayer_agent") is not None,
     "platform": importlib.util.find_spec("assayer_platform") is not None,
 }))
 """
@@ -167,8 +164,6 @@ def _assert_case(case: Case, observed: dict) -> None:
         raise SystemExit(f"{case.name}: ordinary Python plugins were installed: {observed['ordinaryPlugins']}")
     if len(observed["providers"]) != case.providers:
         raise SystemExit(f"{case.name}: expected {case.providers} providers, observed {observed['providers']}")
-    if bool(observed.get("agent")) != case.agent:
-        raise SystemExit(f"{case.name}: expected agent package={case.agent}")
     if bool(observed.get("platform", True)) != case.platform:
         raise SystemExit(f"{case.name}: expected platform package={case.platform}")
     purelib = observed.get("purelib") or ""

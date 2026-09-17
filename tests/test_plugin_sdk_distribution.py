@@ -147,7 +147,6 @@ class PluginSdkDistributionTest(unittest.TestCase):
 
         expected_packages = {
             "assayer-plugin-sdk": ["assayer_plugin_sdk"],
-            "assayer-agent": ["assayer_agent"],
             "assayer-platform": ["assayer_platform", "assayer_host"],
         }
         for name, packages in expected_packages.items():
@@ -162,11 +161,6 @@ class PluginSdkDistributionTest(unittest.TestCase):
         entry_points = platform["project"].get("entry-points", {})
         self.assertNotIn("assayer.plugins", entry_points)
         self.assertNotIn("assayer.providers", entry_points)
-
-        agent = config("assayer-agent")
-        self.assertEqual(["assayer-plugin-sdk==0.1.2"], agent["project"]["dependencies"])
-        self.assertNotIn("assayer.plugins", agent["project"].get("entry-points", {}))
-        self.assertNotIn("assayer.providers", agent["project"].get("entry-points", {}))
 
         sdk_entry_points = config("assayer-plugin-sdk")["project"].get("entry-points", {})
         self.assertNotIn("assayer.plugins", sdk_entry_points)

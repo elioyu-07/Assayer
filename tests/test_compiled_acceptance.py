@@ -157,7 +157,7 @@ class CompiledAcceptanceVocabularyTests(unittest.TestCase):
     def test_acceptance_installs_the_split_distributions_and_one_provider(self):
         self.assertEqual(
             compiled_acceptance.DISTRIBUTIONS,
-            ("assayer-platform", "assayer-plugin-sdk", "assayer-agent", "assayer-provider-markdown"),
+            ("assayer-platform", "assayer-plugin-sdk", "assayer-provider-markdown"),
         )
         self.assertNotIn("assayer", compiled_acceptance.DISTRIBUTIONS)
 

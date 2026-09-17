@@ -48,7 +48,6 @@ FIXTURE = ROOT / "tests" / "fixtures" / "plugins" / "policy-pack"
 DISTRIBUTIONS = (
     "assayer-platform",
     "assayer-plugin-sdk",
-    "assayer-agent",
     "assayer-provider-markdown",
 )
 THIRD_PARTY = ("jsonschema==4.26.0",)

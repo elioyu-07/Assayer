@@ -1,5 +1,12 @@
 # Tool-Level Protocol Contract
 
+> **Superseded.** This document describes the retired vertical audit protocol
+> and its `schemas/protocol` envelopes and tool contracts, both of which this
+> repository removed: the compiled Host exposes a different tool set and every
+> terminal review atom is one of satisfied, violated, not_applicable, unknown,
+> or blocked. Retained for historical traceability only; it is not current
+> implementation guidance and constrains no current interface.
+
 > C05 implementation note: the dynamic MCP/JSON Router exposes one complete tool catalog, including `get_operation`. It creates a Scan Runtime on `start_audit`, routes by `scanId/runId`, and never interprets rules or generates conclusions.
 
 Envelope fields are constrained by [`schemas/protocol/envelope.schema.json`](../schemas/protocol/envelope.schema.json); tool-specific input/output is constrained by [`schemas/protocol/tool-contracts.schema.json`](../schemas/protocol/tool-contracts.schema.json). Both must pass; a broad `input: {}` cannot replace a tool contract.

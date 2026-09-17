@@ -105,7 +105,6 @@ Providers register through the `assayer.providers` entry point group.
 ```bash
 python3 -m venv .venv
 uv pip install --python .venv/bin/python -e packages/assayer-plugin-sdk
-uv pip install --python .venv/bin/python -e packages/assayer-agent
 uv pip install --python .venv/bin/python -e '.[test]'
 ```
 
@@ -146,10 +145,9 @@ plugins/assayer/        Codex Plugin source: Skill, MCP launcher, runtime prep
 plugins/frontend-audit/ Declaration-only sample ordinary plugin
 src/assayer_platform/   Platform kernel, compiled contracts, ledger, release
 src/assayer_host/       Host, MCP transport, persistence, and recovery
-src/assayer_agent/      Model-independent Agent orchestration
 src/assayer_plugin_sdk/ Public plugin and Provider contracts
-packages/               Shipped distributions: platform, agent, SDK, markdown provider
-schemas/                Platform-owned protocol, ledger, coverage, and result schemas
+packages/               Shipped distributions: platform, SDK, markdown provider
+schemas/                Platform-owned ledger, coverage, and result schemas
 docs/                   Constitution, contracts, and historical records
 tests/                  Deterministic, MCP, plugin, Provider, and conformance tests
 scripts/                Test, release, resilience, and governance tooling

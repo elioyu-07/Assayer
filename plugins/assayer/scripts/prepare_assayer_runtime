@@ -109,8 +109,7 @@ if [ ! -x "$VENV_ROOT/bin/assayer-mcp" ] || [ ! -f "$STAMP" ]; then
     --disable-pip-version-check \
     --no-index \
     --find-links "$WHEEL_DIR" \
-    "assayer[mcp]==$BASE_VERSION" \
-    "assayer-agent==$BASE_VERSION" 1>&2 || {
+    "assayer[mcp]==$BASE_VERSION" 1>&2 || {
       echo "ASSAYER_RUNTIME_INSTALL_FAILED: bundled Python dependencies could not be installed." >&2
       exit 78
     }

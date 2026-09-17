@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-agent-distribution-and-retired-protocol-surface",
+  "changeType": "release_change",
+  "title": "Retire the assayer-agent distribution and the shipped protocol schemas",
+  "summary": "Two shipped surfaces still carried the removed vertical audit protocol. First, src/assayer_agent and packages/assayer-agent published the assayer-agent distribution: its loop built envelopes for start_audit, inspect_page, and the page/object tool chain, its DEFAULT_AGENT_TOOLS listed sixteen retired tool names, and the operator runtime preparer installed assayer-agent into the bundle's private runtime venv. Nothing in the repository imports assayer_agent, so the package had no consumer on any live path and only kept a retired compatibility runtime published. Second, schemas/protocol/envelope.schema.json and schemas/protocol/tool-contracts.schema.json enumerated those same retired tools and were installed into share/assayer/schemas/protocol by the root pyproject data-files, while no code loaded them; the only reference was a packaging test asserting that the data-files entry exists. This change deletes src/assayer_agent, packages/assayer-agent, and schemas/protocol, drops the protocol data-files entry and the uv workspace member, removes assayer-agent from the split distribution list, the install matrix, the compiled acceptance, the plugin bundle, and the operator runtime preparer, and updates the distribution inventory and tool-contract documents so the shipped surface and its documentation agree. The platform and the external Host client own the Agent role instead, and every terminal review atom stays in the compiled five-state vocabulary. No runtime behaviour of the platform, Host, SDK, or any provider changes, and no compiled contract, ledger, or result schema changes; the removal of two published artifacts is what makes this a breaking release change.",
+  "changedPaths": [
+    "docs/distribution-split-v1.md",
+    "docs/tool-contracts.md",
+    "docs/ws3-distribution-plan.md",
+    "packages/assayer-agent/pyproject.toml",
+    "plugins/assayer/scripts/prepare_assayer_runtime",
+    "pyproject.toml",
+    "README.md",
+    "schemas/protocol/envelope.schema.json",
+    "schemas/protocol/tool-contracts.schema.json",
+    "scripts/build_distributions.py",
+    "scripts/build_plugin_bundle.py",
+    "scripts/compiled_acceptance.py",
+    "scripts/install_matrix.py",
+    "src/assayer_agent/__init__.py",
+    "src/assayer_agent/loop.py",
+    "tests/test_compiled_acceptance.py",
+    "tests/test_install_matrix.py",
+    "tests/test_plugin_packaging.py",
+    "tests/test_plugin_sdk_distribution.py",
+    "uv.lock"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ws3-distribution-plan.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Release engineering owns the shipped distribution list, the bundle contents, and the retired protocol schemas"],
+    "plugin": ["No plugin change; ordinary plugins stay declarative, are never Python distributions, and are unaffected"],
+    "provider": ["No provider change; the markdown capability provider remains the only shipped provider"],
+    "agent": ["The Agent role is owned by the platform and the external Host client; the retired model-independent loop is removed rather than ported"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter any compiled contract, ledger, coverage, evidence, or result schema",
+    "The change must not reintroduce a compatibility shim for the retired audit protocol or its tool names",
+    "The change must not leave a dangling reference to assayer-agent or schemas/protocol in a workflow, script, test, bundle step, or document",
+    "The change must not remove the frozen v1 decision-state vocabulary in schemas/common.schema.json, which remains a pinned v1 contract",
+    "The compiled acceptance must keep proving the same end-to-end Run without the removed distribution"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "src/assayer_agent, packages/assayer-agent, and schemas/protocol no longer exist, and the root pyproject ships no share/assayer/schemas/protocol data-files entry",
+    "scripts/build_distributions.py builds exactly the SDK and platform wheels, and the install matrix covers platform-only, platform+sdk, all-split, and root-meta with zero ordinary plugin and zero provider entry points",
+    "scripts/compiled_acceptance.py installs the platform, SDK, and markdown provider distribution, runs one compiled Run end to end in a clean venv, and still reports status=passed with a verified artifact digest",
+    "the operator runtime preparer installs only assayer[mcp] and the plugin bundle builds without the removed distribution",
+    "the uv workspace resolves without the removed member and the lock no longer contains assayer-agent",
+    "the fast and full profiles, the design confirmation gate, and the architecture, document, plugin-source, English text, and resilience gates all stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is breaking because two published artifacts, the assayer-agent distribution and the protocol schema directory installed by the root wheel, are removed; the evidence that they had no consumer is recorded in the summary. @assayer_rev independently reviews the batch and raised this class of residue, noting that removing a published distribution or schema is a release change that also touches build_distributions.py, install_matrix.py, and the CI support matrix."
+  },
+  "state": "approved"
+}

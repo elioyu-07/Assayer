@@ -4,7 +4,7 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-10 |
-| Status | SDK, agent, platform, and compiled-plugin artifact split implemented; no concrete Provider is shipped |
+| Status | SDK, platform, and compiled-plugin artifact split implemented; no concrete Provider is shipped |
 | Owner | Assayer maintainers |
 | Authority | Platform--Plugin Boundary Contract v1 §5, plugin-version-axes-v1 |
 
@@ -17,7 +17,6 @@
 | Distribution | Packages | Depends on | Entry points | Status |
 |---|---|---|---|---|
 | `assayer-plugin-sdk` | `assayer_plugin_sdk` | `jsonschema` | — | **split** |
-| `assayer-agent` | `assayer_agent` | `assayer-plugin-sdk` | — | **split** |
 | `assayer-platform` | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | **split** |
 | `assayer` (product base) | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | platform-only |
 
@@ -32,7 +31,6 @@ The other distributions build from the shared `src/` tree:
 ```text
 packages/
   assayer-plugin-sdk/pyproject.toml
-  assayer-agent/pyproject.toml
   assayer-platform/pyproject.toml
 ```
 
@@ -48,7 +46,7 @@ Build every distribution and clean the staging metadata in one step:
 python scripts/build_distributions.py
 ```
 
-The aggregate command builds only platform, SDK, and Agent wheels.
+The aggregate command builds only platform and SDK wheels.
 Plugin declarations are verified separately and emit only `compiled-plugin.json`.
 
 > Building a split wheel writes a `<package>.egg-info` directory under `src/`.
@@ -60,12 +58,11 @@ Plugin declarations are verified separately and emit only `compiled-plugin.json`
 The root `pyproject.toml` is **platform-only**: it ships `assayer_platform` and
 `assayer_host`, depends on `assayer-plugin-sdk`, and no
 longer declares the plugin/provider packages or their entry points. A clean
-development environment installs the SDK and Agent first, then the plugin and
-provider distributions alongside the platform root:
+development environment installs the SDK first, then the platform root
+alongside it:
 
 ```bash
 pip install -e packages/assayer-plugin-sdk
-pip install -e packages/assayer-agent
 pip install -e '.[test]'
 ```
 
@@ -81,9 +78,9 @@ pip install -e '.[test]'
 
 ## 4. Remaining work
 
-- `assayer-agent` is an independent SDK-dependent distribution. It contains
-  only the model-independent Agent loop and has no platform, plugin, or
-  Provider implementation dependency.
+- The `assayer-agent` distribution was retired: its model-independent Agent
+  loop drove the removed vertical audit protocol and had no v2 consumer, so the
+  Agent role is owned by the platform and the external Host client instead.
 - SDK Schema single-sourcing is complete: public contract schemas exist only in
   `assayer_plugin_sdk/schemas`, while the platform wheel ships only
   platform-owned resources and resolves shared references through the SDK.

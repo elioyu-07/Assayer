@@ -28,7 +28,6 @@ _ROOT_WHEEL = re.compile(r"^assayer-\d")
 # Order is informational only: ``--no-deps`` makes each build independent.
 DISTRIBUTIONS = (
     "assayer-plugin-sdk",
-    "assayer-agent",
     "assayer-platform",
 )
 

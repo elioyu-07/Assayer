@@ -34,10 +34,7 @@ class InstallMatrixAssertionsTest(unittest.TestCase):
         self.assertIn("all-split", names)
         split = next(case for case in matrix.CASES if case.name == "all-split")
         self.assertEqual((0, 0), (split.ordinary_plugins, split.providers))
-        self.assertTrue(split.agent)
-        self.assertIn("agent-only", names)
-        agent_only = next(case for case in matrix.CASES if case.name == "agent-only")
-        self.assertFalse(agent_only.platform)
+        self.assertTrue(split.platform)
         root = next(case for case in matrix.CASES if case.name == "root-meta")
         self.assertEqual((0, 0), (root.ordinary_plugins, root.providers))
 
