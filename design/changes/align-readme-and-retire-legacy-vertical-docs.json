@@ -3,7 +3,7 @@
   "changeId": "align-readme-and-retire-legacy-vertical-docs",
   "changeType": "contract_change",
   "title": "Realign the README and retire the legacy vertical documents",
-  "summary": "The README and a set of older design documents still describe the v1 product: Playwright/Chromium setup, the web-audit Skill, and the retired five-state result vocabulary. The compiled-platform migration and the retired browser runtime make those instructions false. This change rewrites README.md to the Platform Constitution v2 model (declaration-only plugins compiled to one artifact, platform-owned Host lifecycle, bounded semantic review, exact verified artifact release) and marks the legacy vertical documents as superseded historical records rather than current authority. No document is deleted; each superseded document keeps its content and gains a banner that points at the v2 authority. No code, schema, compiled artifact, or runtime behavior changes.",
+  "summary": "The README and a set of older design documents still describe the v1 product: Playwright/Chromium setup, the web-audit Skill, and the retired five-state result vocabulary. The compiled-platform migration and the retired browser runtime make those instructions false. This change rewrites README.md to the Platform Constitution v2 model (declaration-only plugins compiled to one artifact, platform-owned Host lifecycle, bounded semantic review, exact verified artifact release) and marks the legacy vertical documents as superseded historical records rather than current authority. No document is deleted; each superseded document keeps its content and gains a banner that points at the v2 authority. No code, schema, compiled artifact, or runtime behavior changes. Implementation evidence: this change landed in da33ed7, the commit that added this record, and remains in force at 66e7e45; da33ed7 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "README.md",
     "docs/product-contract.md",
@@ -60,5 +60,5 @@
     "approvedAt": "2026-09-17T14:57:28+08:00",
     "decision": "User replied '修 CI，对齐文档。' in #assayer-group:4c84ee19, authorizing the document alignment work."
   },
-  "state": "approved"
+  "state": "implemented"
 }
