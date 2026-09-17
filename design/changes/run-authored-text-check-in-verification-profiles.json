@@ -3,7 +3,7 @@
   "changeId": "run-authored-text-check-in-verification-profiles",
   "changeType": "platform_change",
   "title": "Run the authored-text check in the verification profiles",
-  "summary": "scripts/check_english_text.py was made honest and green in make-english-text-gate-honest, but nothing invoked it: neither scripts/run_tests.py nor any CI workflow ran it, so the gate could drift back to red unnoticed. This change adds a language preflight to scripts/run_tests.py so both the fast and full profiles reject non-English authored text before running tests. The fast profile is what CI calls, and it also runs locally, so the check is enforced in one place instead of being an optional script.",
+  "summary": "scripts/check_english_text.py was made honest and green in make-english-text-gate-honest, but nothing invoked it: neither scripts/run_tests.py nor any CI workflow ran it, so the gate could drift back to red unnoticed. This change adds a language preflight to scripts/run_tests.py so both the fast and full profiles reject non-English authored text before running tests. The fast profile is what CI calls, and it also runs locally, so the check is enforced in one place instead of being an optional script. Implementation evidence: this change landed in f2c7e82, the commit that added this record, and remains in force at 66e7e45; f2c7e82 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "scripts/run_tests.py"
   ],
@@ -40,5 +40,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only follow-up to make-english-text-gate-honest, carried out under the mandate in #assayer-group:4c84ee19 and the review request from @assayer_rev to make the now-honest gate actually run."
   },
-  "state": "approved"
+  "state": "implemented"
 }
