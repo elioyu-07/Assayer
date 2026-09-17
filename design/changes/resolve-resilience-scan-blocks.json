@@ -3,7 +3,7 @@
   "changeId": "resolve-resilience-scan-blocks",
   "changeType": "platform_change",
   "title": "Clear the two resilience-scan blocks introduced by the compiled-platform migration",
-  "summary": "The fast CI job runs scripts/resilience_scan.py, which currently reports two blocking findings introduced by b5921f9 (verified with each revision's own scanner: 42d53cc = pass, b5921f9 = 2 blocks, HEAD = 2 blocks). src/assayer_host/transport.py:166 catches PlatformContractError in close() and passes, silently dropping teardown failures; src/assayer_platform/compiled_interactive.py:274 uses a literal `while True` for provider pagination even though the loop already terminates on a failed collection, a missing next cursor, or a repeated cursor. The fix keeps close() non-throwing but records a warning through module logging, and makes the pagination loop's bound explicit without changing its termination or cursor semantics. No public contract, artifact, compiled-plugin behavior, or user-visible behavior changes; the change touches runtime source, so it is classified `safety` and carries an explicit human approval.",
+  "summary": "The fast CI job runs scripts/resilience_scan.py, which currently reports two blocking findings introduced by b5921f9 (verified with each revision's own scanner: 42d53cc = pass, b5921f9 = 2 blocks, HEAD = 2 blocks). src/assayer_host/transport.py:166 catches PlatformContractError in close() and passes, silently dropping teardown failures; src/assayer_platform/compiled_interactive.py:274 uses a literal `while True` for provider pagination even though the loop already terminates on a failed collection, a missing next cursor, or a repeated cursor. The fix keeps close() non-throwing but records a warning through module logging, and makes the pagination loop's bound explicit without changing its termination or cursor semantics. No public contract, artifact, compiled-plugin behavior, or user-visible behavior changes; the change touches runtime source, so it is classified `safety` and carries an explicit human approval. Implementation evidence: this change landed in 4a1a71b, the commit that added this record, and remains in force at 66e7e45; 4a1a71b was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_host/transport.py",
     "src/assayer_platform/compiled_interactive.py",
@@ -44,5 +44,5 @@
     "approvedAt": "2026-09-17T14:57:28+08:00",
     "decision": "User replied '修 CI，对齐文档。' in #assayer-group:4c84ee19, authorizing the CI red-gate fix (the two resilience_scan blocks) and the document alignment."
   },
-  "state": "approved"
+  "state": "implemented"
 }
