@@ -3,7 +3,7 @@
   "changeId": "remove-concrete-providers",
   "changeType": "provider_change",
   "title": "Remove the shipped Markdown and browser Provider implementations",
-  "summary": "Hard-delete the two concrete Provider packages and their Host runtime adapter. The platform keeps only generic Provider contracts and registries; requests requiring an unavailable capability fail closed.",
+  "summary": "Hard-delete the two concrete Provider packages and their Host runtime adapter. The platform keeps only generic Provider contracts and registries; requests requiring an unavailable capability fail closed. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified. Its 'provider-package-absence' acceptance item no longer holds because packages/assayer-provider-markdown was restored by restore-markdown-audit-slice, while the browser-provider removal stands. The record is deliberately kept implemented rather than superseded: its surviving 'tests/**' changedPath is the only design authorization covering dozens of test files that no other approved record lists, so moving it to superseded would drop that coverage.",
   "changedPaths": [
     "packages/assayer-provider-markdown/**",
     "packages/assayer-provider-browser/**",
@@ -79,5 +79,5 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "Approved for hard-cut removal of both concrete Providers without compatibility adapters."
   },
-  "state": "approved"
+  "state": "implemented"
 }
