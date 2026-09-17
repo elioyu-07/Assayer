@@ -3,7 +3,7 @@
   "changeId": "remove-named-plugin-guidance",
   "changeType": "contract_change",
   "title": "Remove named domain-plugin assumptions from user and Agent guidance",
-  "summary": "Make README, lifecycle Skill, and operator preparation use generic plugin identifiers and installed-scope selection rather than a retired named domain plugin.",
+  "summary": "Make README, lifecycle Skill, and operator preparation use generic plugin identifiers and installed-scope selection rather than a retired named domain plugin. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "README.md",
     "plugins/assayer/skills/assayer-plugin-lifecycle/SKILL.md",
@@ -42,5 +42,5 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "Approved as the final removal of named domain-plugin assumptions from current guidance."
   },
-  "state": "approved"
+  "state": "implemented"
 }
