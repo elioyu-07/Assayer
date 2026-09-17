@@ -3,7 +3,7 @@
   "changeId": "markdown-evidence-submission-binding",
   "changeType": "platform_change",
   "title": "Bind Markdown decisions to Host-issued Evidence",
-  "summary": "Reject fabricated, foreign, stale, and atom-incompatible Evidence references when a compiled Markdown ReviewBatch is submitted.",
+  "summary": "Reject fabricated, foreign, stale, and atom-incompatible Evidence references when a compiled Markdown ReviewBatch is submitted. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_platform/compiled_interactive.py",
     "tests/test_compiled_interactive.py",
@@ -33,6 +33,6 @@
     "focused compiled runtime tests and fast verification pass"
   ],
   "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-17T00:00:00+08:00", "decision": "Approved as the next Markdown audit trust-boundary step."},
-  "state": "approved",
+  "state": "implemented",
   "supersedes": "markdown-review-element-planning"
 }
