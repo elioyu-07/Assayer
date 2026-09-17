@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-dead-common-review-decision-assembly",
+  "changeType": "release_change",
+  "title": "Retire the dead common-review Decision assembly module",
+  "summary": "src/assayer_platform/common_review_decision.py defines assemble_common_review_decisions, a Host-owned assembler that projected legacy common-review coverage into per-WorkItem results using the retired v1 result vocabulary (issue_found, scanned_no_issue, needs_review). The compiled runtime now owns review planning, coverage and terminal decisions through compiled_interactive.py, incremental_review.py and kernel.py, and nothing in the repository imports the module: the only importer is tests/test_common_review_decision.py, it is not re-exported by assayer_platform/__init__.py or public_surface.py, and no document names it. This change deletes the dead module and its test and adds architecture-gate guards so the retired module path and the assemble_common_review_decisions symbol cannot return. No live compiled review path, Kernel decision gate, v1 SDK schema, plugin or provider surface, or shipped document changes: the frozen v1 result vocabulary in assayer_plugin_sdk stays untouched, and the live common-review types in common_review.py keep their importers in review_projection.py, incremental_review_runtime.py and review_binding.py.",
+  "changedPaths": [
+    "src/assayer_platform/common_review_decision.py",
+    "tests/test_common_review_decision.py",
+    "scripts/check_architecture_boundaries.py",
+    "tests/test_architecture_boundaries.py",
+    "design/changes/retire-the-dead-common-review-decision-assembly.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the retired common-review Decision assembler and the architecture gate that guards it"
+    ],
+    "plugin": [
+      "No plugin change; ordinary plugins remain declaration-only"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter the live compiled review path, the Kernel decision gate, the frozen v1 SDK result vocabulary, or any live decision state",
+    "The change must not remove common_review.py or any module that still has a live importer",
+    "The change must not weaken the architecture gate for live platform modules"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "src/assayer_platform/common_review_decision.py and tests/test_common_review_decision.py are deleted",
+    "no live module imports or re-exports assemble_common_review_decisions",
+    "the architecture gate rejects the retired module path and the assemble_common_review_decisions symbol",
+    "the architecture, document, plugin-source, English text and resilience gates return 0 and the fast and full profiles stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is breaking because the assayer-platform wheel stops shipping the assayer_platform.common_review_decision module; the evidence that nothing in the repository imported it is recorded in the summary. @assayer_rev independently reviews the batch and has previously required that a published-surface removal be classified as a release change."
+  },
+  "state": "approved"
+}

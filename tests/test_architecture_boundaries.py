@@ -51,6 +51,41 @@ class ArchitectureBoundaryTest(unittest.TestCase):
         self.assertEqual([], sorted((ROOT / "examples").glob("*-ledger.json")))
         self.assertNotIn("DerivedReportBuilder", assayer_host.__all__)
 
+    def test_retired_common_review_decision_surface_is_absent(self):
+        self.assertFalse(
+            (ROOT / "src" / "assayer_platform" / "common_review_decision.py").exists()
+        )
+        self.assertFalse((ROOT / "tests" / "test_common_review_decision.py").exists())
+
+    def test_retired_common_review_decision_assembly_is_rejected(self):
+        from scripts.check_architecture_boundaries import _repository_contract_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src" / "assayer_platform").mkdir(parents=True)
+            source = root / "src" / "assayer_platform" / "kept.py"
+            source.write_text(
+                "def assemble_common_review_decisions():\n    return ()\n", encoding="utf-8",
+            )
+            violations = _repository_contract_violations(root)
+            self.assertTrue(
+                any("assemble_common_review_decisions" in item for item in violations),
+                violations,
+            )
+
+    def test_retired_common_review_decision_module_path_is_rejected(self):
+        from scripts.check_architecture_boundaries import _repository_contract_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "src" / "assayer_platform" / "common_review_decision.py"
+            path.parent.mkdir(parents=True)
+            path.write_text("X = 1\n", encoding="utf-8")
+            violations = _repository_contract_violations(root)
+            self.assertTrue(
+                any("common_review_decision.py" in item for item in violations), violations,
+            )
+
     def test_retired_schema_surface_is_absent(self):
         from scripts.check_architecture_boundaries import RETIRED_SCHEMA_NAMES
 

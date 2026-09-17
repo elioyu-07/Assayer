@@ -112,6 +112,7 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
         "src/assayer_platform/installation_conformance.py",
         "src/assayer_platform/release_conformance.py",
         "src/assayer_platform/package_conformance.py",
+        "src/assayer_platform/common_review_decision.py",
         "src/assayer_plugin_sdk/registration.py",
         "src/assayer_plugin_sdk/agent_contract.py",
         "src/assayer_host/browser_session.py",
@@ -143,6 +144,7 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
                 "PluginRegistry", "PluginRegistration", "PlatformRunner",
                 "InteractivePluginController", "DomainResultContract",
                 "DerivedReportBuilder", "render_observability", "render_performance_bill",
+                "assemble_common_review_decisions",
             )
             for name in removed_names:
                 if re.search(rf"\b{re.escape(name)}\b", text):
