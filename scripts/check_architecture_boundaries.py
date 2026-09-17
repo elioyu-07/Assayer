@@ -145,6 +145,7 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
                 "InteractivePluginController", "DomainResultContract",
                 "DerivedReportBuilder", "render_observability", "render_performance_bill",
                 "assemble_common_review_decisions",
+                "expectedDecision",
             )
             for name in removed_names:
                 if re.search(rf"\b{re.escape(name)}\b", text):

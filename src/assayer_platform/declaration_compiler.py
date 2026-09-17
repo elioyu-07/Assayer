@@ -177,12 +177,7 @@ def compile_plugin_contract(
             "PLUGIN_CASES_REQUIRED", "Plugin requires at least one business case",
         )
     check_ids = {item["id"] for item in normalized_checks}
-    final_results = {
-        "ready": "scanned_no_issue",
-        "rework": "issue_found",
-        "needs_review": "needs_review",
-        "not_applicable": "not_applicable",
-    }
+    business_final_results = ("ready", "rework", "needs_review", "not_applicable")
     business_cases: list[dict[str, Any]] = []
     for case_path in case_paths:
         case = _mapping(load_yaml_subset(case_path), f"Business case {case_path.name}")
@@ -211,7 +206,7 @@ def compile_plugin_contract(
                 "INVALID_PLUGIN_CASE", "Expected candidate_rules must be unique declared rule IDs",
             )
         final = _text(expect["final"], "Business case final")
-        if final not in final_results:
+        if final not in business_final_results:
             raise PlatformContractError(
                 "INVALID_PLUGIN_CASE",
                 "Business case final must be ready, rework, needs_review, or not_applicable",
@@ -276,7 +271,6 @@ def compile_plugin_contract(
             **({"inputData": input_data} if input_data is not None else {}),
             "expectedCandidateRules": candidate_rules,
             "expectedFinal": final,
-            "expectedDecision": final_results[final],
         })
     uncovered = check_ids - {item["checkId"] for item in business_cases}
     if uncovered:

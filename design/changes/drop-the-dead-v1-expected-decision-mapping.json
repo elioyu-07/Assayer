@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "drop-the-dead-v1-expected-decision-mapping",
+  "changeType": "platform_change",
+  "title": "Drop the dead v1 expected-decision mapping from the declaration compiler",
+  "summary": "compile_plugin_contract built a final_results dictionary that translated each plugin business-case conclusion (ready, rework, needs_review, not_applicable) into the retired v1 result vocabulary (scanned_no_issue, issue_found, needs_review, not_applicable) and stored the translation as expectedDecision on an internal business_cases record. Nothing read that field: the compiled Plugin Contract only ever emitted expected.final with the business word, business_cases is not returned, and no document or test named expectedDecision. This change deletes the dead translation, validates the case conclusion against the business vocabulary directly, and adds an architecture-gate guard so expectedDecision cannot return. No compiled contract field, plugin case schema, runtime behaviour, or published artifact changes: the compiled output is byte-for-byte the same.",
+  "changedPaths": [
+    "src/assayer_platform/declaration_compiler.py",
+    "scripts/check_architecture_boundaries.py",
+    "tests/test_architecture_boundaries.py",
+    "design/changes/drop-the-dead-v1-expected-decision-mapping.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the declaration compiler and the architecture gate that guards retired v1 result vocabulary"
+    ],
+    "plugin": [
+      "No plugin change; plugin cases keep declaring ready, rework, needs_review, or not_applicable"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter the compiled Plugin Contract output, its schema, or any plugin case validation outcome",
+    "The change must not change any live decision state, Kernel gate, or the frozen v1 SDK schema",
+    "The change must not remove the business vocabulary from the compiled contract's expected.final field"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "declaration_compiler.py contains no v1 result mapping and no expectedDecision field",
+    "the compiled Plugin Contract output is unchanged for the existing fixture plugins",
+    "the architecture gate rejects a reintroduced expectedDecision name",
+    "the architecture, document, plugin-source, English text and resilience gates return 0 and the fast and full profiles stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only dead-code removal carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No compiled contract, schema, published artifact, contract, or live behaviour changes: the removed expectedDecision field was never read, and the compiled output is unchanged."
+  },
+  "state": "approved"
+}

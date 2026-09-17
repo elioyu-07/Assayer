@@ -86,6 +86,21 @@ class ArchitectureBoundaryTest(unittest.TestCase):
                 any("common_review_decision.py" in item for item in violations), violations,
             )
 
+    def test_retired_v1_result_mapping_name_is_rejected(self):
+        from scripts.check_architecture_boundaries import _repository_contract_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src" / "assayer_platform").mkdir(parents=True)
+            source = root / "src" / "assayer_platform" / "compiler.py"
+            source.write_text(
+                'CASE = {"expectedDecision": "scanned_no_issue"}\n', encoding="utf-8",
+            )
+            violations = _repository_contract_violations(root)
+            self.assertTrue(
+                any("expectedDecision" in item for item in violations), violations,
+            )
+
     def test_retired_schema_surface_is_absent(self):
         from scripts.check_architecture_boundaries import RETIRED_SCHEMA_NAMES
 
