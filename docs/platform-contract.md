@@ -4,21 +4,25 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-02 |
-| Status | Superseded authority; see [Platform Constitution v1](platform-constitution-v1.md) and the v1 contracts |
+| Status | Superseded authority; see [Platform Constitution v2](platform-constitution-v2.md) |
 | Owner | Assayer Maintainers |
 
 > **Non-normative historical reference.** This document retains examples from
-> the first vertical implementation. It is not a platform authority; use the
-> Constitution and v1 contracts for normative decisions.
+> the first vertical implementation. It is not a platform authority; the
+> [Platform Constitution v2](platform-constitution-v2.md) and the platform
+> contracts govern current work.
 
 ## Implementation Note
 
-This document is retained as the detailed design reference. The normative M2
-authority is split into the [Platform Constitution v1](platform-constitution-v1.md),
+This document is retained as the detailed design reference for the M2 baseline.
+At that baseline the normative authority was split into the
+[Platform Constitution v1](platform-constitution-v1.md),
 [Audit Plugin Contract v1](plugin-contract-v1.md), [Capability Provider Contract
 v1](capability-provider-contract-v1.md), and [Canonical Audit Result Contract
-v1](canonical-result-contract-v1.md). Those documents resolve ownership and
-versioning; this reference must not introduce a conflicting rule.
+v1](canonical-result-contract-v1.md); those documents are themselves superseded
+by the [Platform Constitution v2](platform-constitution-v2.md), which now
+resolves ownership and versioning. This reference must not introduce a
+conflicting rule.
 
 The in-process reference kernel and manifest loader are implemented under
 `src/assayer_platform`. Frontend is no longer a compatibility plugin in that

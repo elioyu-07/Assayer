@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "repoint-superseded-platform-contract-banner",
+  "changeType": "platform_change",
+  "title": "Point the superseded platform contract at the v2 authority",
+  "summary": "docs/platform-contract.md is a superseded historical reference, but its metadata status, its banner, and its Implementation Note still directed readers to Platform Constitution v1 and the retired v1 contracts as the normative authority for current work. Repoint the status and banner at docs/platform-constitution-v2.md, and reframe the Implementation Note as a statement about the M2 baseline whose v1 authority documents are themselves superseded. The historical content and the retired examples are left untouched.",
+  "changedPaths": [
+    "docs/platform-contract.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-governance.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the constitution and the governance of superseded documents"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not delete or rewrite the historical contract content",
+    "The change must not present a retired v1 contract as current authority",
+    "The change must not promote docs/platform-contract.md into a normative document"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "docs/platform-contract.md names Platform Constitution v2 as the authority for current work",
+    "every local link in the banner and the Implementation Note resolves to an existing file",
+    "docs/platform-contract.md stays out of NORMATIVE_DOCUMENTS in scripts/check_document_boundaries.py",
+    "scripts/run_tests.py fast and full stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:45:00+08:00",
+    "decision": "Documentation-consistency step carried out under the mandate in #assayer-group:4c84ee19; the stale banner was reported to the group on 2026-09-17 as part of step 2, and the file is a non-normative historical reference."
+  },
+  "state": "approved"
+}
