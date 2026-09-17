@@ -1,5 +1,10 @@
 # Vertical Slice 062: Restricted Codex Plugin Adapter
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Connect the durable lifecycle transaction engine to the supported Codex plugin

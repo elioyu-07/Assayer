@@ -4,9 +4,15 @@
 |---|---|
 | Document version | 1.3.0-draft |
 | Date | 2026-09-13 |
-| Status | Design converging |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Product Owner / Assayer Maintainers |
 | Baseline | Current design on `main` |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 > **Non-normative legacy vertical design record.** The invariants and terms in
 > this document describe the original source-specific implementation. They are

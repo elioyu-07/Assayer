@@ -1,5 +1,10 @@
 # Vertical Slice 075: Actionable Result Contract
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Make a valid terminal audit result useful for remediation without moving domain

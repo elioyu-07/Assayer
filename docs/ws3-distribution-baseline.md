@@ -1,5 +1,11 @@
 # WS3 Distribution Split — Baseline Checkpoint
 
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
+
 | Metadata | Value |
 |---|---|
 | Date | 2026-09-10 |

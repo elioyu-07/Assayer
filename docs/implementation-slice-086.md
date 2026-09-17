@@ -1,5 +1,10 @@
 # Implementation Slice 086 — Remove Built-in Spec and Prove the External CLI Journey
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 > **Naming note:** this plugin was later renamed `ass-spec` and moved to its own
 > repository; it no longer lives at `plugins/spec-quality/`. The name
 > "Spec-quality" below is the historical name at the time of this slice.

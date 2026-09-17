@@ -1,5 +1,10 @@
 # Layer Convergence L1 — Platform Interface Skeleton
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 The platform now exposes four domain-neutral protocol seams:

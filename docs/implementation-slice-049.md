@@ -1,5 +1,10 @@
 # Vertical Slice 049: Pre-persistence Review Checkpoint Validation
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Status
 
 Implemented on 2026-09-03. Real CLI interruption acceptance remains owner-run

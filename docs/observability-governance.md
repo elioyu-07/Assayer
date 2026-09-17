@@ -4,8 +4,14 @@
 |---|---|
 | Document version | 1.1.0-draft |
 | Date | 2026-09-04 |
-| Status | C08.1-C08.4 completed; ongoing governance baseline for J04-J08 acceptance |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Agent Runtime / Host Core / Product Owner |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 ## 1. Objective
 

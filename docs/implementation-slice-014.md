@@ -1,5 +1,10 @@
 # Vertical Slice 014: Playwright Read-Only Page and Object Identity
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Adds optional `browser` dependency and lazy `PlaywrightBrowserBackend`; missing Playwright/Chromium fails startup without fixture fallback. Chromium uses constrained profile only. `BrowserReadOnlyPageAdapter` uses versioned Host probes for URL, route, title, DOM summary, visible text, safe entrypoints, and `filter_region` candidates. Navigation is frozen-origin only; persisted PageState strips query/fragment. `BrowserLocatorRegistry` stays in Session memory; selectors, ElementHandles, and locator material never enter SQLite, protocol, or reports. `BrowserObjectIdentityAdapter` re-probes before each validation and returns `not_found`, `ambiguous`, or unique `matched`.
 
 Tests verify same-origin reading, cross-origin rejection, query/fragment stripping, locator refresh, unique promotion, ambiguity, schema, and fail-closed startup. B04 proves reading and initial binding only; B05/B06 add interception/actions/recovery. B07c screenshot sanitization remains deferred.

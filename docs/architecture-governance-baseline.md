@@ -4,9 +4,15 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-05 |
-| Status | Historical baseline; superseded by the compiler-owned hard cut |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Scope | Repository architecture and dependency ownership |
 | Evidence | Source tree and import relationships in `src/` |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 This is a factual snapshot of the low-level SDK/Advanced SPI implementation.
 Its intended plugin-authoring statements are superseded by Platform

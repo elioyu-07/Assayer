@@ -1,5 +1,10 @@
 # Vertical Slice 053: Interruption and Terminal Publication Fault Injection
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Status
 
 Implemented and accepted on 2026-09-03 for the generic interactive plugin

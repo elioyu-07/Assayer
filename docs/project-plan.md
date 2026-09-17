@@ -4,9 +4,15 @@
 |---|---|
 | Document version | 1.2.0 |
 | Date | 2026-09-13 |
-| Status | Historical execution baseline; superseded by Platform Constitution v2 |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer maintainers |
 | Primary client | Codex CLI |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 > **Superseded.** This plan records an earlier product sequence and is retained
 > for traceability. New work follows Platform Constitution v2, the compiled

@@ -1,5 +1,10 @@
 # Layer Convergence L5 — Unified Delivery Observer
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 `PlatformDeliveryObserver` is now the platform-owned composition point for

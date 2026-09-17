@@ -1,5 +1,10 @@
 # Vertical Slice 071: Unified Platform Performance Bill
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Make serial and parallel platform performance understandable without coupling

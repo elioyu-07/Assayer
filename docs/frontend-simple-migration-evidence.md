@@ -3,8 +3,14 @@
 | Metadata | Value |
 |---|---|
 | Date | 2026-09-15 |
-| Status | Historical migration evidence; superseded by the compiled artifact contract |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Scope | Earlier domain migration and split distribution |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 > **Historical evidence.** Concrete domain names and old distribution mechanics
 > below are retained only to explain a past migration. They are not platform

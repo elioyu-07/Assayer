@@ -1,5 +1,10 @@
 # Implementation Slice 093 — Remove Obsolete Legacy Test Surface
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 The SDK v2 boundary is now the only active Agent-facing contract. Tests that

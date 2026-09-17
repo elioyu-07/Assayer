@@ -1,5 +1,10 @@
 # Implementation Slice 076 — Generic Evidence-Graph Projection
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 ## Purpose

@@ -1,5 +1,10 @@
 # Vertical Slice 061: Durable Lifecycle Transaction Engine
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Execute one accepted plugin lifecycle plan with durable state, immediate

@@ -1,5 +1,10 @@
 # Vertical Slice 040: Platform Constitution and v1 Contract Freeze (M2)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 M2 freezes the domain-neutral laws for the Assayer platform. The Platform
 Constitution assigns ownership across the kernel, audit plugins, capability
 providers, Agent adapters, and renderers. Separate v1 contracts define plugin

@@ -1,5 +1,10 @@
 # Vertical Slice 004: Case Boundaries and Safe-Action Core
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 `begin_case` accepts only a uniquely verified eligible object and frozen rule, atomically saves recovery baseline, marks the object `investigating`, and increments revision. One active Case is allowed per object-rule pair. `perform_action` validates Scan, Case, Object, PageState, intent, and every outbound request. Unknown actions, selectors, scripts, writes, mutations, multipart, Beacon, WebSocket/SSE, Service Worker, and cross-origin business requests are rejected. Pre-send blocks persist ActionAttempt and sanitized RequestObservation; uncertain sending yields `result_unknown` and no replay. String parameters retain type/length only. A write observed before interception fails the Scan. `get_operation` exposes saved structured result snapshots.
 
 This slice persists safety facts but does not claim real-browser integration. Reverse actions, baseline replay, recovery checks, and `completed/restore_failed` convergence belong to Slice 005.

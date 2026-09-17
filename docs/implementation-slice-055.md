@@ -1,5 +1,10 @@
 # Vertical Slice 055: Independent Plugin Package Resource Gate
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Reject an incomplete, inconsistent, or path-unsafe independent plugin package

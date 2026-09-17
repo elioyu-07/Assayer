@@ -1,5 +1,10 @@
 # Vertical Slice 068: Provider-Bound Execution and Evidence
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Turn a ready capability negotiation into one controlled provider execution

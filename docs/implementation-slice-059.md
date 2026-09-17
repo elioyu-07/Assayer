@@ -1,5 +1,10 @@
 # Vertical Slice 059: Read-Only Installation and Feedback Status
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Give a user or Agent one safe way to determine whether the running Assayer

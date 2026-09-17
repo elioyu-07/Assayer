@@ -1,5 +1,10 @@
 # Vertical Slice 042: Generic Interactive Inspection Paging (M3 foundation)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The domain-neutral interactive controller now pages WorkItem inspection using
 the selected plugin's declared `inspectBatching` and `maxBatchSize` constraints.
 Callers may provide an opaque cursor and receive a bounded range plus the next

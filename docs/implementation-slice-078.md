@@ -1,5 +1,10 @@
 # Implementation Slice 078 — Result-Feature Conformance
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 Plugin registrations may declare the additive `evidence_graph` result feature.

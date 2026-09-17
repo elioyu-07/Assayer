@@ -1,5 +1,10 @@
 # Vertical Slice 039: Second-Use Run Isolation (J06a)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The product Facade and domain-neutral interactive transport now retire all
 per-Run semantic state at terminal completion and before a new Run starts.
 Durable ledgers and published artifacts remain available under the first Run's

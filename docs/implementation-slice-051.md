@@ -1,5 +1,10 @@
 # Vertical Slice 051: Durable Active-Run Resume
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Status
 
 Implemented on 2026-09-03 for the generic interactive plugin transport. Real

@@ -1,5 +1,10 @@
 # Implementation Slice 094 — Remove Legacy SDK Surface
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 The removed AgentContract protocol is no longer a public SDK capability.

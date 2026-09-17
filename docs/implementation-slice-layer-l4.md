@@ -1,5 +1,10 @@
 # Layer Convergence L4 — Generic Review Protocol Boundary
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 The platform now provides a compact review-task envelope and a generic

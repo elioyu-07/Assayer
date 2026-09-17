@@ -1,5 +1,10 @@
 # Vertical Slice 001: Protocol and Operation Core
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Scope
 
 This slice implements deterministic Host Core boundaries without a browser: Bootstrap/Session envelope and tool-input validation; Scan/Run identity and `expectedRunRevision` gates; Operation idempotency, request digests, and `IDEMPOTENCY_CONFLICT`; read-only `get_operation`; SQLite persistence across restarts; one-time TTL credential handles and replaceable login adapters; and fail-closed `INTERNAL_FAILURE` when browser adapters are absent.

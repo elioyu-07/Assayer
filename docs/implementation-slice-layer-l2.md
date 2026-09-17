@@ -1,5 +1,10 @@
 # Layer Convergence L2 — Markdown Navigation Adapter (removed)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: superseded
 
 The original L2 slice exposed `MarkdownNavigationAdapter` through the generic

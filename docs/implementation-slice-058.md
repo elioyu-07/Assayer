@@ -1,5 +1,10 @@
 # Vertical Slice 058: Platform-Owned Result Experience
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Guarantee that every plugin Run ends with an understandable, actionable result

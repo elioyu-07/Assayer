@@ -1,5 +1,10 @@
 # Vertical Slice 043: Layered Investigation Evidence (M3 foundation)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The domain-neutral interactive controller can now return an InvestigationPacket
 without embedding every Evidence payload. The response keeps dimensions and a
 stable Evidence index; `expand_investigation` returns selected immutable

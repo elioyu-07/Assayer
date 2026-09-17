@@ -1,5 +1,10 @@
 # Vertical Slice 046: Incremental Semantic Review Checkpoints (M3)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Interactive Runs can now persist semantic-review progress after each bounded
 Evidence collection page. `checkpoint_review` binds an opaque plugin payload to
 the current WorkItem, Check version, collection, and stable item IDs. The

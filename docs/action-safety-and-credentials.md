@@ -4,8 +4,14 @@
 |---|---|
 | Document version | 1.0.0-draft |
 | Date | 2026-08-30 |
-| Status | Design converging |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Host Core / Security Owner |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 ## 1. Purpose
 

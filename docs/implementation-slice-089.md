@@ -1,5 +1,10 @@
 # Implementation Slice 089 — Host-Owned Domain-Result Task Binding
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 This slice connects the SDK v2 `DomainResultContract` to the interactive Host

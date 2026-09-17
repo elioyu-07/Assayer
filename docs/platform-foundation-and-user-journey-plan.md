@@ -4,9 +4,15 @@
 |---|---|
 | Document version | 1.1.0-draft |
 | Date | 2026-09-13 |
-| Status | Historical planning proposal; superseded by Platform Constitution v2 |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer Maintainers |
 | Scope | Minimum platform work required to deliver a reliable Alpha user journey |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 > **Superseded.** This plan is retained for product-history traceability. It is
 > not an implementation sequencing authority. Current changes require an

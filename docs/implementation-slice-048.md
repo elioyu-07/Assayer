@@ -1,5 +1,10 @@
 # Vertical Slice 048: Staged Terminal Result Delivery (M3)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Interactive plugin closeout now returns a bounded summary-first projection.
 The platform recursively stages non-empty arrays and text larger than the
 inline byte limit as stable result sections. This is domain-neutral: plugins

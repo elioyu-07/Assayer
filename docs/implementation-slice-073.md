@@ -1,5 +1,10 @@
 # Vertical Slice 073: Portable Canonical Result
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Give every generic audit plugin one portable terminal result that CLI clients,

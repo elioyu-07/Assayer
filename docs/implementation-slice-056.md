@@ -1,5 +1,10 @@
 # Vertical Slice 056: Isolated Plugin Installation and Fixture Gate
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Prove that a statically valid independent plugin package can actually be built,

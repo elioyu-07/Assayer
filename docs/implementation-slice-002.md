@@ -1,5 +1,10 @@
 # Vertical Slice 002: Read-Only Page Discovery
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Deliverables
 
 - `ReadOnlyPageAdapter` exposes only `observe(pageStateId)`;

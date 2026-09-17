@@ -1,5 +1,10 @@
 # Vertical Slice 065: Isolated Lifecycle Acceptance
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Exercise the complete release lifecycle across real process and persistence

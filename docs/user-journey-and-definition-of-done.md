@@ -4,8 +4,14 @@
 |---|---|
 | Document version | 1.2.0 |
 | Date | 2026-09-03 |
-| Status | J00-J03 and J06b confirmed; J04-J05 implementation complete, deterministic evidence recorded, operator acceptance pending |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Product Owner / Agent Runtime / Host Core |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 This document is the sole user-journey baseline for the Assayer productization phase. It defines whether a user can actually use the product and when completion may be claimed. Plugin, Skill, MCP, Host, tests, and observability are implementation means and cannot independently prove product completion.
 

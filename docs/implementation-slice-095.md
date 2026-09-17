@@ -1,5 +1,10 @@
 # Implementation Slice 095 — P0 Platform-Owned Evidence Binding
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: in progress; current agentView/supportedBy/provider boundary is executable, and the hard-cut removal of legacy protocol paths is in progress
 Priority: P0
 Owner: Assayer platform maintainers, with ass-spec plugin support

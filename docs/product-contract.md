@@ -5,10 +5,16 @@
 | Document version | 1.3.1-draft |
 | Created | 2026-08-30 |
 | Amended | 2026-09-10 |
-| Status | Alpha user-journey baseline awaiting confirmation |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Business owner | Product Owner |
 | Baseline | B12 Host smoke completed; C01 LLM investigation design baseline |
 | Blocking open questions | Governed by [Verification and Traceability](verification-and-traceability.md) |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 This document owns only product goals, scope, user-visible commitments, and first-version completion conditions. [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md) owns the current Alpha end-to-end journey and sole completion gate. Platform invariants and generic lifecycle laws are owned by the [Platform Constitution](platform-constitution-v1.md) and v1 contracts; source-specific algorithms and rule files are owned by [Domain Model](domain-model-and-lifecycle.md), [Action Safety](action-safety-and-credentials.md), [Evidence Integrity](evidence-and-decision-integrity.md), and [Rule Contract](rule-contract.md), respectively.
 

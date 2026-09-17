@@ -1,5 +1,10 @@
 # Vertical Slice 013: Secure Credential Channel and Login Convergence
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Adds Host-owned bytearray `LoginSecret`, redacted string/repr, one-time TTL `CredentialVault`, local credential intake, and `LoginCoordinator`. Handles are protocol IDs, non-overwritable, consumed once, and cleared on expiry, discard, Host close, or `clear_all`. Coordinator converges `credential_consumed -> authenticating -> succeeded/failed -> credential_cleared/clear_failed`; adapter errors and clearing failures fail closed. Diagnostics sanitize usernames, passwords, token assignments, and exception text. Success includes PageState/capabilities; failure includes neither.
 
 Temporary immutable strings may exist at the Python/browser boundary, so OS-level zero residue is not promised. Vault buffers, protocol/log/SQLite/report exclusion, and post-adapter unreadability are guaranteed. Local intake is Host-only; MCP receives only `credentialHandle`. Tests cover duplicate handles, TTL, clear failure, diagnostics, and fixture-password exclusion.

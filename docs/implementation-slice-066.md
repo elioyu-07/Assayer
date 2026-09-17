@@ -1,5 +1,10 @@
 # Vertical Slice 066: Capability Provider Conformance
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Turn the frozen capability-provider contract into a shared registration gate

@@ -1,5 +1,10 @@
 # Vertical Slice 044: Summary-First Collection Paging (M3)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Agent-facing `inspect_work_items` now omits full Evidence payloads by default.
 It returns dimensions, metadata, a stable Evidence index, and an Evidence
 collection index. A caller can still request compatibility behavior with

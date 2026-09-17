@@ -1,5 +1,10 @@
 # Vertical Slice 047: Host-Driven Interactive Workflow (M3)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Interactive plugin Runs now expose an explicit workflow boundary on every
 generic response and in the durable platform ledger. The boundary includes the
 current phase, lifecycle state, whether closeout is allowed, the required next

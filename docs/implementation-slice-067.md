@@ -1,5 +1,10 @@
 # Vertical Slice 067: Capability and Budget Negotiation
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Implement the provider-contract formula that a usable capability is the

@@ -1,5 +1,10 @@
 # Implementation Slice 083 — Evidence-Graph Schema Gate
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 The portable evidence-graph projection is now described by

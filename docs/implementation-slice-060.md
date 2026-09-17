@@ -1,5 +1,10 @@
 # Vertical Slice 060: Fail-Closed Plugin Lifecycle Planning
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Define the transaction boundary for Assayer upgrade, rollback, and uninstall

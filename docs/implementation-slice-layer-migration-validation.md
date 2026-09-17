@@ -1,5 +1,10 @@
 # Layer Migration Validation — Spec and Config
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 Spec now consumes the platform Markdown navigation adapter for its complete

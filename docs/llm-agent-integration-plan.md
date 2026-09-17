@@ -4,8 +4,14 @@
 |---|---|
 | Document version | 1.0.0-draft |
 | Date | 2026-08-31 |
-| Status | C01-C07.2 completed; C07.3 and J01-J08 end-to-end delivery closure in progress |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Agent Runtime / Host Core |
+
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
 
 ## 1. Phase Objective
 

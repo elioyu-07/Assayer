@@ -1,5 +1,10 @@
 # Vertical Slice 041: Bounded Agent Waiting (M1 performance safeguard)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The model-independent AgentLoop now has a platform-wide context-size safety
 limit for the serialized Host context presented to the Agent. A context that
 cannot fit in one turn stops with an explicit `context_budget` reason and

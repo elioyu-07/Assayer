@@ -1,5 +1,10 @@
 # Implementation Slice 081 — Evidence-Graph Progress
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 Interactive progress now includes an additive `evidenceGraph` block with total

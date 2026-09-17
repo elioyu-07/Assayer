@@ -1,5 +1,10 @@
 # Vertical Slice 038: Plain-Language Audit Results (J05)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The terminal product summary and `audit-summary.md` now lead with status,
 conclusion validity, the concrete terminal reason, and an actionable next step.
 They distinguish completed remediation, bounded partial coverage, and failed

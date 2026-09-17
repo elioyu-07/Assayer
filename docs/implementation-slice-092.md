@@ -1,5 +1,10 @@
 # Implementation Slice 092 — Enforce Installed DomainResult Acceptance
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 This slice closes a release-gate hole left by the SDK v2 migration. Installed

@@ -1,5 +1,10 @@
 # Vertical Slice 070: Parallel Inspection Contract
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Reduce platform waiting for large independent WorkItem sets without changing

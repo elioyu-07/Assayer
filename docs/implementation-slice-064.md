@@ -1,5 +1,10 @@
 # Vertical Slice 064: Verified Private-Runtime Cleanup
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Remove an uninstalled Assayer release's reproducible private runtime without

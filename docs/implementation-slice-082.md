@@ -1,5 +1,10 @@
 # Implementation Slice 082 — Human-Readable Evidence Coverage
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented
 
 Platform observability JSON and Markdown now include evidence-graph coverage.

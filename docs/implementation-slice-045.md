@@ -1,5 +1,10 @@
 # Vertical Slice 045: Safe Adaptive Inspection Batches (M3)
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 The platform now treats failed-batch retry as an explicit plugin capability.
 The optional manifest field `failureSplitting` defaults to `forbidden` and is
 effective only when inspection batching is allowed and WorkItem ordering is

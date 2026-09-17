@@ -1,5 +1,10 @@
 # Implementation Slice 087 — Public Plugin SDK Boundary and Semantic Contract Enforcement
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 Status: implemented; release and operator-level natural-language acceptance remain separate gates
 
 This slice closes the platform-owned SDK boundary for independently packaged

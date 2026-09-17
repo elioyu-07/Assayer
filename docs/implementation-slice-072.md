@@ -1,5 +1,10 @@
 # Vertical Slice 072: Shared Result and Recovery Conformance
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Make final result validity a platform-enforced invariant shared by batch,

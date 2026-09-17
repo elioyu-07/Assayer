@@ -1,5 +1,10 @@
 # Vertical Slice 057: Generic Run Progress and Human Diary
 
+> **Historical record.** This implementation slice predates the Platform
+> Constitution v2 and is retained for traceability only; it is not current
+> implementation guidance.
+
+
 ## Goal
 
 Make a long interactive plugin Run understandable while it is active and after

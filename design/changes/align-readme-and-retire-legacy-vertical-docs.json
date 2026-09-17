@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "align-readme-and-retire-legacy-vertical-docs",
+  "changeType": "contract_change",
+  "title": "Realign the README and retire the legacy vertical documents",
+  "summary": "The README and a set of older design documents still describe the v1 product: Playwright/Chromium setup, the web-audit Skill, and the retired five-state result vocabulary. The compiled-platform migration and the retired browser runtime make those instructions false. This change rewrites README.md to the Platform Constitution v2 model (declaration-only plugins compiled to one artifact, platform-owned Host lifecycle, bounded semantic review, exact verified artifact release) and marks the legacy vertical documents as superseded historical records rather than current authority. No document is deleted; each superseded document keeps its content and gains a banner that points at the v2 authority. No code, schema, compiled artifact, or runtime behavior changes.",
+  "changedPaths": [
+    "README.md",
+    "docs/product-contract.md",
+    "docs/design-governance.md",
+    "docs/host-agent-protocol.md",
+    "docs/observability-governance.md",
+    "docs/evidence-and-decision-integrity.md",
+    "docs/domain-model-and-lifecycle.md",
+    "docs/action-safety-and-credentials.md",
+    "docs/rule-contract.md",
+    "docs/verification-and-traceability.md",
+    "docs/user-journey-and-definition-of-done.md",
+    "docs/llm-agent-orchestration.md",
+    "docs/llm-agent-integration-plan.md",
+    "docs/browser-mcp-integration-plan.md",
+    "docs/ws3-distribution-baseline.md",
+    "docs/platform-foundation-and-user-journey-plan.md",
+    "docs/project-plan.md",
+    "docs/architecture-governance-baseline.md",
+    "docs/frontend-simple-migration-evidence.md",
+    "docs/implementation-slice-*.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the README and the authority status of platform documentation"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The README must not describe a bundled browser, Playwright, or Chromium prerequisite",
+    "No superseded document may be deleted or have its historical content rewritten",
+    "A superseded banner must not claim the document is still current authority"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "README.md contains no Playwright, Chromium, or web-audit Skill instructions",
+    "README.md describes the compiled declaration-only plugin model and the v2 review states",
+    "every listed historical document carries a superseded or historical banner",
+    "scripts/check_english_text.py, check_architecture_boundaries.py, check_document_boundaries.py, and check_plugin_source_boundaries.py stay green",
+    "scripts/run_tests.py fast and full stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T14:57:28+08:00",
+    "decision": "User replied '修 CI，对齐文档。' in #assayer-group:4c84ee19, authorizing the document alignment work."
+  },
+  "state": "approved"
+}

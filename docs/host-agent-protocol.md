@@ -1,5 +1,11 @@
 # Assayer Host-Agent Collaboration Protocol
 
+> **Superseded.** This document predates the Platform Constitution v2 and is
+> retained as a historical migration reference. The Platform Constitution v2
+> and the v1 contracts govern current platform work; this content is not
+> current implementation guidance.
+
+
 > C05 status: dynamic Runtime Router, fixed output root, per-Scan isolation, Agent lease supervision, project MCP configuration, and formal `audit`/deterministic `smoke` separation are implemented. The authoritative loop is [LLM Investigation Orchestration](llm-agent-orchestration.md).
 
 ## 1. Scope
