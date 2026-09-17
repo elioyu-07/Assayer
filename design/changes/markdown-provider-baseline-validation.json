@@ -3,7 +3,7 @@
   "changeId": "markdown-provider-baseline-validation",
   "changeType": "provider_change",
   "title": "Validate the restored optional Markdown Provider baseline",
-  "summary": "Complete the user-approved restoration baseline, replace obsolete Markdown package absence assertions with independent-package boundary checks, and record observed compiled-runtime integration gaps without claiming end-to-end completion.",
+  "summary": "Complete the user-approved restoration baseline, replace obsolete Markdown package absence assertions with independent-package boundary checks, and record observed compiled-runtime integration gaps without claiming end-to-end completion. Supersession: this record's acceptance item 'Observed compiled-runtime blockers are documented and end-to-end acceptance remains explicitly pending' was closed by markdown-review-closure-acceptance, which is therefore the superseding record; the pending end-to-end journey it left open is now covered by that record's compiled review-to-result acceptance. Its surviving changedPaths stay covered after supersession: src/assayer_document_navigation/*, packages/assayer-provider-markdown/* and tests/test_markdown_navigation.py by restore-markdown-audit-slice, tests/test_plugin_sdk_distribution.py by data-only-plugin-contract, and tests/test_architecture_boundaries.py by the architecture-gate records.",
   "changedPaths": [
     "src/assayer_document_navigation/*",
     "packages/assayer-provider-markdown/*",
@@ -69,6 +69,6 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "User approved restoring existing Markdown assets and establishing the baseline; updating tests that require their deletion is necessary to that approved scope. No legacy plugin runtime is restored."
   },
-  "state": "approved",
+  "state": "superseded",
   "supersedes": "restore-markdown-audit-slice"
 }
