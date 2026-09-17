@@ -3,7 +3,7 @@
   "changeId": "deep-clean-legacy-plugin-documentation-and-gates",
   "changeType": "contract_change",
   "title": "Remove stale ordinary-plugin runtime and authoring semantics",
-  "summary": "Align current guidance and repository gates with the single zero-Python compiled-plugin contract, while explicitly retaining Provider terminology and negative rejection fixtures.",
+  "summary": "Align current guidance and repository gates with the single zero-Python compiled-plugin contract, while explicitly retaining Provider terminology and negative rejection fixtures. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "README.md",
     "docs/platform-constitution-v2.md",
@@ -85,5 +85,5 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "Approved as the deep-clean phase of the hard-cut unified platform/plugin contract."
   },
-  "state": "approved"
+  "state": "implemented"
 }
