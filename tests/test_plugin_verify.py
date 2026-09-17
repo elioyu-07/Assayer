@@ -50,13 +50,13 @@ class PluginVerifyTests(unittest.TestCase):
             self.assertEqual(result["status"], "failed", result)
             self.assertEqual(result["error"]["code"], "ADVANCED_SPI_REMOVED")
 
-    def test_browser_policy_pack_compiles_without_runtime_code(self):
-        source = Path("plugins/frontend-audit")
+    def test_markdown_policy_pack_compiles_without_runtime_code(self):
+        source = Path("tests/fixtures/plugins/policy-pack")
         with tempfile.TemporaryDirectory() as directory:
             result = verify_plugin_source(source, output_dir=directory)
 
         self.assertEqual(result["status"], "passed", result)
-        self.assertEqual(result["pluginId"], "assayer.frontend-audit")
+        self.assertEqual(result["pluginId"], "test.policy-pack")
         self.assertTrue(result["acceptance"]["dataOnly"])
 
 

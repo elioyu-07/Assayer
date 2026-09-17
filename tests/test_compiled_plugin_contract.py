@@ -15,13 +15,13 @@ from assayer_plugin_sdk.contract import PlatformContractError
 
 
 class CompiledPluginContractTests(unittest.TestCase):
-    def test_frontend_contract_is_immutable_and_self_authenticating(self):
+    def test_compiled_contract_is_immutable_and_self_authenticating(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             contract = load_compiled_plugin_contract(root)
 
-        self.assertEqual(contract.plugin_id, "assayer.frontend-audit")
+        self.assertEqual(contract.plugin_id, "test.policy-pack")
         self.assertEqual(contract.digest, contract_digest(contract.payload))
         with self.assertRaises(TypeError):
             contract.payload["plugin"]["id"] = "changed"
@@ -29,7 +29,7 @@ class CompiledPluginContractTests(unittest.TestCase):
     def test_contract_tampering_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             path = root / "compiled-plugin.json"
             payload = json.loads(path.read_text(encoding="utf-8"))
             payload["plugin"]["name"] = "tampered"
@@ -42,7 +42,7 @@ class CompiledPluginContractTests(unittest.TestCase):
     def test_schema_rejects_executable_registration_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             payload = json.loads((root / "compiled-plugin.json").read_text(encoding="utf-8"))
         payload["registration"] = "plugin:registration"
         payload["contractDigest"] = contract_digest(payload)

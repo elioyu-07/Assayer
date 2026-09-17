@@ -60,14 +60,8 @@ def _manifest(contract: CompiledPluginContract) -> PluginManifest:
     input_value = payload["input"]
     subject_kind = str(input_value["subjectKind"])
     checks: list[CheckContract] = []
-    required_capability = (
-        ("browser_snapshot",) if input_value["kind"] == "browser_snapshot"
-        else ("document_navigation",)
-    )
-    evidence_kind = (
-        ("browser_snapshot",) if input_value["kind"] == "browser_snapshot"
-        else ("structured",)
-    )
+    required_capability = ("document_navigation",)
+    evidence_kind = ("structured",)
     for item in payload["checks"]:
         checks.append(CheckContract(
             check_id=str(item["id"]),
@@ -80,10 +74,7 @@ def _manifest(contract: CompiledPluginContract) -> PluginManifest:
             required_evidence_kinds=evidence_kind,
             required_capabilities=required_capability,
             capability_missing_outcome="blocked",
-            invalidation_signals=(
-                "browser_state_digest" if input_value["kind"] == "browser_snapshot"
-                else "source_digest",
-            ),
+            invalidation_signals=("source_digest",),
         ))
     return PluginManifest(
         plugin_id=contract.plugin_id,
@@ -122,7 +113,7 @@ class CompiledInteractiveController:
         # Capability names are requested by the compiled contract and resolved
         # only through an installed Provider. The platform does not implement
         # a document or browser capability itself.
-        return "browser_snapshot" if contract.input_kind == "browser_snapshot" else "document_navigation"
+        return "document_navigation"
 
     def _run(self, run_id: str) -> CompiledRun:
         try:
@@ -230,8 +221,6 @@ class CompiledInteractiveController:
         }
 
     def _provider_scope(self, scope: Any) -> Mapping[str, Any]:
-        if self.contract.input_kind == "browser_snapshot":
-            return dict(scope)
         files = scope.get("files") if isinstance(scope, Mapping) else None
         if not isinstance(files, Sequence) or isinstance(files, (str, bytes, bytearray)) or not files:
             raise PlatformContractError("PROVIDER_SCOPE_INVALID", "Document input requires at least one file")
@@ -274,11 +263,11 @@ class CompiledInteractiveController:
             exhausted = False
             while not exhausted:
                 page_scope = self._provider_scope(state.scope)
-                if cursor is not None and state.contract.input_kind in {"markdown", "document"}:
+                if cursor is not None:
                     page_scope["page"] = {"cursor": cursor}
                 result = state.provider.collect(item, state.check, state.capability, scope=page_scope)
                 collected.append(result)
-                if result.failure is not None or state.contract.input_kind not in {"markdown", "document"}:
+                if result.failure is not None:
                     exhausted = True
                 else:
                     next_cursor = None

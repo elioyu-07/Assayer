@@ -8,7 +8,7 @@ from pathlib import Path
 
 from assayer_host.plugin_intent import IntentResolutionError, resolve_intent
 
-KNOWN = ("test-minimal", "assayer.frontend-audit")
+KNOWN = ("test-minimal",)
 
 
 class PluginIntentResolutionTest(unittest.TestCase):

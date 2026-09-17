@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-providerless-browser-source-kind-and-its-domain-plugin",
+  "changeType": "release_change",
+  "title": "Retire the providerless browser source kind and its domain plugin",
+  "summary": "The platform kernel still hard-coded the source kind browser_snapshot everywhere: the declaration compiler admitted it as one of three input kinds and gave it a URL scope schema and a browser_page subject default, compiled_interactive derived its capability name, evidence kind and invalidation signal from it, the compiled-plugin-contract schema enumerated it, and the SDK shipped a BrowserSnapshot type with browser observation properties. Its provider was already retired (remove-browser-runtime-and-playwright), no installed provider serves that capability, and its only consumer was the first-party plugins/frontend-audit plugin, so the whole surface was a dead, source-specific branch in the platform kernel, which Platform Constitution v2 section 13 forbids (source-specific branches in the platform kernel). This change deletes plugins/frontend-audit, src/assayer_plugin_sdk/browser.py and tests/test_browser_snapshot.py and tests/test_frontend_migration.py, removes the browser branches, URL scope schema, capabilities and evidence and invalidation mappings from declaration_compiler.py and compiled_interactive.py, drops browser_snapshot from the compiled-plugin-contract schema enum, removes the BrowserSnapshot and BrowserSnapshotSource exports and the browser observation properties from the SDK platform runtime, and repoints the affected contract, lifecycle, verify, packaging, distribution, intent and boundary tests at the neutral declaration-only fixtures/plugins/policy-pack fixture. The architecture gate now rejects the deleted module path, the retired plugin directory, the BrowserSnapshot and BrowserSnapshotSource symbols, and the browser_snapshot literal, with three new boundary tests. The single remaining document source kind is unchanged, an ordinary plugin still compiles, binds the markdown provider, and completes a Run end to end, and the compiled Run output stays in the five-state vocabulary. This is a breaking release change because the assayer-plugin-sdk wheel stops exporting BrowserSnapshot and BrowserSnapshotSource and the platform stops accepting the browser_snapshot input kind.",
+  "changedPaths": [
+    "plugins/frontend-audit/*",
+    "schemas/compiled-plugin-contract.schema.json",
+    "scripts/check_architecture_boundaries.py",
+    "src/assayer_platform/compiled_interactive.py",
+    "src/assayer_platform/declaration_compiler.py",
+    "src/assayer_platform/provider_binding.py",
+    "src/assayer_plugin_sdk/__init__.py",
+    "src/assayer_plugin_sdk/browser.py",
+    "src/assayer_plugin_sdk/platform_runtime.py",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_browser_snapshot.py",
+    "tests/test_compiled_interactive.py",
+    "tests/test_compiled_plugin_contract.py",
+    "tests/test_compiled_plugin_lifecycle.py",
+    "tests/test_declaration_compiler.py",
+    "tests/test_frontend_migration.py",
+    "tests/test_plugin_intent.py",
+    "tests/test_plugin_packaging.py",
+    "tests/test_plugin_sdk_distribution.py",
+    "tests/test_plugin_verify.py",
+    "docs/architecture-governance-baseline.md",
+    "docs/platform-boundary-map.md",
+    "design/changes/retire-the-providerless-browser-source-kind-and-its-domain-plugin.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md",
+    "docs/plugin-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the retired browser source kind, the kernel branches that mapped it, and the architecture gate that now guards it"
+    ],
+    "plugin": [
+      "No live plugin change; the retired first-party plugins/frontend-audit domain plugin is deleted and no platform plugin remains hard-coded"
+    ],
+    "provider": [
+      "No provider change; the browser provider was already retired and no installed provider supplies the removed capability"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter the live markdown/document source path, the compiled Run five-state vocabulary, or the frozen v1 SDK contracts",
+    "The change must not remove a source kind that an installed provider still serves",
+    "The change must not weaken the architecture gate for live platform modules"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "plugins/frontend-audit, src/assayer_plugin_sdk/browser.py, tests/test_browser_snapshot.py and tests/test_frontend_migration.py are deleted",
+    "the platform kernel admits no browser_snapshot input kind and derives no capability, evidence or invalidation name from a source kind",
+    "the compiled-plugin-contract schema no longer enumerates browser_snapshot and the SDK exports no BrowserSnapshot or BrowserSnapshotSource symbol",
+    "the architecture gate rejects the retired module path, the retired plugin directory, the retired symbols and the browser_snapshot literal",
+    "an ordinary declaration-only plugin still compiles, binds the installed markdown provider, and completes one compiled Run end to end in a clean environment",
+    "the architecture, document, plugin-source, English text and resilience gates return 0 and the fast and full profiles stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface change carried out under the standing authorization of the refactor mandate and the platform de-plugin and capability special project opened by 于旸 in #assayer-group:ca16776b, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is breaking because the assayer-plugin-sdk wheel stops exporting BrowserSnapshot and BrowserSnapshotSource and the platform stops admitting the browser_snapshot input kind; the evidence that no installed provider serves that capability is recorded in the summary. @assayer_rev independently reviews the change."
+  },
+  "state": "approved"
+}

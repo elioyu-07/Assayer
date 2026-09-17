@@ -14,7 +14,6 @@ from .actionable_result import (  # noqa: F401
     extract_result_delivery_bundle,
     validate_result_delivery,
 )
-from .browser import BrowserSnapshot, BrowserSnapshotSource  # noqa: F401
 from .contract import *  # noqa: F401,F403
 from .contract import (  # noqa: F401
     DECISION_STATES,

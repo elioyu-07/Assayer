@@ -21,8 +21,10 @@ Its intended plugin-authoring statements are superseded by Platform
 Constitution v1.1 and
 [Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).
 The Frontend compatibility package described below has since been deleted;
-`plugins/frontend-audit/` and `assayer-provider-browser` are the current plugin
-and source-provider boundaries.
+`plugins/frontend-audit/` and `assayer-provider-browser` were then retired as
+well, so the platform repository ships no domain plugin and no browser source
+kind. The current plugin and source-provider boundaries are the declaration-only
+plugin contract and the installed capability providers.
 
 ## 1. Purpose
 

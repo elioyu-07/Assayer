@@ -13,13 +13,13 @@ SDK_ROOT = ROOT / "src" / "assayer_plugin_sdk"
 FORBIDDEN_ROOTS = ("assayer_platform", "assayer_host")
 
 
-def _compiled_frontend_contract() -> dict:
+def _compiled_policy_pack_contract() -> dict:
     from assayer_platform.declaration_compiler import compile_plugin_contract
 
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "generated"
         compile_plugin_contract(
-            ROOT / "plugins" / "frontend-audit",
+            ROOT / "tests" / "fixtures" / "plugins" / "policy-pack",
             output,
         )
         return json.loads((output / "compiled-plugin.json").read_text(encoding="utf-8"))
@@ -126,8 +126,8 @@ class PluginSdkDistributionTest(unittest.TestCase):
             sdk["tool"]["setuptools"]["package-data"]["assayer_plugin_sdk"],
         )
 
-        plugin = _compiled_frontend_contract()
-        self.assertEqual(plugin["plugin"]["id"], "assayer.frontend-audit")
+        plugin = _compiled_policy_pack_contract()
+        self.assertEqual(plugin["plugin"]["id"], "test.policy-pack")
         self.assertNotIn("dependencies", plugin)
         self.assertNotIn("entryPoints", plugin)
 
@@ -166,7 +166,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         self.assertNotIn("assayer.plugins", sdk_entry_points)
         self.assertNotIn("assayer.providers", sdk_entry_points)
 
-        self.assertNotIn("registration", _compiled_frontend_contract())
+        self.assertNotIn("registration", _compiled_policy_pack_contract())
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ def bind_capability_provider(
     """Return a bound provider for the Check, or ``None`` when none is needed.
 
     ``provider_runtime`` is an opaque Host-owned adapter passed to the
-    provider factory (for example ``BrowserSnapshotSource``).  The binding
+    provider factory (for example a Host-owned source adapter).  The binding
     layer never starts or inspects that runtime.  Fails closed with
     ``PROVIDER_NOT_FOUND`` when the Check requires a declared provider
     capability but no installed provider supplies it.

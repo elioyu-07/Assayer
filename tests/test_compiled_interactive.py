@@ -11,24 +11,7 @@ from assayer_platform.declaration_compiler import compile_plugin_contract
 from assayer_platform.provider_registry import ProviderRegistry
 from assayer_platform.incremental_review import JsonCoverageLedgerStore
 from assayer_plugin_sdk.contract import PlatformContractError
-from assayer_plugin_sdk import BrowserSnapshot
 from assayer_document_navigation import markdown_registration
-
-
-class _SnapshotSource:
-    def observe_snapshot(self):
-        return BrowserSnapshot(
-            visible_text="Orders\nFilter\nQuery\nReset",
-            entrypoints=({"kind": "safe_action", "intent": "query"},),
-            candidates=({"kind": "filter_region", "label": "Order filters"},),
-            route="/orders",
-            state_kind="page",
-            structure_summary={"fields": 1, "tables": 1},
-            dom_digest="d" * 64,
-            url="https://example.test/orders",
-            origin="https://example.test",
-            title="Orders",
-        )
 
 
 class CompiledInteractiveTests(unittest.TestCase):
@@ -177,14 +160,13 @@ class CompiledInteractiveTests(unittest.TestCase):
     def test_start_consumes_contract_without_registration_or_plugin_code(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             contract = load_compiled_plugin_contract(root)
             controller = CompiledInteractiveController(contract, root / "runs")
             started = controller.start(
-                plugin_id="assayer.frontend-audit",
-                check_id="FUA-01",
-                scope={"url": "https://example.test/orders"},
-                capabilities=("browser_snapshot",),
+                plugin_id="test.policy-pack",
+                check_id="POLICY-001",
+                scope={"files": ["input.md"]},
             )
 
         self.assertEqual(started["runtime"], "compiled_plugin_contract")
@@ -194,14 +176,14 @@ class CompiledInteractiveTests(unittest.TestCase):
     def test_contract_scope_is_enforced_before_run_creation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             controller = CompiledInteractiveController(
                 load_compiled_plugin_contract(root), root / "runs",
             )
             with self.assertRaises(PlatformContractError) as rejected:
                 controller.start(
-                    plugin_id="assayer.frontend-audit",
-                    check_id="FUA-01",
+                    plugin_id="test.policy-pack",
+                    check_id="POLICY-001",
                     scope={},
                 )
 
@@ -210,14 +192,14 @@ class CompiledInteractiveTests(unittest.TestCase):
     def test_provider_required_run_fails_closed_without_installed_provider(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            compile_plugin_contract(Path("plugins/frontend-audit"), root)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root)
             controller = CompiledInteractiveController(
                 load_compiled_plugin_contract(root), root / "runs",
             )
             started = controller.start(
-                plugin_id="assayer.frontend-audit",
-                check_id="FUA-01",
-                scope={"url": "https://example.test/orders"},
+                plugin_id="test.policy-pack",
+                check_id="POLICY-001",
+                scope={"files": ["input.md"]},
             )
             with self.assertRaises(PlatformContractError) as rejected:
                 controller.bind_provider(

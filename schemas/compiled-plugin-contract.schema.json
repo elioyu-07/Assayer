@@ -34,7 +34,7 @@
       "additionalProperties": false,
       "required": ["kind", "subjectKind", "scopeSchema"],
       "properties": {
-        "kind": { "enum": ["document", "markdown", "browser_snapshot"] },
+        "kind": { "enum": ["document", "markdown"] },
         "subjectKind": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$" },
         "scopeSchema": { "type": "object" }
       }

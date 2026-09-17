@@ -11,7 +11,6 @@ import re
 from typing import Any
 
 from assayer_plugin_sdk.contract import PlatformContractError
-from assayer_plugin_sdk.browser import BrowserSnapshot
 from .compiled_plugin_contract import COMPILED_PLUGIN_CONTRACT, contract_digest
 from .yaml_subset import load_yaml_subset
 
@@ -94,10 +93,10 @@ def compile_plugin_contract(
         raise PlatformContractError(
             "INVALID_PLUGIN_DECLARATION", "Plugin ID or business version is invalid",
         )
-    if plugin["input"] not in {"document", "markdown", "browser_snapshot"}:
+    if plugin["input"] not in {"document", "markdown"}:
         raise PlatformContractError(
             "INVALID_PLUGIN_DECLARATION",
-            "Simple compiler supports document, markdown, or browser_snapshot input",
+            "Simple compiler supports document or markdown input",
         )
     checks_path = (root / plugin["checks"]).resolve()
     instructions_path = (root / plugin["instructions"]).resolve()
@@ -212,7 +211,6 @@ def compile_plugin_contract(
                 "Business case final must be ready, rework, needs_review, or not_applicable",
             )
         input_path = (case_path.parent / _text(case["input"], "Business case input")).resolve()
-        input_data: Mapping[str, Any] | None = None
         try:
             input_path.relative_to(root)
             input_text = input_path.read_text(encoding="utf-8")
@@ -220,46 +218,6 @@ def compile_plugin_contract(
             raise PlatformContractError(
                 "INVALID_PLUGIN_CASE", "Business case input must be readable inside the plugin source",
             ) from error
-        if plugin["input"] == "browser_snapshot":
-            if input_path.suffix.lower() != ".json":
-                raise PlatformContractError(
-                    "INVALID_PLUGIN_CASE",
-                    "browser_snapshot business cases must use a JSON snapshot input",
-                )
-            try:
-                parsed_input = json.loads(input_text)
-            except (TypeError, ValueError) as error:
-                raise PlatformContractError(
-                    "INVALID_PLUGIN_CASE",
-                    "browser_snapshot business case input must be valid JSON",
-                ) from error
-            if not isinstance(parsed_input, Mapping):
-                raise PlatformContractError(
-                    "INVALID_PLUGIN_CASE",
-                    "browser_snapshot business case input must be a JSON object",
-                )
-            input_data = dict(parsed_input)
-            try:
-                snapshot = BrowserSnapshot(**input_data)
-            except (TypeError, PlatformContractError) as error:
-                raise PlatformContractError(
-                    "INVALID_PLUGIN_CASE",
-                    "browser_snapshot business case input does not match BrowserSnapshot",
-                ) from error
-            if snapshot.url is None:
-                raise PlatformContractError(
-                    "INVALID_PLUGIN_CASE",
-                    "browser_snapshot business case input requires a URL",
-                )
-            input_data = _plain({
-                key: getattr(snapshot, key)
-                for key in (
-                    "visible_text", "entrypoints", "candidates", "network_summary",
-                    "route", "state_kind", "structure_summary", "active_tab",
-                    "dom_digest", "visual_digest", "state_digest", "url", "origin",
-                    "title",
-                )
-            })
         business_cases.append({
             "caseId": case_path.stem,
             "checkId": check_id,
@@ -268,7 +226,6 @@ def compile_plugin_contract(
                 "md" if plugin["input"] == "markdown" else "txt"
             ),
             "inputKind": plugin["input"],
-            **({"inputData": input_data} if input_data is not None else {}),
             "expectedCandidateRules": candidate_rules,
             "expectedFinal": final,
         })
@@ -287,23 +244,20 @@ def compile_plugin_contract(
     subject_kind = {
         "markdown": "markdown_document",
         "document": "document",
-        "browser_snapshot": "browser_page",
     }[plugin["input"]]
     subject_kind = plugin.get("subject_kind", subject_kind)
-    browser_input = plugin["input"] == "browser_snapshot"
     scope_schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object", "additionalProperties": False,
-        "required": ["url"] if browser_input else ["files"],
-        "properties": ({"url": {"type": "string", "format": "uri", "minLength": 1}}
-                       if browser_input else {"files": {
-                           "type": "array", "minItems": 1, "uniqueItems": True,
-                           "items": {"oneOf": [
-                               {"type": "string", "minLength": 1},
-                               {"type": "object", "additionalProperties": False,
-                                "required": ["path"], "properties": {"path": {"type": "string", "minLength": 1}}},
-                           ]},
-                       }}),
+        "required": ["files"],
+        "properties": {"files": {
+            "type": "array", "minItems": 1, "uniqueItems": True,
+            "items": {"oneOf": [
+                {"type": "string", "minLength": 1},
+                {"type": "object", "additionalProperties": False,
+                 "required": ["path"], "properties": {"path": {"type": "string", "minLength": 1}}},
+            ]},
+        }},
     }
     semantic_digest = hashlib.sha256(instructions.encode("utf-8")).hexdigest()
     checks = []

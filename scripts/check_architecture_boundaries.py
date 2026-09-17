@@ -122,6 +122,8 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
         "src/assayer_host/browser_evidence.py",
         "src/assayer_host/reporting.py",
         "src/assayer_host/observability.py",
+        "src/assayer_plugin_sdk/browser.py",
+        "plugins/frontend-audit",
         "src/assayer_host/page.py",
         "src/assayer_host/object_identity.py",
         "src/assayer_host/action_safety.py",
@@ -146,6 +148,7 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
                 "DerivedReportBuilder", "render_observability", "render_performance_bill",
                 "assemble_common_review_decisions",
                 "expectedDecision",
+                "BrowserSnapshot", "BrowserSnapshotSource",
             )
             for name in removed_names:
                 if re.search(rf"\b{re.escape(name)}\b", text):
@@ -165,6 +168,10 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
                     violations.append(
                         f"{path.relative_to(root)} retains retired v1 artifact name {artifact}"
                     )
+            if "browser_snapshot" in text:
+                violations.append(
+                    f"{path.relative_to(root)} retains the retired browser source kind browser_snapshot"
+                )
             if "from .core import" in text or "assayer_host.core" in text:
                 violations.append(f"{path.relative_to(root)} retains a deleted HostCore dependency")
             if "from .runtime_router import" in text or "assayer_host.runtime_router" in text:

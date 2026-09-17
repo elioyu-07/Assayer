@@ -66,7 +66,11 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertTrue(
             any(dep.startswith("assayer-plugin-sdk") for dep in root["project"]["dependencies"])
         )
-        self.assertTrue((ROOT / "plugins" / "frontend-audit" / "plugin.yaml").is_file())
+        self.assertFalse((ROOT / "plugins" / "frontend-audit").exists())
+        self.assertEqual(
+            [path.name for path in (ROOT / "plugins").iterdir() if (path / "plugin.yaml").is_file()],
+            [],
+        )
         self.assertFalse((ROOT / "src" / "assayer_frontend_audit" / "__init__.py").exists())
         self.assertFalse(
             (ROOT / "packages" / "assayer-plugin-frontend-audit" / "pyproject.toml").exists()
@@ -92,20 +96,16 @@ class PluginPackagingContractTests(unittest.TestCase):
             self.assertNotIn("frontend-audit", source)
             self.assertNotIn("assayer.frontend-audit", source)
 
-    def test_bundle_compiler_discovers_first_party_declaration_plugins(self):
+    def test_bundle_compiler_finds_no_domain_plugin_in_the_platform(self):
         from scripts.build_plugin_bundle import _compiled_first_party_plugins
 
         compiled = _compiled_first_party_plugins()
-        self.assertTrue(compiled)
+        self.assertEqual(compiled, ())
         sources = {
             path.name for path in (ROOT / "plugins").iterdir()
             if path.is_dir() and (path / "plugin.yaml").is_file()
         }
-        self.assertEqual(
-            {item["file"] for item in compiled},
-            {f"{name}.compiled-plugin.json" for name in sources},
-        )
-        self.assertEqual(len({item["pluginId"] for item in compiled}), len(compiled))
+        self.assertEqual(sources, set())
 
 
 if __name__ == "__main__":

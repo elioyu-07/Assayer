@@ -153,23 +153,19 @@ Path({str(marker)!r}).write_text("unsafe", encoding="utf-8")
             )
             self.assertFalse(marker.exists())
 
-    def test_browser_policy_pack_derives_provider_contract_and_url_scope(self):
+    def test_markdown_policy_pack_derives_provider_contract_and_file_scope(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "source"
-            shutil.copytree(Path("plugins/frontend-audit"), source)
+            shutil.copytree(Path("tests/fixtures/plugins/policy-pack"), source)
             generated = root / "generated"
 
             compiled = compile_plugin_contract(source, generated)
 
             contract = load_compiled_plugin_contract(generated)
-            check = contract.payload["checks"][0]
-            self.assertEqual(check["dimensions"], (
-                "filter_present", "query_action", "reset_action", "binding_to_list",
-            ))
             scope = contract.payload["input"]["scopeSchema"]
-            self.assertEqual(scope["required"], ("url",))
-            self.assertEqual(contract.input_kind, "browser_snapshot")
+            self.assertEqual(scope["required"], ("files",))
+            self.assertEqual(contract.input_kind, "markdown")
             self.assertEqual(tuple(generated.rglob("*.py")), ())
 
     def test_filesystem_builtin_and_private_document_access_are_rejected(self):

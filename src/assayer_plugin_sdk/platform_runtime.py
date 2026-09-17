@@ -14,7 +14,6 @@ import json
 from types import MappingProxyType
 from typing import Any
 
-from .browser import BrowserSnapshot
 from .contract import PlatformContractError
 
 
@@ -175,7 +174,6 @@ class Document:
 
     __slots__ = (
         "__text", "__support", "__token", "__closed", "__chunks", "__coverage_refs",
-        "__browser_snapshot",
     )
 
     def __init__(self, *args: object, **kwargs: object) -> None:
@@ -247,7 +245,6 @@ class Document:
         object.__setattr__(value, "_Document__closed", closed)
         object.__setattr__(value, "_Document__chunks", tuple(normalized_chunks))
         object.__setattr__(value, "_Document__coverage_refs", normalized_coverage)
-        object.__setattr__(value, "_Document__browser_snapshot", None)
         object.__setattr__(
             value,
             "_Document__support",
@@ -255,101 +252,10 @@ class Document:
         )
         return value
 
-    @classmethod
-    def _from_browser_snapshot(
-        cls,
-        snapshot: BrowserSnapshot,
-        *,
-        evidence_refs: Sequence[str],
-    ) -> "Document":
-        """Create the author-facing read-only view of a Host browser snapshot.
-
-        Browser I/O remains outside this runtime.  The Host reconstructs this
-        view from provider Evidence, so generated adapters can use the same
-        ``Document`` concept for text and browser inputs without receiving a
-        page, locator, or provider request envelope.
-        """
-        if not isinstance(snapshot, BrowserSnapshot):
-            raise PlatformContractError(
-                "INVALID_BROWSER_SNAPSHOT",
-                "Browser input must be a Host-owned BrowserSnapshot",
-            )
-        value = cls._from_snapshot(
-            snapshot.visible_text,
-            evidence_refs=evidence_refs,
-            # A bounded browser observation is not a proof that text is absent
-            # from the complete page.  Keep absence conservative unless a
-            # future provider publishes an explicit closed search scope.
-            closed=False,
-        )
-        object.__setattr__(value, "_Document__browser_snapshot", snapshot)
-        return value
-
-    @property
-    def browser_snapshot(self) -> BrowserSnapshot | None:
-        """Return the immutable browser observation, when this is browser input."""
-        return self.__browser_snapshot
-
     @property
     def visible_text(self) -> str:
-        """Visible text for browser input; equivalent to the document text."""
+        """Frozen visible text for this document."""
         return self.__text
-
-    def _browser_value(self, name: str, default: Any = None) -> Any:
-        snapshot = self.__browser_snapshot
-        return getattr(snapshot, name, default) if snapshot is not None else default
-
-    @property
-    def url(self) -> str | None:
-        return self._browser_value("url")
-
-    @property
-    def origin(self) -> str | None:
-        return self._browser_value("origin")
-
-    @property
-    def title(self) -> str | None:
-        return self._browser_value("title")
-
-    @property
-    def route(self) -> str | None:
-        return self._browser_value("route")
-
-    @property
-    def state_kind(self) -> str | None:
-        return self._browser_value("state_kind")
-
-    @property
-    def entrypoints(self) -> tuple[Mapping[str, Any], ...]:
-        return self._browser_value("entrypoints", ())
-
-    @property
-    def candidates(self) -> tuple[Mapping[str, Any], ...]:
-        return self._browser_value("candidates", ())
-
-    @property
-    def network_summary(self) -> Mapping[str, Any] | None:
-        return self._browser_value("network_summary")
-
-    @property
-    def structure_summary(self) -> Mapping[str, Any] | None:
-        return self._browser_value("structure_summary")
-
-    @property
-    def active_tab(self) -> str | None:
-        return self._browser_value("active_tab")
-
-    @property
-    def dom_digest(self) -> str | None:
-        return self._browser_value("dom_digest")
-
-    @property
-    def visual_digest(self) -> str | None:
-        return self._browser_value("visual_digest")
-
-    @property
-    def state_digest(self) -> str | None:
-        return self._browser_value("state_digest")
 
     @property
     def full_scope(self) -> _DocumentScope:

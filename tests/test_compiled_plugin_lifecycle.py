@@ -18,22 +18,22 @@ class CompiledPluginLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             artifact_dir = root / "artifact"
-            compile_plugin_contract(Path("plugins/frontend-audit"), artifact_dir)
+            compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), artifact_dir)
             store = PluginInstallationStore(root / "store")
             manager = CompiledPluginLifecycleManager(store)
 
             installed = manager.install(artifact_dir / "compiled-plugin.json")
             self.assertEqual(installed["status"], "completed")
-            loaded = load_installed_compiled_plugin(store, "assayer.frontend-audit")
-            self.assertEqual(loaded.plugin_id, "assayer.frontend-audit")
-            package = store.package_dir("assayer.frontend-audit", "1.0.0")
+            loaded = load_installed_compiled_plugin(store, "test.policy-pack")
+            self.assertEqual(loaded.plugin_id, "test.policy-pack")
+            package = store.package_dir("test.policy-pack", "1.0.0")
             self.assertEqual(tuple(package.rglob("*.py")), ())
             self.assertEqual(manager.list()[0]["artifactType"], "compiled-plugin-contract")
 
-            removed = manager.uninstall("assayer.frontend-audit")
+            removed = manager.uninstall("test.policy-pack")
             self.assertEqual(removed["status"], "completed")
             with self.assertRaises(PlatformContractError):
-                load_installed_compiled_plugin(store, "assayer.frontend-audit")
+                load_installed_compiled_plugin(store, "test.policy-pack")
 
 
 if __name__ == "__main__":

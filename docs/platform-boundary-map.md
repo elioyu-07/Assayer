@@ -15,9 +15,10 @@ new ordinary plugins. The current target is
 [Simple Plugin Authoring Architecture](simple-plugin-authoring-design.md).
 
 Current hard-cut status: the Frontend compatibility package described by the
-historical extraction record below has been removed. Frontend is now authored
-only as `plugins/frontend-audit/` and compiled into a common-review plugin; the
-browser source boundary is owned by `assayer-provider-browser`.
+historical extraction record below has been removed, and `plugins/frontend-audit`
+plus the `assayer-provider-browser` boundary were retired with it. The platform
+repository now ships no domain plugin and no browser source kind; every source
+kind is owned by an installed capability provider.
 
 ## Implementation Status
 
