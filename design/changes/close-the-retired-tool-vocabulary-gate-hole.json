@@ -3,7 +3,7 @@
   "changeId": "close-the-retired-tool-vocabulary-gate-hole",
   "changeType": "platform_change",
   "title": "Close the gate hole around retired tool names and shipped schema vocabulary",
-  "summary": "The gate added by retire-the-vertical-audit-skill-and-gate-bundle-text only covered plugins/assayer authored text, and the older architecture check banned just three retired plugin-protocol fields, so two generations of retired tool names survived in Python with every gate green. src/assayer_host/reporting.py kept a table mapping fifteen retired audit tools to diary copy; the lookup keys could never match a compiled Run, so the table was dead data behind a live generic fallback, and one test asserted that dead copy. src/assayer_host/store.py emitted a safety gate event only when an operation carried the retired perform_action tool, which no compiled operation does. This change removes both dead surfaces, extends the architecture check to the complete retired tool-name set from both removed protocol generations, matches it as a quoted literal so unrelated live method names such as get_operation are not rejected, extends the retired-runtime path list to src/assayer_agent, packages/assayer-agent, and schemas/protocol, and adds a shipped-surface scan that rejects retired protocol tool names inside schemas/ and a wheel data-files declaration that still points at the retired protocol directory. Together these close the hole rev identified, where a retired name in Python or in a wheel-shipped schema was invisible because no gate looked at that surface. No compiled contract, vocabulary, runtime behaviour, or published artifact changes, and the frozen v1 decision-state vocabulary stays untouched because the gate matches tool names only.",
+  "summary": "The gate added by retire-the-vertical-audit-skill-and-gate-bundle-text only covered plugins/assayer authored text, and the older architecture check banned just three retired plugin-protocol fields, so two generations of retired tool names survived in Python with every gate green. src/assayer_host/reporting.py kept a table mapping fifteen retired audit tools to diary copy; the lookup keys could never match a compiled Run, so the table was dead data behind a live generic fallback, and one test asserted that dead copy. src/assayer_host/store.py emitted a safety gate event only when an operation carried the retired perform_action tool, which no compiled operation does. This change removes both dead surfaces, extends the architecture check to the complete retired tool-name set from both removed protocol generations, matches it as a quoted literal so unrelated live method names such as get_operation are not rejected, extends the retired-runtime path list to src/assayer_agent, packages/assayer-agent, and schemas/protocol, and adds a shipped-surface scan that rejects retired protocol tool names inside schemas/ and a wheel data-files declaration that still points at the retired protocol directory. Together these close the hole rev identified, where a retired name in Python or in a wheel-shipped schema was invisible because no gate looked at that surface. No compiled contract, vocabulary, runtime behaviour, or published artifact changes, and the frozen v1 decision-state vocabulary stays untouched because the gate matches tool names only. Verification evidence: the change landed in 6eaf88b, pushed on 2026-09-17 with 6eaf88b as the publish point, and CI run 35201959968 passed all seven jobs; locally the architecture check returns 0 on the repository, its seven tests pass including a planted quoted retired tool name that is rejected and a live get_operation method that is not, a planted retired name in schemas/*.json and a planted data-files protocol entry are both rejected while the frozen decision vocabulary is accepted, the fast profile reported 443 tests OK and full reported 456 tests OK, and the design confirmation, document, plugin-source, English text, and resilience gates all returned 0.",
   "changedPaths": [
     "scripts/check_architecture_boundaries.py",
     "src/assayer_host/reporting.py",
@@ -16,10 +16,18 @@
     "docs/ci-support-matrix-v1.md"
   ],
   "ownership": {
-    "platform": ["Platform governance owns the architecture check and the Host reporting and store layers"],
-    "plugin": ["No plugin change; ordinary plugins are unaffected"],
-    "provider": ["No provider change"],
-    "agent": ["No agent change; the removed copy described retired protocol operations only"]
+    "platform": [
+      "Platform governance owns the architecture check and the Host reporting and store layers"
+    ],
+    "plugin": [
+      "No plugin change; ordinary plugins are unaffected"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change; the removed copy described retired protocol operations only"
+    ]
   },
   "capabilities": {
     "inputKinds": [],
@@ -46,5 +54,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only governance and dead-code change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No normative document, published artifact, contract, or live behaviour changes: the batch removes two unreachable retired-vocabulary code paths and widens an internal gate."
   },
-  "state": "approved"
+  "state": "verified"
 }
