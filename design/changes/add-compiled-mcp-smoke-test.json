@@ -3,7 +3,7 @@
   "changeId": "add-compiled-mcp-smoke-test",
   "changeType": "platform_change",
   "title": "Prove the compiled MCP server through the real MCP SDK",
-  "summary": "The full verification profile is the release gate and must prove that the optional MCP dependency is usable, but after the compiled-plugin migration it only proved that the mcp module is importable: the sentinel that instantiated a real server was removed with tests/test_transport.py. This change adds tests/test_compiled_mcp_smoke.py, which drives create_compiled_mcp_server through the real FastMCP SDK, asserts the SDK lists the compiled lifecycle tools, and invokes the read-only list_plugins tool through the SDK call path. run_tests.py excludes it from the dependency-light fast profile and includes it in the full profile.",
+  "summary": "The full verification profile is the release gate and must prove that the optional MCP dependency is usable, but after the compiled-plugin migration it only proved that the mcp module is importable: the sentinel that instantiated a real server was removed with tests/test_transport.py. This change adds tests/test_compiled_mcp_smoke.py, which drives create_compiled_mcp_server through the real FastMCP SDK, asserts the SDK lists the compiled lifecycle tools, and invokes the read-only list_plugins tool through the SDK call path. run_tests.py excludes it from the dependency-light fast profile and includes it in the full profile. Implementation evidence: this change landed in 228ee2a, the commit that added this record, and remains in force at 66e7e45; 228ee2a was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "tests/test_compiled_mcp_smoke.py",
     "scripts/run_tests.py"
@@ -41,5 +41,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only release-gate coverage restored under the mandate in #assayer-group:4c84ee19; the gap and its scope were confirmed with @assayer_rev on 2026-09-17."
   },
-  "state": "approved"
+  "state": "implemented"
 }
