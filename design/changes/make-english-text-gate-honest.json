@@ -3,7 +3,7 @@
   "changeId": "make-english-text-gate-honest",
   "changeType": "platform_change",
   "title": "Make the English-text gate honest and green",
-  "summary": "scripts/check_english_text.py returned rc=1 and was being ignored. Two causes: it scanned the git-ignored generated run directory assayer-output/, contradicting its own contract that generated output is never scanned; and several intentional locale surfaces were never allowlisted, including the frozen formal report format, the renderer that emits it, its tests, the SDK test that asserts non-ASCII identifiers are rejected, the historical Chinese lifecycle plan, and the approval records that must quote the approver name and the user's own words. This change excludes assayer-output/ from the scan, allowlists those locale surfaces by path with stated reasons, and removes four incidental Chinese leftovers from otherwise English authored files (two WS3 distribution metadata rows, one JSON example reason, and two test payload messages). The gate now returns 0 without deleting any intentional locale content.",
+  "summary": "scripts/check_english_text.py returned rc=1 and was being ignored. Two causes: it scanned the git-ignored generated run directory assayer-output/, contradicting its own contract that generated output is never scanned; and several intentional locale surfaces were never allowlisted, including the frozen formal report format, the renderer that emits it, its tests, the SDK test that asserts non-ASCII identifiers are rejected, the historical Chinese lifecycle plan, and the approval records that must quote the approver name and the user's own words. This change excludes assayer-output/ from the scan, allowlists those locale surfaces by path with stated reasons, and removes four incidental Chinese leftovers from otherwise English authored files (two WS3 distribution metadata rows, one JSON example reason, and two test payload messages). The gate now returns 0 without deleting any intentional locale content. Implementation evidence: this change landed in 49347e4, the commit that added this record, and remains in force at 66e7e45; 49347e4 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "scripts/check_english_text.py",
     "docs/ws3-distribution-plan.md",
@@ -45,5 +45,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "User instructed in #assayer-group:4c84ee19: '按照这个为目标，@assayer_dev 你开工，完成这个目标后，@assayer_rev 进行 review ... 如此循环，直到达到我们的最终目的', authorizing the platform-conformance work and its review loop."
   },
-  "state": "approved"
+  "state": "implemented"
 }
