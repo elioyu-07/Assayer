@@ -29,3 +29,9 @@ packages = ["assayer_platform", "assayer_host"]
 [tool.setuptools.data-files]
 "share/assayer/schemas" = ["schemas/*.json"]
 "share/assayer/schemas/protocol" = ["schemas/protocol/*.json"]
+
+[tool.uv.workspace]
+members = ["packages/assayer-plugin-sdk", "packages/assayer-agent", "packages/assayer-platform", "packages/assayer-provider-markdown"]
+
+[tool.uv.sources]
+assayer-plugin-sdk = { workspace = true }

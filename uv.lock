@@ -2,6 +2,15 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 
+[manifest]
+members = [
+    "assayer",
+    "assayer-agent",
+    "assayer-platform",
+    "assayer-plugin-sdk",
+    "assayer-provider-markdown",
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.8.0"
@@ -29,6 +38,7 @@ name = "assayer"
 version = "0.1.2"
 source = { editable = "." }
 dependencies = [
+    { name = "assayer-plugin-sdk" },
     { name = "jsonschema" },
 ]
 
@@ -42,11 +52,67 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "assayer-plugin-sdk", editable = "packages/assayer-plugin-sdk" },
     { name = "jsonschema", specifier = "==4.26.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = "==1.27.0" },
     { name = "mcp", marker = "extra == 'test'", specifier = "==1.27.0" },
 ]
 provides-extras = ["mcp", "test"]
+
+[[package]]
+name = "assayer-agent"
+version = "0.1.2"
+source = { editable = "packages/assayer-agent" }
+dependencies = [
+    { name = "assayer-plugin-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "assayer-plugin-sdk", editable = "packages/assayer-plugin-sdk" }]
+
+[[package]]
+name = "assayer-platform"
+version = "0.1.2"
+source = { editable = "packages/assayer-platform" }
+dependencies = [
+    { name = "assayer-plugin-sdk" },
+    { name = "jsonschema" },
+]
+
+[package.optional-dependencies]
+mcp = [
+    { name = "mcp" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "assayer-plugin-sdk", editable = "packages/assayer-plugin-sdk" },
+    { name = "jsonschema", specifier = "==4.26.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = "==1.27.0" },
+]
+provides-extras = ["mcp"]
+
+[[package]]
+name = "assayer-plugin-sdk"
+version = "0.1.2"
+source = { editable = "packages/assayer-plugin-sdk" }
+dependencies = [
+    { name = "jsonschema" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "jsonschema", specifier = "==4.26.0" }]
+
+[[package]]
+name = "assayer-provider-markdown"
+version = "0.1.0"
+source = { editable = "packages/assayer-provider-markdown" }
+dependencies = [
+    { name = "assayer-plugin-sdk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "assayer-plugin-sdk", editable = "packages/assayer-plugin-sdk" }]
 
 [[package]]
 name = "attrs"
@@ -228,6 +294,7 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/51/cf/5b3f53a0b74d122f023476ede40ba5d3e70d5cf475f73b899740d26a4fb2/cryptography-50.0.1-pp311-pypy311_pp73-manylinux_2_34_x86_64.whl", hash = "sha256:804728ce710890870f3aaa344b2e161172d258d768ac139d02cfd9092d0d94e6", size = 4706889, upload-time = "2026-08-25T19:45:35.086Z" },
     { url = "https://files.pythonhosted.org/packages/71/44/711e61f7d014be825ef79b285b047292d1bf893732ac1bc030a351fb517f/cryptography-50.0.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:693c99b49bd37d0d096e4334c10232c77248c415b98d35236094cdf96d57258b", size = 3824006, upload-time = "2026-08-25T19:45:37.281Z" },
 ]
+
 [[package]]
 name = "h11"
 version = "0.16.0"
@@ -334,6 +401,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/8b/eb/c0cfc62075dc6e1ec
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9c/46/f6b4ad632c67ef35209a66127e4bddc95759649dd595f71f13fba11bdf9a/mcp-1.27.0-py3-none-any.whl", hash = "sha256:5ce1fa81614958e267b21fb2aa34e0aea8e2c6ede60d52aba45fd47246b4d741", size = 215967, upload-time = "2026-04-02T14:48:07.24Z" },
 ]
+
 [[package]]
 name = "pycparser"
 version = "3.0"
@@ -473,6 +541,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/68/ca/31c57507b13119d7d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/30/a4/2bffa9f8e804325a09867f0e9d30795c80ea9f8d62560bd1b6ad6220eb2f/pydantic_settings-2.15.0-py3-none-any.whl", hash = "sha256:0ba092c291c94baceb5eff768aa0d56400a457585bc0175925a5a5510303da42", size = 69413, upload-time = "2026-08-07T09:24:55.839Z" },
 ]
+
 [[package]]
 name = "pyjwt"
 version = "2.13.0"
