@@ -24,7 +24,10 @@ not replace CI evidence.
 
 ## 2. Gate definitions
 
-The `fast` job runs static, resilience, unit, and lightweight integration tests.
+The `fast` job runs static, resilience, unit, and lightweight integration tests,
+and it enforces the authored-text language preflight: a repository text file
+that is neither English nor an allowlisted locale surface fails the profile
+with exit code 2 before any test runs. The `full` job runs the same preflight.
 Both fast and full jobs install the wheel-build toolchain (`setuptools`,
 `wheel`, and `uv`) explicitly before verification; no runner-global build tool
 is part of the support contract.

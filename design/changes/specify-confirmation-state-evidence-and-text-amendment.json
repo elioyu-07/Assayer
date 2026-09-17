@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "specify-confirmation-state-evidence-and-text-amendment",
+  "changeType": "contract_change",
+  "title": "Make the design confirmation contract state its evidence and amendment rules",
+  "summary": "The design confirmation contract made three claims that the repository did not honour. It said implemented and verified are written by development and release gates and never by the authoring step, but no gate writes either state and records in the repository carry them from creation. It did not say how an internal_only record, which needs no separate human decision, should register its approval status, even though the repository gate only credits changed paths to a record that is both in an implementation state and carrying an approved status. It also did not say whether descriptive text can be corrected after implementation begins, while section 5 declared the whole record immutable. This change states each rule in a decidable form: implemented and verified are claims that MUST name their evidence, states asserted before the rule are not retroactive, an internal_only record MUST register an approved status and name the standing decision it relies on without inventing an approval time, and a title or summary correction MUST land as its own visible commit. It also records in the CI support matrix that the fast and full profiles now enforce the authored-text language preflight before any test runs.",
+  "changedPaths": [
+    "docs/design-confirmation-contract-v1.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-governance.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the design confirmation contract, its state machine, and the verification profiles"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not weaken the requirement that a public-contract, semantic, safety, persistence, or release change carries human approval",
+    "The change must not allow an internal_only record to cover a path without an approved status",
+    "The change must not retroactively invalidate records created before the evidence rule",
+    "The change must not promote a superseded document or add a new normative document"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "docs/design-confirmation-contract-v1.md states that implemented and verified MUST name their evidence",
+    "docs/design-confirmation-contract-v1.md states that an internal_only record MUST register an approved status naming its standing decision",
+    "docs/design-confirmation-contract-v1.md states that a title or summary correction MUST land as its own visible commit",
+    "docs/ci-support-matrix-v1.md states that fast and full enforce the authored-text language preflight",
+    "scripts/check_design_confirmation.py --git-range origin/main..HEAD passes",
+    "scripts/run_tests.py fast and full stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:48:52+08:00",
+    "decision": "Approved in #assayer-group:4c84ee19 on 2026-09-17 as items A, B, C, and D of the step-2 bundle. C was proposed with three options and the recommendation was option (c): state a decidable evidence rule without a record-schema migration."
+  },
+  "state": "approved"
+}

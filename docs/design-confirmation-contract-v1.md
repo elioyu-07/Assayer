@@ -59,21 +59,37 @@ proposed -> machine_checked -> approved -> implemented -> verified
 
 `machine_checked` proves structure, references, allowed change type, and
 required gates. `approved` proves that the responsible human accepted the
-design direction. `implemented` and `verified` are written by the development
-and release gates, never by the Agent's initial authoring step.
+design direction, or that a standing decision named by the record covers it.
+
+`implemented` and `verified` are claims about evidence, so each state MUST name
+that evidence in the record. `implemented` asserts that the change landed and
+MUST name the landing commit. `verified` asserts that the acceptance gates
+named by the record were run against that landing commit and MUST name the
+verification evidence, such as a gate run reference or a reviewer's independent
+verification. A record MUST NOT claim a state whose evidence it cannot name.
+States asserted before this rule took effect are not required to name that
+evidence retroactively.
 
 Implementation is permitted only for an `approved` record. A public-contract,
 semantic, safety, persistence, or release change always requires human
 approval. A purely internal implementation change may use the `internal_only`
 impact classification, but the machine gate must prove that classification and
-the absence of public impact.
+the absence of public impact. An `internal_only` record does not require a
+separate human decision, but it MUST still register `humanApproval.status` as
+`approved` and name the standing decision or mandate it relies on: `required`
+being false means no new approval is needed, not that the status may be left
+unregistered or that an approval time may be invented.
 
 ## 5. Immutability and supersession
 
 Once implementation begins, the approved record is immutable. A changed scope,
 ownership split, capability, forbidden dependency, compatibility classification,
 or acceptance gate requires a new change ID and a new approval. A superseded
-record remains in history and cannot authorize new code.
+record remains in history and cannot authorize new code. The descriptive text
+of a record, `title` and `summary`, is not scope: correcting it does not require
+a new change ID, but the correction MUST land as its own visible commit, so the
+history shows that the text changed after implementation began rather than
+hiding the change in an amended commit.
 
 ## 6. Required acceptance
 
