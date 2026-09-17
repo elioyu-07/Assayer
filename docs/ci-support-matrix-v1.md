@@ -34,7 +34,12 @@ is part of the support contract.
 The `full` job adds the complete non-browser and browser/MCP regression suite,
 including the installed-package checks appropriate to that job. The
 `install-matrix` job builds and validates split-distribution installation at
-Python 3.11 and 3.13.
+Python 3.11 and 3.13. That job owns the clean-environment acceptance: it
+installs the split distributions from a cleared wheelhouse with `--no-index`
+into an isolated virtual environment, and then runs one compiled Run end to
+end there, failing the job unless the Run reaches a terminal status and its
+artifact digest verifies. A green unit or integration profile does not replace
+that acceptance, and the acceptance does not replace the operator gate.
 
 The full gate is intentionally required at the minimum and latest supported
 minor rather than repeated unchanged at every intermediate minor. A failure in

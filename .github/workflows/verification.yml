@@ -69,3 +69,4 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip setuptools wheel
       - run: python scripts/install_matrix.py
+      - run: python scripts/compiled_acceptance.py

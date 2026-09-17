@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "admit-compiled-acceptance-to-the-install-matrix-gate",
+  "changeType": "release_change",
+  "title": "Make the clean-environment compiled acceptance a CI release gate",
+  "summary": "add-compiled-end-to-end-acceptance added scripts/compiled_acceptance.py, which installs the split distributions from a cleared wheelhouse with --no-index into an isolated virtual environment and then drives one compiled Run end to end on the declarative tests/fixtures/plugins/policy-pack fixture, verifying a terminal Run status and a self-consistent artifact digest. That record registered an explicit trigger: wiring the harness into the install-matrix job and updating the docs/ci-support-matrix-v1.md section 2 wording stays deferred to the next release-admission batch, so the harness was not an enforced gate. This change is that batch. It adds one step to the existing install-matrix job, python scripts/compiled_acceptance.py, so the same job that already validates split-distribution installation also proves the acceptance baseline end to end at Python 3.11 and 3.13; no new job, matrix entry, or runner requirement is added, and the harness still builds its own wheelhouse and venv. It also states that obligation in docs/ci-support-matrix-v1.md section 2, so the normative gate definition matches what CI runs instead of describing split-distribution installation alone. The change is release-admission tightening only: it enforces an acceptance the baseline already requires, and it changes no interface, distribution set, schema, vocabulary, or supported Python range. It does not satisfy or replace the operator release gate, which remains a human-executed profile.",
+  "changedPaths": [
+    ".github/workflows/verification.yml",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "authorityDocuments": [
+    "docs/ci-support-matrix-v1.md",
+    "docs/platform-constitution-v2.md"
+  ],
+  "ownership": {
+    "platform": ["Release engineering owns the verification workflow and the gate definitions in docs/ci-support-matrix-v1.md"],
+    "plugin": ["No plugin change; ordinary plugins stay declarative and are still never Python distributions"],
+    "provider": ["No provider change; the acceptance installs the existing markdown capability provider wheel"],
+    "agent": ["No agent change; the acceptance drives review batches directly against the Host transport"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not add a CI job, a matrix entry, a Python version, or a runner image; it extends the existing install-matrix job only",
+    "The change must not weaken or reinterpret the install-matrix job's existing split-distribution install assertions",
+    "The change must not present the compiled acceptance as a substitute for the operator release gate or for the fast and full profiles",
+    "The compiled harness must keep building its own cleared wheelhouse and isolated venv, so the CI step cannot pass on an editable or cached checkout install",
+    "The change must not modify the frozen harness, its record add-compiled-end-to-end-acceptance, or any other immutable record"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    ".github/workflows/verification.yml runs python scripts/compiled_acceptance.py inside the install-matrix job, after python scripts/install_matrix.py",
+    "the CI matrix Python versions, job count, and runner image are unchanged and still agree with docs/ci-support-matrix-v1.md",
+    "docs/ci-support-matrix-v1.md section 2 states that the install-matrix job owns the clean-environment compiled acceptance and that a green unit or integration profile does not replace it",
+    "scripts/compiled_acceptance.py exits 0 in a clean environment with a cleared wheelhouse, reporting a terminal Run status and a verified artifact digest",
+    "the fast and full profiles, the design confirmation gate, and the architecture, document, plugin-source, English text, and resilience gates all stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-admission change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 (approval time) and its delegation update: 于旸 stated that the agent and reviewer decide these changes themselves and that the workflow runs at most seven rounds, so no per-change sign-off is requested. The classification is compatible because the change only makes CI enforce the clean-environment acceptance that the refactor acceptance baseline already requires, and the record add-compiled-end-to-end-acceptance already registered this exact wiring as its deferred trigger; no product interface, distribution set, schema, vocabulary, or supported Python range changes, and the operator release gate is untouched. @assayer_rev independently reviews the batch and the classification."
+  },
+  "state": "approved"
+}
