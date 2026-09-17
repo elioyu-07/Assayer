@@ -3,7 +3,7 @@
   "changeId": "repoint-superseded-platform-contract-banner",
   "changeType": "platform_change",
   "title": "Point the superseded platform contract at the v2 authority",
-  "summary": "docs/platform-contract.md is a superseded historical reference, but its metadata status, its banner, and its Implementation Note still directed readers to Platform Constitution v1 and the retired v1 contracts as the normative authority for current work. Repoint the status and banner at docs/platform-constitution-v2.md, and reframe the Implementation Note as a statement about the M2 baseline whose v1 authority documents are themselves superseded. The historical content and the retired examples are left untouched.",
+  "summary": "docs/platform-contract.md is a superseded historical reference, but its metadata status, its banner, and its Implementation Note still directed readers to Platform Constitution v1 and the retired v1 contracts as the normative authority for current work. Repoint the status and banner at docs/platform-constitution-v2.md, and reframe the Implementation Note as a statement about the M2 baseline whose v1 authority documents are themselves superseded. The historical content and the retired examples are left untouched. Implementation evidence: this change landed in c8bd4b5, the commit that added this record, and remains in force at 66e7e45; c8bd4b5 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "docs/platform-contract.md"
   ],
@@ -40,5 +40,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Documentation-consistency step carried out under the mandate in #assayer-group:4c84ee19; the stale banner was reported to the group on 2026-09-17 as part of step 2, and the file is a non-normative historical reference. This registration cites the standing mandate approval at 2026-09-17T15:29:01+08:00, the same instant recorded by the other records in the batch. An earlier draft of this record carried a timestamp ahead of its own commit time; it was corrected on review, and no approval is claimed at or after that time."
   },
-  "state": "approved"
+  "state": "implemented"
 }
