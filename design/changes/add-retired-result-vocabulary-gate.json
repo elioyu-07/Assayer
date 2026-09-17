@@ -3,7 +3,7 @@
   "changeId": "add-retired-result-vocabulary-gate",
   "changeType": "contract_change",
   "title": "Gate the retired result vocabulary in normative documents",
-  "summary": "scripts/check_document_boundaries.py enforces domain-neutral vocabulary in the normative platform documents, but it does not catch the retired v1 result vocabulary, and it still lists the superseded Canonical Audit Result Contract as a normative document. A compiled Run now emits the platform ledger, events, log, observability, and performance bill, and every terminal review atom is one of satisfied, violated, not_applicable, unknown, or blocked; the legacy issue_found, scanned_no_issue, needs_review, noise, and canonical-result vocabulary must not return to an active contract. This change adds the retired terms to the forbidden list, drops the superseded contract from the normative set, and adds the clean Active release documents ci-support-matrix-v1.md and ws3-distribution-plan.md so the gate covers them. plugin-development-standard-v1.md is corrected in the same change because it still used the retired canonical-result vocabulary.",
+  "summary": "scripts/check_document_boundaries.py enforces domain-neutral vocabulary in the normative platform documents, but it does not catch the retired v1 result vocabulary, and it still lists the superseded Canonical Audit Result Contract as a normative document. A compiled Run now emits the platform ledger, events, log, observability, and performance bill, and every terminal review atom is one of satisfied, violated, not_applicable, unknown, or blocked; the legacy issue_found, scanned_no_issue, needs_review, noise, and canonical-result vocabulary must not return to an active contract. This change adds the retired terms to the forbidden list, drops the superseded contract from the normative set, and adds the clean Active release documents ci-support-matrix-v1.md and ws3-distribution-plan.md so the gate covers them. plugin-development-standard-v1.md is corrected in the same change because it still used the retired canonical-result vocabulary. Implementation evidence: this change landed in 827626f, the commit that added this record, and remains in force at 66e7e45; 827626f was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "scripts/check_document_boundaries.py",
     "docs/plugin-development-standard-v1.md"
@@ -42,5 +42,5 @@
     "approvedAt": "2026-09-17T14:57:28+08:00",
     "decision": "User replied '修 CI，对齐文档。' in #assayer-group:4c84ee19, authorizing the document alignment work."
   },
-  "state": "approved"
+  "state": "implemented"
 }
