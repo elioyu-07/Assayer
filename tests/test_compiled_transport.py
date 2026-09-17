@@ -10,6 +10,7 @@ from assayer_platform.declaration_compiler import compile_plugin_contract
 from assayer_platform.plugin_installation import PluginInstallationStore
 from assayer_platform.provider_registry import ProviderRegistry
 from assayer_document_navigation import markdown_registration
+from assayer_platform import PlatformContractError
 from assayer_platform.contract import CapabilityProfile
 
 
@@ -18,6 +19,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "plugins" / "policy-pack"
 
 def _result(response: dict) -> dict:
     return response["structuredContent"]["result"]
+
+
+class _FailingCloseController:
+    def close(self, run_id: str) -> None:
+        raise PlatformContractError("TEARDOWN_FAILED", f"cannot close {run_id}")
 
 
 class CompiledTransportTests(unittest.TestCase):
@@ -81,6 +87,18 @@ class CompiledTransportTests(unittest.TestCase):
             restored = _result(restarted.call_tool("get_compiled_result", {"runId": run_id}))
             self.assertEqual(restored, result)
             self.assertEqual(len(restored["coverage"]["verdicts"]), 3)
+
+    def test_transport_close_logs_and_survives_controller_teardown_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transport = self._transport(Path(directory))
+            transport._controllers["run-1"] = _FailingCloseController()
+            transport._active_run_id = "run-1"
+
+            with self.assertLogs("assayer_host.transport", level="WARNING") as captured:
+                transport.close()
+
+            self.assertIsNone(transport._active_run_id)
+            self.assertTrue(any("run-1" in line for line in captured.output), captured.output)
 
     def test_only_compiled_execution_tools_are_exposed(self):
         with tempfile.TemporaryDirectory() as directory:

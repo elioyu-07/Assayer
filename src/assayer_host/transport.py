@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
@@ -30,6 +31,9 @@ from assayer_platform.plugin_installation import PluginInstallationStore
 from .errors import HostError
 from .plugin_lifecycle_mcp import PluginLifecycleMcpToolTransport
 from .plugin_store_registry import default_store_root
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class CompiledPlatformMcpToolTransport:
@@ -163,8 +167,11 @@ class CompiledPlatformMcpToolTransport:
         for run_id, controller in tuple(self._controllers.items()):
             try:
                 controller.close(run_id)
-            except PlatformContractError:
-                pass
+            except PlatformContractError as error:
+                _LOG.warning(
+                    "Compiled Run teardown failed for %s: %s (%s)",
+                    run_id, error.message, error.code,
+                )
         self._active_run_id = None
 
 

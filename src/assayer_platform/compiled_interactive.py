@@ -271,24 +271,27 @@ class CompiledInteractiveController:
         for item in items:
             cursor: str | None = None
             seen_cursors: set[str | None] = set()
-            while True:
+            exhausted = False
+            while not exhausted:
                 page_scope = self._provider_scope(state.scope)
                 if cursor is not None and state.contract.input_kind in {"markdown", "document"}:
                     page_scope["page"] = {"cursor": cursor}
                 result = state.provider.collect(item, state.check, state.capability, scope=page_scope)
                 collected.append(result)
                 if result.failure is not None or state.contract.input_kind not in {"markdown", "document"}:
-                    break
-                next_cursor = None
-                for evidence in result.evidence:
-                    candidate = evidence.payload.get("nextCursor")
-                    if candidate is not None:
-                        next_cursor = str(candidate)
-                        break
-                if next_cursor is None or next_cursor in seen_cursors:
-                    break
-                seen_cursors.add(cursor)
-                cursor = next_cursor
+                    exhausted = True
+                else:
+                    next_cursor = None
+                    for evidence in result.evidence:
+                        candidate = evidence.payload.get("nextCursor")
+                        if candidate is not None:
+                            next_cursor = str(candidate)
+                            break
+                    if next_cursor is None or next_cursor in seen_cursors:
+                        exhausted = True
+                    else:
+                        seen_cursors.add(cursor)
+                        cursor = next_cursor
         results = tuple(collected)
         self._runs[run_id] = CompiledRun(
             state.run_id, state.contract, state.check, state.scope, state.context,
