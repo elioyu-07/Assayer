@@ -3,7 +3,7 @@
   "changeId": "zero-python-ordinary-plugin-hard-cut",
   "changeType": "contract_change",
   "title": "Remove executable ordinary-plugin authoring and legacy plugin paths",
-  "summary": "Make ordinary plugins declaration-only, remove scan/relations author code and legacy DomainResult/Advanced SPI paths from the ordinary lifecycle, and leave source capabilities to the platform.",
+  "summary": "Make ordinary plugins declaration-only, remove scan/relations author code and legacy DomainResult/Advanced SPI paths from the ordinary lifecycle, and leave source capabilities to the platform. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_platform/*",
     "src/assayer_plugin_sdk/*",
@@ -84,5 +84,5 @@
     "approvedAt": "2026-09-15T00:00:00+08:00",
     "decision": "Approved as the first runtime migration step after the architecture grill."
   },
-  "state": "approved"
+  "state": "implemented"
 }
