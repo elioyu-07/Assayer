@@ -3,7 +3,7 @@
   "changeId": "remove-plugin-specific-host-and-bundle-coupling",
   "changeType": "contract_change",
   "title": "Remove concrete domain-plugin assumptions from Host routing and bundle delivery",
-  "summary": "Make first-party plugin discovery, compilation, bundle manifests, and runtime preparation generic over every declaration-only plugin under plugins/, with no default or required domain plugin.",
+  "summary": "Make first-party plugin discovery, compilation, bundle manifests, and runtime preparation generic over every declaration-only plugin under plugins/, with no default or required domain plugin. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_host/cli.py",
     "src/assayer_host/plugin_lifecycle_mcp.py",
@@ -74,5 +74,5 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "Approved as the hard-cut removal of concrete plugin assumptions from platform routing and product delivery."
   },
-  "state": "approved"
+  "state": "implemented"
 }
