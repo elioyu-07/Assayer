@@ -49,7 +49,22 @@ class DesignConfirmationTests(unittest.TestCase):
             path.write_text(json.dumps(_record()), encoding="utf-8")
             self.assertEqual(validate_confirmation(path, root=ROOT), ())
 
-    def test_public_change_cannot_skip_human_approval(self):
+    def test_proposed_or_machine_checked_public_change_may_wait_for_approval(self):
+        for state in ("proposed", "machine_checked"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "confirmation.json"
+                path.write_text(
+                    json.dumps(
+                        _record(
+                            state=state,
+                            humanApproval={"required": True, "status": "pending"},
+                        )
+                    ),
+                    encoding="utf-8",
+                )
+                self.assertEqual(validate_confirmation(path, root=ROOT), ())
+
+    def test_public_change_cannot_reach_implementation_without_human_approval(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "confirmation.json"
             path.write_text(
@@ -57,7 +72,7 @@ class DesignConfirmationTests(unittest.TestCase):
                 encoding="utf-8",
             )
             issues = validate_confirmation(path, root=ROOT)
-        self.assertIn("public-impact changes require approved humanApproval", issues)
+        self.assertIn("implementation states require approved humanApproval", issues)
 
     def test_unknown_authority_document_fails(self):
         with tempfile.TemporaryDirectory() as directory:

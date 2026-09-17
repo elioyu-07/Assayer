@@ -48,8 +48,6 @@ def validate_confirmation(path: Path, *, root: Path = ROOT) -> tuple[str, ...]:
             "humanApproval.required must be true for public/semantic/safety/breaking "
             "changes and false only for internal_only changes"
         )
-    if requires_human and approval["status"] != "approved":
-        issues.append("public-impact changes require approved humanApproval")
     if approval["status"] == "approved" and not approval.get("approver"):
         issues.append("approved humanApproval requires approver")
     if approval["status"] == "approved" and not approval.get("approvedAt"):
