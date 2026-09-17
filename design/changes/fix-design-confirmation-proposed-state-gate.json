@@ -3,7 +3,7 @@
   "changeId": "fix-design-confirmation-proposed-state-gate",
   "changeType": "platform_change",
   "title": "Let a proposed design confirmation wait for approval",
-  "summary": "scripts/check_design_confirmation.py rejected every record whose publicContractImpact was not internal_only unless humanApproval was already approved, so a public, semantic, safety, persistence, or release record could not exist in the proposed or machine_checked state. That contradicts docs/design-confirmation-contract-v1.md section 4, which defines proposed -> machine_checked -> approved -> implemented -> verified and permits drafts before approval, and it forced an approve-then-create workflow in which no truthful draft of a public-impact change could be registered. The gate now accepts a proposed or machine_checked record with pending approval, while still rejecting an approved, implemented, or verified record whose approval is not approved, and still requiring that humanApproval.required matches the impact classification.",
+  "summary": "scripts/check_design_confirmation.py rejected every record whose publicContractImpact was not internal_only unless humanApproval was already approved, so a public, semantic, safety, persistence, or release record could not exist in the proposed or machine_checked state. That contradicts docs/design-confirmation-contract-v1.md section 4, which defines proposed -> machine_checked -> approved -> implemented -> verified and permits drafts before approval, and it forced an approve-then-create workflow in which no truthful draft of a public-impact change could be registered. The gate now accepts a proposed or machine_checked record with pending approval, while still rejecting an approved, implemented, or verified record whose approval is not approved, and still requiring that humanApproval.required matches the impact classification. Implementation evidence: this change landed in 6a36ae0, the commit that added this record, and remains in force at 66e7e45; 6a36ae0 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "scripts/check_design_confirmation.py",
     "tests/test_design_confirmation.py"
@@ -43,5 +43,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only governance-tool fix carried out under the mandate in #assayer-group:4c84ee19 ('你开工...直到达到我们的最终目的'). Human approval is not required for an internal_only change; the recorded approver covers the gate's implementation-state requirement so the change can be committed."
   },
-  "state": "approved"
+  "state": "implemented"
 }
