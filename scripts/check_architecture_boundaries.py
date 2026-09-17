@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,8 +196,6 @@ def _reason(role: str, module: str, path: Path) -> str | None:
         "assayer_platform.interactive", "assayer_platform.result_delivery",
     )):
         return "plugin must use platform layer interfaces instead of owning delivery or lifecycle"
-    if role == "agent" and _starts_with(module, "assayer_host"):
-        return "Agent adapter must not mutate or import Host implementation"
     return None
 
 
@@ -219,12 +218,58 @@ def scan_file(path: Path, *, root: Path = ROOT) -> tuple[BoundaryViolation, ...]
     return tuple(violations)
 
 
+def _wheel_pyprojects(root: Path) -> tuple[Path, ...]:
+    candidates = [root / "pyproject.toml"]
+    for parent in ("packages", "plugins"):
+        directory = root / parent
+        if directory.is_dir():
+            candidates.extend(sorted(directory.glob("*/pyproject.toml")))
+    return tuple(path for path in candidates if path.exists())
+
+
+def _data_file_violations(pyproject: Path, root: Path) -> tuple[str, ...]:
+    """Reject a wheel declaration that ships a removed or missing path.
+
+    Every distribution that installs ``share/assayer`` files must declare
+    sources that still exist; a glob into a deleted directory is silently
+    ignored by setuptools, so an artifact can keep a dangling declaration with
+    every gate green.
+    """
+    violations: list[str] = []
+    text = pyproject.read_text(encoding="utf-8")
+    relative = pyproject.relative_to(root)
+    if "share/assayer" not in text:
+        return ()
+    if "schemas/protocol" in text:
+        violations.append(
+            f"{relative} declares the retired protocol schema directory in its wheel data-files"
+        )
+    try:
+        table = tomllib.loads(text).get("tool", {}).get("setuptools", {}).get("data-files", {})
+    except tomllib.TOMLDecodeError:
+        violations.append(f"{relative} is not valid TOML")
+        return tuple(violations)
+    for destination, sources in table.items():
+        if not destination.startswith("share/assayer"):
+            continue
+        for source in sources:
+            target = (pyproject.parent / source).resolve()
+            has_glob = any(character in source for character in "*?[")
+            exists = target.parent.is_dir() if has_glob else target.exists()
+            if not exists:
+                violations.append(
+                    f"{relative} data-files source disappears: {source} -> {destination}"
+                )
+    return tuple(violations)
+
+
 def _retired_surface_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
     """Reject retired protocol vocabulary in the published artifact surface.
 
     Authored Python already fails through the source scan; this covers what a
     wheel ships without any Python reader, so a retired schema cannot ride
-    along in a distribution simply because nothing imports it.
+    along in a distribution simply because nothing imports it, and no wheel
+    keeps a data-files declaration pointing at a path that no longer exists.
     """
     violations: list[BoundaryViolation] = []
     schemas = root / "schemas"
@@ -237,12 +282,11 @@ def _retired_surface_violations(root: Path = ROOT) -> tuple[BoundaryViolation, .
                     path=path, line=line, role="repository", imported_module="",
                     reason=f"shipped schema retains retired protocol tool name {match.group(1)}",
                 ))
-    pyproject = root / "pyproject.toml"
-    if pyproject.exists() and "schemas/protocol" in pyproject.read_text(encoding="utf-8"):
-        violations.append(BoundaryViolation(
-            path=pyproject, line=1, role="repository", imported_module="",
-            reason="wheel data-files still ship the retired protocol schema directory",
-        ))
+    for pyproject in _wheel_pyprojects(root):
+        for reason in _data_file_violations(pyproject, root):
+            violations.append(BoundaryViolation(
+                path=pyproject, line=1, role="repository", imported_module="", reason=reason,
+            ))
     return tuple(violations)
 
 

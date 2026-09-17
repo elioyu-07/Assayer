@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "widen-the-wheel-data-files-gate-to-every-distribution",
+  "changeType": "platform_change",
+  "title": "Check every wheel data-files declaration and every retired protocol path",
+  "summary": "close-the-retired-tool-vocabulary-gate-hole added a shipped-surface scan that only inspected the root pyproject.toml for the literal schemas/protocol, so the identical declaration in packages/assayer-platform/pyproject.toml stayed invisible with every gate green, which is how the residue fixed in remove-the-dangling-platform-wheel-protocol-data-files survived. This change widens that scan to the root pyproject and every packages/*/pyproject.toml and plugins/*/pyproject.toml, reads the tool.setuptools.data-files table, rejects any entry that names the retired protocol directory, and rejects any share/assayer entry whose source path does not exist, so a future deletion cannot leave a declaration behind that setuptools would silently ignore. It also removes the now-dead agent role branch from the boundary reason table, because the assayer-agent distribution is retired and no source root resolves to that role. Tests gain a packages/*/pyproject.toml case for both the missing-source and retired-protocol rejections, and the existing repository assertions keep the retired paths absent. No contract, artifact, or live behaviour changes; the gate only becomes able to see this class of residue.",
+  "changedPaths": [
+    "scripts/check_architecture_boundaries.py",
+    "tests/test_architecture_boundaries.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Platform governance owns the architecture check and the wheel-surface vocabulary scan"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change; the removed branch described a retired distribution"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The scan must not depend on a runtime import or on the network",
+    "The scan must not reject a data-files entry whose directory exists, and must not treat a missing file behind an existing glob directory as a violation",
+    "The gate must not ban the frozen v1 decision-state vocabulary",
+    "The change must not alter any wheel's declared contents"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "planting the retired protocol data-files declaration in packages/assayer-platform/pyproject.toml makes the architecture check return 1 and name both the retired directory and the disappearing source",
+    "a wheel declaring a share/assayer source directory that does not exist is rejected, and is accepted once the directory exists",
+    "the repository architecture check returns 0 with the corrected platform pyproject and the eight boundary tests pass",
+    "the fast and full profiles, the design confirmation gate, and the document, plugin-source, English text, and resilience gates all stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only governance change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No normative document, artifact, contract, or live behaviour changes: the batch widens an internal gate and removes one unreachable branch."
+  },
+  "state": "approved"
+}

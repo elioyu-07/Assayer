@@ -91,6 +91,35 @@ class RetiredToolVocabularyTest(unittest.TestCase):
             )
             self.assertTrue(find_violations(root))
 
+    def test_every_distribution_wheel_declaration_is_checked_and_verified(self):
+        from scripts.check_architecture_boundaries import find_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            platform = root / "packages" / "assayer-platform"
+            platform.mkdir(parents=True)
+            pyproject = platform / "pyproject.toml"
+            pyproject.write_text(
+                '[tool.setuptools.data-files]\n'
+                '"share/assayer/schemas" = ["../../schemas/*.json"]\n',
+                encoding="utf-8",
+            )
+            reasons = [violation.reason for violation in find_violations(root)]
+            self.assertTrue(any("disappears" in reason for reason in reasons), reasons)
+
+            (root / "schemas").mkdir()
+            (root / "schemas" / "common.schema.json").write_text("{}", encoding="utf-8")
+            self.assertEqual((), find_violations(root))
+
+            pyproject.write_text(
+                '[tool.setuptools.data-files]\n'
+                '"share/assayer/schemas" = ["../../schemas/*.json"]\n'
+                '"share/assayer/schemas/protocol" = ["../../schemas/protocol/*.json"]\n',
+                encoding="utf-8",
+            )
+            reasons = [violation.reason for violation in find_violations(root)]
+            self.assertTrue(any("retired protocol" in reason for reason in reasons), reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
