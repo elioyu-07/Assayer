@@ -41,6 +41,48 @@ RETIRED_TOOL_LITERAL = re.compile(
     r"[\"'](" + "|".join(re.escape(name) for name in RETIRED_TOOL_NAMES) + r")(?:[\"'])"
 )
 
+# Every schema that shipped inside the platform or legacy-plugin wheels without
+# a live reader was retired with the v1 vertical ledger surface and the legacy
+# executable-plugin conformance chain. A retired schema may only return together
+# with a live loader and an explicit author-facing registration.
+RETIRED_SCHEMA_NAMES = (
+    "action-attempt.schema.json",
+    "audit-ledger.schema.json",
+    "audit-object.schema.json",
+    "derived-issues.schema.json",
+    "dimension-finding.schema.json",
+    "entrypoint.schema.json",
+    "evidence.schema.json",
+    "frontend-canonical-extension.schema.json",
+    "issue.schema.json",
+    "object-verification.schema.json",
+    "observability-manifest.schema.json",
+    "operation.schema.json",
+    "page-candidate.schema.json",
+    "page-element-judgement.schema.json",
+    "page-state.schema.json",
+    "pending-decision.schema.json",
+    "performance-bill.schema.json",
+    "plugin-conformance.schema.json",
+    "plugin-fixture.schema.json",
+    "plugin-release.schema.json",
+    "plugin-release-acceptance.schema.json",
+    "public-progress.schema.json",
+    "request-observation.schema.json",
+    "reverse-case.schema.json",
+    "rule-assessment.schema.json",
+    "rule-registry.schema.json",
+    "run-diagnostics.schema.json",
+    "runtime-event.schema.json",
+    "scan-run.schema.json",
+    "screenshot.schema.json",
+)
+
+# Schemas published as author-facing contracts that no Python validator loads.
+# A schema that belongs here must be registered explicitly, which keeps a whole
+# unreachable published surface from drifting back in unnoticed.
+AUTHOR_FACING_SCHEMAS: frozenset[str] = frozenset()
+
 
 def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
     violations: list[str] = []
@@ -290,11 +332,90 @@ def _retired_surface_violations(root: Path = ROOT) -> tuple[BoundaryViolation, .
                     path=path, line=line, role="repository", imported_module="",
                     reason=f"shipped schema retains retired protocol tool name {match.group(1)}",
                 ))
+        inventory = schemas / "README.md"
+        if inventory.is_file():
+            text = inventory.read_text(encoding="utf-8")
+            for match in RETIRED_TOOL_LITERAL.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                violations.append(BoundaryViolation(
+                    path=inventory, line=line, role="repository", imported_module="",
+                    reason=f"schema inventory retains retired protocol tool name {match.group(1)}",
+                ))
     for pyproject in _wheel_pyprojects(root):
         for reason in _data_file_violations(pyproject, root):
             violations.append(BoundaryViolation(
                 path=pyproject, line=1, role="repository", imported_module="", reason=reason,
             ))
+    return tuple(violations)
+
+
+def _schema_literal(name: str) -> re.Pattern[str]:
+    return re.compile(r"""["'`]""" + re.escape(name) + r"""["'`]""")
+
+
+def _referenced_schema_names(root: Path) -> set[str]:
+    """Names of shipped platform schemas a live code path actually loads.
+
+    A schema is referenced when an authored Python literal names it, or when a
+    referenced schema reaches it through a cross-file ``$ref``.
+    """
+    directory = root / "schemas"
+    if not directory.is_dir():
+        return set()
+    shipped = {path.name for path in directory.rglob("*.schema.json")}
+    referenced: set[str] = set()
+    source_roots = [*_source_roots(root), root / "scripts"]
+    for source_root in source_roots:
+        if not source_root.is_dir():
+            continue
+        for path in sorted(source_root.rglob("*.py")):
+            text = path.read_text(encoding="utf-8")
+            for name in shipped - referenced:
+                if _schema_literal(name).search(text):
+                    referenced.add(name)
+    frontier = list(referenced)
+    while frontier:
+        name = frontier.pop()
+        source = directory / name
+        if not source.is_file():
+            continue
+        for match in re.finditer(r'"\$ref"\s*:\s*"([^"]+)"', source.read_text(encoding="utf-8")):
+            target = match.group(1).split("#", 1)[0].split("/")[-1]
+            if target in shipped and target not in referenced:
+                referenced.add(target)
+                frontier.append(target)
+    return referenced
+
+
+def _schema_surface_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
+    """Reject a retired or unreachable schema in a published wheel.
+
+    Deleted Python already fails through the source scan; a schema ships without
+    any reader, so nothing else notices when a retired or orphaned schema rides
+    along. Every schema in the platform resource directory must be reachable
+    from an authored literal (or a ``$ref`` chain) unless it is registered as an
+    explicit author-facing contract.
+    """
+    directory = root / "schemas"
+    if not directory.is_dir():
+        return ()
+    shipped = sorted(path.name for path in directory.rglob("*.schema.json"))
+    referenced = _referenced_schema_names(root)
+    violations: list[BoundaryViolation] = []
+    for name in shipped:
+        path = directory / name
+        if name in RETIRED_SCHEMA_NAMES:
+            reason = f"retired v1 or legacy-plugin schema {name} is present"
+        elif name not in referenced and name not in AUTHOR_FACING_SCHEMAS:
+            reason = (
+                f"schema {name} ships without a live reader or an explicit "
+                "author-facing registration"
+            )
+        else:
+            continue
+        violations.append(BoundaryViolation(
+            path=path, line=1, role="repository", imported_module="", reason=reason,
+        ))
     return tuple(violations)
 
 
@@ -304,6 +425,7 @@ def find_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
         for path in sorted(source_root.rglob("*.py")):
             violations.extend(scan_file(path, root=root))
     violations.extend(_retired_surface_violations(root))
+    violations.extend(_schema_surface_violations(root))
     return tuple(violations)
 
 

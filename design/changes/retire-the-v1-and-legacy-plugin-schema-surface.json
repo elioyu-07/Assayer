@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-v1-and-legacy-plugin-schema-surface",
+  "changeType": "release_change",
+  "title": "Retire the v1 vertical and legacy-plugin schema surface",
+  "summary": "The platform wheel shipped thirty JSON schemas that no authored code and no live test reached: the v1 vertical audit ledger family (audit-ledger plus its referenced children and the page, object, operation, evidence, finding, decision, and registry schemas), the v1 observability and public-progress contracts (runtime-event, observability-manifest, performance-bill, public-progress), and the legacy executable-plugin conformance family (plugin-conformance, plugin-fixture, plugin-release, plugin-release-acceptance) left behind when the Python plugin conformance chain was deleted. Scope: schemas/ held 45 files; exactly 15 are named by a live loader under src/, packages/*/src, plugins/*/src, or scripts/ (canonical-result, capability-negotiation, compiled-plugin-contract, design-confirmation, lifecycle-acceptance, parallel-execution, platform-ledger, platform-performance-bill, plugin-lifecycle-plan, plugin-lifecycle-transaction, private-runtime-cleanup, provider-conformance, provider-execution, provider-fixture, provider-release). The other 30 had no reader: they were reachable only from schemas/README.md, from each other, or from the retired v1 test. No kept schema references a deleted one, and no deleted schema is referenced by any authored code, so removing them cannot change runtime behaviour. This change deletes the 30 schemas, replaces the v1-only test with tests/test_schema_contracts.py (which keeps the two live schema acceptance cases) and removes tests/test_observability_schema.py, rewrites schemas/README.md to the live inventory with a historical note for the retired surface, and extends scripts/check_architecture_boundaries.py so every schema in schemas/ must be reachable from an authored literal or a $ref chain unless it is registered as an explicit author-facing contract, a retired schema name cannot return even if a reader is added, and schemas/README.md cannot reintroduce retired protocol tool vocabulary. Classification is breaking because the assayer-platform wheel stops shipping these thirty files; no live loader, compiled contract, ledger, result schema, plugin, provider, or Host behaviour changes. Verification evidence: the change landed in LANDING_COMMIT, pushed on 2026-09-17, and CI run CI_RUN passed all seven jobs; locally the architecture check returns 0 on the repository, its thirteen tests pass including an orphan schema that is rejected and a retired schema name that is rejected even with a reader, the design confirmation gate returns 0 across the changed range, and the fast and full profiles, the document, plugin-source, English text, and resilience gates all stay green.",
+  "changedPaths": [
+    "design/changes/retire-the-v1-and-legacy-plugin-schema-surface.json",
+    "schemas/README.md",
+    "schemas/action-attempt.schema.json",
+    "schemas/audit-ledger.schema.json",
+    "schemas/audit-object.schema.json",
+    "schemas/derived-issues.schema.json",
+    "schemas/dimension-finding.schema.json",
+    "schemas/entrypoint.schema.json",
+    "schemas/evidence.schema.json",
+    "schemas/frontend-canonical-extension.schema.json",
+    "schemas/issue.schema.json",
+    "schemas/object-verification.schema.json",
+    "schemas/observability-manifest.schema.json",
+    "schemas/operation.schema.json",
+    "schemas/page-candidate.schema.json",
+    "schemas/page-element-judgement.schema.json",
+    "schemas/page-state.schema.json",
+    "schemas/pending-decision.schema.json",
+    "schemas/performance-bill.schema.json",
+    "schemas/plugin-conformance.schema.json",
+    "schemas/plugin-fixture.schema.json",
+    "schemas/plugin-release-acceptance.schema.json",
+    "schemas/plugin-release.schema.json",
+    "schemas/public-progress.schema.json",
+    "schemas/request-observation.schema.json",
+    "schemas/reverse-case.schema.json",
+    "schemas/rule-assessment.schema.json",
+    "schemas/rule-registry.schema.json",
+    "schemas/run-diagnostics.schema.json",
+    "schemas/runtime-event.schema.json",
+    "schemas/scan-run.schema.json",
+    "schemas/screenshot.schema.json",
+    "scripts/check_architecture_boundaries.py",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_observability_schema.py",
+    "tests/test_schema_contracts.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/verification-and-traceability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the platform schema resource directory, the architecture gate, and the schema inventory"
+    ],
+    "plugin": [
+      "No plugin change; ordinary plugins compile to compiled-plugin.json and never loaded the removed schemas"
+    ],
+    "provider": [
+      "No provider change; provider packages use provider-release, provider-fixture, provider-execution, provider-conformance, and capability-negotiation, which stay in place"
+    ],
+    "agent": [
+      "No agent change; the removed schemas had no live reader and the retired agent distribution is already gone"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter any live schema, compiled contract, platform ledger, or result contract, or any live Host, plugin, provider, or SDK behaviour",
+    "The change must not remove the live platform and SDK schemas that the compiled acceptance and conformance paths validate",
+    "The change must not reintroduce a retired v1 or legacy-plugin schema, or ship a platform schema with no live reader, without an explicit author-facing registration",
+    "The gate must not reject the live schemas, the SDK-owned schemas, or a schema that is reachable only through a cross-file $ref"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "schemas/ contains only the fifteen schemas that a live loader names, and none of the thirty retired schema names exist",
+    "tests/test_observability_schema.py does not exist and tests/test_schema_contracts.py keeps the live platform-ledger and plugin-manifest acceptance cases",
+    "scripts/check_architecture_boundaries.py rejects a schema in schemas/ with no live reader, rejects a retired schema name even when a reader is added, and rejects retired protocol tool vocabulary in schemas/README.md",
+    "no kept schema references a deleted schema and the schema store loads without the removed files",
+    "the architecture, document, plugin-source, English text, and resilience gates stay green, the design confirmation gate is green across the changed range, and the fast, full, and compiled acceptance profiles still pass"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is breaking because the assayer-platform wheel stops shipping thirty unreachable schemas; the evidence that nothing in the repository consumed them is recorded in the summary. @assayer_rev independently requested this round and reviews the batch; a published-surface removal is classified as a release change by established precedent."
+  },
+  "state": "approved"
+}

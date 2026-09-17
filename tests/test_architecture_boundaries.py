@@ -51,6 +51,14 @@ class ArchitectureBoundaryTest(unittest.TestCase):
         self.assertEqual([], sorted((ROOT / "examples").glob("*-ledger.json")))
         self.assertNotIn("DerivedReportBuilder", assayer_host.__all__)
 
+    def test_retired_schema_surface_is_absent(self):
+        from scripts.check_architecture_boundaries import RETIRED_SCHEMA_NAMES
+
+        for name in RETIRED_SCHEMA_NAMES:
+            self.assertFalse((ROOT / "schemas" / name).exists(), name)
+        for name in ("platform-ledger.schema.json", "canonical-result.schema.json"):
+            self.assertTrue((ROOT / "schemas" / name).is_file(), name)
+
 
 class RetiredToolVocabularyTest(unittest.TestCase):
     def _repository(self, directory: str) -> Path:
@@ -87,6 +95,10 @@ class RetiredToolVocabularyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "schemas").mkdir(parents=True, exist_ok=True)
+            (root / "src" / "assayer_host").mkdir(parents=True, exist_ok=True)
+            (root / "src" / "assayer_host" / "loader.py").write_text(
+                'SCHEMA = "protocol.schema.json"\n', encoding="utf-8",
+            )
             schema = root / "schemas" / "protocol.schema.json"
             schema.write_text(
                 '{"enum": ["start_audit", "submit_review_batch"]}\n', encoding="utf-8",
@@ -118,6 +130,10 @@ class RetiredToolVocabularyTest(unittest.TestCase):
 
             (root / "schemas").mkdir()
             (root / "schemas" / "common.schema.json").write_text("{}", encoding="utf-8")
+            (root / "src" / "assayer_host").mkdir(parents=True, exist_ok=True)
+            (root / "src" / "assayer_host" / "loader.py").write_text(
+                'SCHEMA = "common.schema.json"\n', encoding="utf-8",
+            )
             self.assertEqual((), find_violations(root))
 
             pyproject.write_text(
@@ -128,6 +144,36 @@ class RetiredToolVocabularyTest(unittest.TestCase):
             )
             reasons = [violation.reason for violation in find_violations(root)]
             self.assertTrue(any("retired protocol" in reason for reason in reasons), reasons)
+
+    def test_orphan_schema_is_rejected_without_a_live_reader(self):
+        from scripts.check_architecture_boundaries import find_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "schemas").mkdir(parents=True)
+            (root / "schemas" / "orphan.schema.json").write_text("{}", encoding="utf-8")
+            reasons = [violation.reason for violation in find_violations(root)]
+            self.assertTrue(any("without a live reader" in reason for reason in reasons), reasons)
+
+            (root / "src" / "assayer_host").mkdir(parents=True)
+            (root / "src" / "assayer_host" / "loader.py").write_text(
+                'SCHEMA = "orphan.schema.json"\n', encoding="utf-8",
+            )
+            self.assertEqual((), find_violations(root))
+
+    def test_retired_schema_name_cannot_return_even_with_a_reader(self):
+        from scripts.check_architecture_boundaries import find_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "schemas").mkdir(parents=True)
+            (root / "schemas" / "audit-ledger.schema.json").write_text("{}", encoding="utf-8")
+            (root / "src" / "assayer_host").mkdir(parents=True)
+            (root / "src" / "assayer_host" / "loader.py").write_text(
+                'SCHEMA = "audit-ledger.schema.json"\n', encoding="utf-8",
+            )
+            reasons = [violation.reason for violation in find_violations(root)]
+            self.assertTrue(any("retired v1 or legacy-plugin schema" in reason for reason in reasons), reasons)
 
     def test_retired_v1_ledger_artifact_name_is_rejected_in_shipped_python(self):
         from scripts.check_architecture_boundaries import _repository_contract_violations
