@@ -62,13 +62,14 @@ required gates. `approved` proves that the responsible human accepted the
 design direction, or that a standing decision named by the record covers it.
 
 `implemented` and `verified` are claims about evidence, so each state MUST name
-that evidence in the record. `implemented` asserts that the change landed and
-MUST name the landing commit. `verified` asserts that the acceptance gates
-named by the record were run against that landing commit and MUST name the
-verification evidence, such as a gate run reference or a reviewer's independent
-verification. A record MUST NOT claim a state whose evidence it cannot name.
-States asserted before this rule took effect are not required to name that
-evidence retroactively.
+that evidence. `implemented` asserts that the change landed and MUST name the
+landing commit. `verified` asserts that the acceptance gates named by the record
+were run against that landing commit and MUST name the verification evidence,
+such as a gate run reference or a reviewer's independent verification. The
+record schema carries no dedicated evidence field, so until one exists the
+citation is recorded in the record's `summary`. A record MUST NOT claim a state
+whose evidence it cannot name. States asserted before this rule took effect are
+not required to name that evidence retroactively.
 
 Implementation is permitted only for an `approved` record. A public-contract,
 semantic, safety, persistence, or release change always requires human
