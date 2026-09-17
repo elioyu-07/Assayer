@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "mark-the-j02-activation-record-as-historical",
+  "changeType": "platform_change",
+  "title": "Mark the J02 activation acceptance as a historical record",
+  "summary": "docs/j02-activation-and-discovery.md recorded one real acceptance run on 2026-09-01 in which a fresh Codex CLI session discovered the assayer:assayer-audit Skill and called start_audit. The file carried no historical marker and its leading section was still titled Current Status, so a reader could take a retired capability and a retired tool name as current guidance even though retire-the-vertical-audit-skill-and-gate-bundle-text removed the audit Skill and the compiled Host exposes a different tool set. The acceptance facts themselves are a truthful record of that execution and are kept for traceability; only the framing changes. This change adds a historical acceptance banner that names the retirement, lists the compiled tools that replaced start_audit, and states that the observations are not current guidance or an active gate, and it retitles the leading section to Recorded status at the 2026-09-01 acceptance. No normative document, gate, contract, workflow, or code path changes, and no record is edited or superseded.",
+  "changedPaths": [
+    "docs/j02-activation-and-discovery.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md"
+  ],
+  "ownership": {
+    "platform": ["Repository documentation owns the historical framing of a records-only acceptance file"],
+    "plugin": ["No plugin change; the retired audit Skill is not restored or re-described as current"],
+    "provider": ["No provider change"],
+    "agent": ["No Agent guidance change; Skills already teach the compiled workflow"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not delete or rewrite the recorded 2026-09-01 observations, which remain traceability evidence",
+    "The change must not present the retired audit Skill or start_audit as a current capability",
+    "The change must not touch a normative document, a gate, or a CI workflow",
+    "The change must not edit or supersede any existing design record"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "docs/j02-activation-and-discovery.md opens with a historical acceptance banner that names the retired audit Skill and lists the compiled tools that replaced start_audit",
+    "the leading status section is no longer titled Current Status",
+    "the 2026-09-01 observations are retained unchanged in substance",
+    "the design confirmation, document, English text, architecture, plugin-source, and resilience gates all stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only documentation framing change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No normative document, contract, gate, or behaviour changes; the batch adds a historical banner and retitles one section of a records-only acceptance file."
+  },
+  "state": "approved"
+}

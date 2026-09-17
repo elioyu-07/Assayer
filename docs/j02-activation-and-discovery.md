@@ -1,10 +1,20 @@
 # J02: Activation and Discovery Acceptance
 
+> **Historical acceptance record.** This file records one acceptance run on
+> 2026-09-01 against the vertical runtime that this repository no longer ships.
+> The `assayer:assayer-audit` Skill and the web-URL audit capability were
+> retired, and the compiled Host now exposes `start_compiled_run`,
+> `bind_provider`, `discover_sources`, `collect_evidence`,
+> `plan_review_batches`, `submit_review_batch`, `finalize_compiled_run`, and
+> `get_compiled_result` instead of `start_audit`. The observations below are
+> retained for traceability of that execution and are not current guidance or
+> an active gate.
+
 ## Objective
 
 After installing the Assayer Plugin, a new Codex Desktop task or CLI session receives the same Skill and MCP without copying configuration, entering absolute paths, or registering Assayer MCP manually.
 
-## Current Status
+## Recorded status at the 2026-09-01 acceptance
 
 On 2026-09-01, a real fresh Codex CLI session automatically discovered `assayer:assayer-audit`, resolved the local Plugin MCP, and directly called `mcp__assayer__start_audit` for a formal lease-mock audit. CLI primary acceptance passed; Desktop remains a later compatibility check, not the current primary gate.
 
