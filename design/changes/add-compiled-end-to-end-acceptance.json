@@ -3,7 +3,7 @@
   "changeId": "add-compiled-end-to-end-acceptance",
   "changeType": "platform_change",
   "title": "Run one compiled Run end to end in a clean venv and verify its artifact",
-  "summary": "The acceptance baseline requires that a clean environment installs the split distributions with --no-index and then runs one compiled Run end to end, producing and verifying one artifact, but until now the compiled path was only exercised by in-process tests against a development checkout: nothing proved that the installed distributions, the shipped provider entry point, and the published schemas can complete a Run together. This change adds scripts/compiled_acceptance.py, which builds a cleared wheelhouse for exactly four distributions (platform, SDK, agent, and the generic markdown capability provider), creates an isolated venv, installs with --no-index, and drives one compiled Run through the Host transport on the non-business declarative fixture tests/fixtures/plugins/policy-pack. The driver reports every module origin, every installed distribution version, the schema root it validated against, the coverage ledger digest, and the artifact digest, and the caller rejects any origin outside the venv, any distribution that was not installed, and any artifact whose digest or verdict vocabulary does not verify. The provider is discovered from installed entry points, so the run also proves the shipped entry point; a development checkout fails closed with PROVIDER_NOT_FOUND because no entry point is installed there. This change adds the harness only and does not wire it into a CI job or change any normative document.",
+  "summary": "The acceptance baseline requires that a clean environment installs the split distributions with --no-index and then runs one compiled Run end to end, producing and verifying one artifact, but until now the compiled path was only exercised by in-process tests against a development checkout: nothing proved that the installed distributions, the shipped provider entry point, and the published schemas can complete a Run together. This change adds scripts/compiled_acceptance.py, which builds a cleared wheelhouse for exactly four distributions (platform, SDK, agent, and the generic markdown capability provider), creates an isolated venv, installs with --no-index, and drives one compiled Run through the Host transport on the non-business declarative fixture tests/fixtures/plugins/policy-pack. The driver reports every module origin, every installed distribution version, the schema root it validated against, the coverage ledger digest, and the artifact digest, and the caller rejects any origin outside the venv, any distribution that was not installed, and any artifact whose digest or verdict vocabulary does not verify. The provider is discovered from installed entry points, so the run also proves the shipped entry point; a development checkout fails closed with PROVIDER_NOT_FOUND because no entry point is installed there. This change adds the harness only and does not wire it into a CI job or change any normative document. Registered trigger: wiring this script into the install-matrix job and updating the docs/ci-support-matrix-v1.md section 2 wording stays deferred to the next release-admission batch, because that touches a normative document and CI job behaviour, so the harness must not be treated as an already-enforced gate. Verification evidence: the change landed in a894d01, pushed on 2026-09-17 with a894d01 as the publish point, with ef1f2e3 advancing an earlier record; the acceptance script exits 0 in a clean venv and reports status=passed, runStatus=completed, providerRegistry=entry-points, module origins inside the venv, the venv's own schema root, and self-consistent coverage and artifact digests; CI run 35199238530 and 35199505555 both passed all seven jobs; locally fast reported 431 tests OK and full reported 444 tests OK with the design confirmation, architecture, document, plugin-source, English text, and resilience gates returning 0; and @assayer_rev independently re-ran the script in a detached worktree, checked the ten-case suite including its five rejection paths, and passed the internal_only classification.",
   "changedPaths": [
     "scripts/compiled_acceptance.py",
     "tests/test_compiled_acceptance.py"
@@ -13,10 +13,18 @@
     "docs/ci-support-matrix-v1.md"
   ],
   "ownership": {
-    "platform": ["Repository verification tooling owns the clean-environment end-to-end compiled acceptance"],
-    "plugin": ["No plugin change; the run uses the existing declarative policy-pack fixture"],
-    "provider": ["No provider change; the run installs the existing markdown provider wheel"],
-    "agent": ["No agent change; review batches are submitted directly to the Host transport"]
+    "platform": [
+      "Repository verification tooling owns the clean-environment end-to-end compiled acceptance"
+    ],
+    "plugin": [
+      "No plugin change; the run uses the existing declarative policy-pack fixture"
+    ],
+    "provider": [
+      "No provider change; the run installs the existing markdown provider wheel"
+    ],
+    "agent": [
+      "No agent change; review batches are submitted directly to the Host transport"
+    ]
   },
   "capabilities": {
     "inputKinds": [],
@@ -46,5 +54,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only addition of verification tooling, carried out under the mandate in #assayer-group:4c84ee19. No normative document, workflow, release surface, contract, or semantic product behaviour changes: the batch adds one acceptance script and its unit test, and wiring the script into the install-matrix job together with the docs/ci-support-matrix-v1.md wording stays for a later batch that requires explicit approval."
   },
-  "state": "approved"
+  "state": "verified"
 }
