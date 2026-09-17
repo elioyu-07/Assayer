@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "drop-dead-plugin-wheel-steps-from-verification",
+  "changeType": "release_change",
+  "title": "Drop the dead plugin-wheel steps from the verification workflow",
+  "summary": "The verification workflow still builds and installs assayer_plugin_frontend_audit-*.whl, but b5921f9 reduced scripts/build_distributions.py so DISTRIBUTIONS contains only assayer-plugin-sdk, assayer-agent, and assayer-platform; ordinary plugins are data-only and are not Python distributions, so that wheel is never produced. The workflow's fast and full jobs therefore fail at the pip install step. The build step's output /tmp/assayer-wheels has no other consumer once that install line is removed, and split-distribution building is the install-matrix job's documented responsibility, so the dead build step is removed as well. No Python version, test, or install reference changes.",
+  "changedPaths": [
+    ".github/workflows/verification.yml"
+  ],
+  "authorityDocuments": [
+    "docs/ci-support-matrix-v1.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Release engineering owns the verification workflow and its gate definitions"],
+    "plugin": ["No plugin change; ordinary plugins remain data-only"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not remove any referenced artifact that still exists",
+    "The change must not alter the CI matrix Python versions or the gate definitions in docs/ci-support-matrix-v1.md",
+    "Split-distribution build coverage must remain owned by the install-matrix job and the unit tests"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "the fast and full jobs no longer reference assayer_plugin_frontend_audit or /tmp/assayer-wheels",
+    "no step in .github/workflows/verification.yml references a build output that no later step consumes",
+    "the CI matrix Python versions are unchanged and still agree with docs/ci-support-matrix-v1.md",
+    "the workflow parses as valid YAML and scripts/run_tests.py fast and full stay green",
+    "split-distribution building remains covered by the install-matrix job and tests/test_install_matrix.py"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:24:31+08:00",
+    "decision": "User replied '同意。' in #assayer-group:4c84ee19, approving the proposed workflow fix (delete the dead plugin-wheel build step and install line) and the plan to create this record, commit, and push."
+  },
+  "state": "approved"
+}
