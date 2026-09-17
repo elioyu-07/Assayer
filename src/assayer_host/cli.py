@@ -43,14 +43,7 @@ def _toml_string(value: str) -> str:
 
 def _audit_prompt(target: str, *, plugin_id: str | None = None) -> str:
     kind = target_kind(target)
-    if kind == "web":
-        return (
-            "Use $assayer-audit to investigate this web URL through the assayer MCP tools: "
-            f"{target}\nComplete the audit; supply only business inputs exposed by the tools, "
-            "let Assayer maintain all protocol and runtime configuration, and do not run the smoke runner."
-        )
-
-    path = Path(target).expanduser().resolve()
+    subject = target if kind == "web" else str(Path(target).expanduser().resolve())
     selected_plugin = plugin_id
     plugin_instruction = (
         f"Use the installed {selected_plugin} plugin. "
@@ -58,11 +51,11 @@ def _audit_prompt(target: str, *, plugin_id: str | None = None) -> str:
         "Select an installed plugin whose declared scope matches the target. "
     )
     return (
-        f"Use $assayer-plugin to review this {kind} target through the assayer MCP tools: {path}\n"
+        f"Use $assayer-plugin to review this {kind} target through the assayer MCP tools: {subject}\n"
         f"{plugin_instruction}Complete exactly one plugin Run for the requested target. "
-        "If the required plugin is missing or ambiguous, report that clearly instead of guessing or starting a web audit. "
-        "Supply only business inputs exposed by the tools, let Assayer maintain protocol and runtime configuration, "
-        "and do not start a web browser."
+        "If the required plugin is missing or ambiguous, report that clearly instead of guessing "
+        "or broadening the scope. Supply only business inputs exposed by the tools, and let Assayer "
+        "maintain protocol and runtime configuration."
     )
 
 
@@ -76,20 +69,15 @@ def _run_agent_audit(target: str, output_root: Path, *, plugin_id: str | None = 
         return 2
     output_root = output_root.expanduser().resolve()
     output_root.mkdir(parents=True, exist_ok=True)
-    if target_kind(target) == "web":
-        command = sys.executable
-        args = ["-m", "assayer_host.transport", "--output-root", str(output_root)]
-    else:
-        # File and directory audits require the domain-plugin lifecycle MCP,
-        # not the generic runtime transport exposed by ``transport --mcp``.
-        # Use the console entry point adjacent to this exact Assayer runtime so
-        # a dynamically configured Codex process cannot bind a stale/global
-        # installation with the same server name.
-        command = str(Path(sys.executable).with_name("assayer-mcp"))
-        args = [
-            "--output-root", str(output_root),
-            "--store", str(default_store_root()),
-        ]
+    # Every target is reviewed through the same domain-plugin lifecycle MCP.
+    # Use the console entry point adjacent to this exact Assayer runtime so a
+    # dynamically configured Codex process cannot bind a stale/global
+    # installation with the same server name.
+    command = str(Path(sys.executable).with_name("assayer-mcp"))
+    args = [
+        "--output-root", str(output_root),
+        "--store", str(default_store_root()),
+    ]
     prompt = _audit_prompt(target, plugin_id=plugin_id)
     config_command = f"mcp_servers.assayer.command={_toml_string(command)}"
     config_args = f"mcp_servers.assayer.args={json.dumps(args, ensure_ascii=False)}"

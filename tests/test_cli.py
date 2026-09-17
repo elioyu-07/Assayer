@@ -185,8 +185,10 @@ class CliTest(unittest.TestCase):
         self.assertIn("--approve-for-me", command)
         self.assertIn("mcp_servers.assayer.command", " ".join(command))
         self.assertNotIn("--mcp", " ".join(command))
-        self.assertIn("$assayer-audit", command[-1])
+        self.assertIn("$assayer-plugin", command[-1])
         self.assertIn("https://test.example.com", command[-1])
+        self.assertNotIn("$assayer-audit", command[-1])
+        self.assertNotIn("web URL", command[-1])
         self.assertNotIn("outputDir=auto", command[-1])
         self.assertNotIn("protocolVersion", command[-1])
 
@@ -203,10 +205,10 @@ class CliTest(unittest.TestCase):
         prompt = run.call_args.args[0][-1]
         self.assertIn("$assayer-plugin", prompt)
         self.assertIn("Select an installed plugin whose declared scope matches the target", prompt)
-        self.assertNotIn("ass-spec", prompt)
         self.assertIn(str(target.resolve()), prompt)
-        self.assertIn("do not start a web browser", prompt)
+        self.assertNotIn("ass-spec", prompt)
         self.assertNotIn("$assayer-audit", prompt)
+        self.assertNotIn("browser", prompt.lower())
         self.assertNotIn("web URL", prompt)
         command = run.call_args.args[0]
         rendered = " ".join(command)
@@ -216,6 +218,22 @@ class CliTest(unittest.TestCase):
         self.assertIn("--store", rendered)
         self.assertNotIn("assayer_host.transport", rendered)
         self.assertNotIn("--mcp", rendered)
+
+    def test_every_target_uses_the_same_domain_plugin_lifecycle_mcp(self):
+        completed = Mock(returncode=0)
+        prompts = []
+        with patch("assayer_host.cli.shutil.which", return_value="/usr/local/bin/codex"), \
+             patch("assayer_host.cli.subprocess.run", return_value=completed) as run:
+            cli.main(["audit", "https://example.test/a"])
+            cli.main(["audit", "./spec.md"])
+            prompts = [call.args[0][-1] for call in run.call_args_list]
+            commands = [call.args[0] for call in run.call_args_list]
+
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:-1], commands[1][:-1])
+        for prompt in prompts:
+            self.assertIn("$assayer-plugin", prompt)
+            self.assertNotIn("$assayer-audit", prompt)
 
     def test_file_audit_accepts_an_explicit_domain_plugin(self):
         completed = Mock(returncode=0)

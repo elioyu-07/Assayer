@@ -32,12 +32,13 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertNotIn(str(ROOT), json.dumps(config))
         self.assertTrue((PLUGIN / "scripts" / "launch_assayer_mcp").is_file())
         self.assertTrue((PLUGIN / "scripts" / "prepare_assayer_runtime").is_file())
-        self.assertTrue((PLUGIN / "skills" / "assayer-audit" / "SKILL.md").is_file())
+        self.assertTrue((PLUGIN / "skills" / "assayer-plugin" / "SKILL.md").is_file())
         self.assertTrue((PLUGIN / "skills" / "assayer-plugin-development" / "SKILL.md").is_file())
+        self.assertFalse((PLUGIN / "skills" / "assayer-audit").exists())
 
     def test_assayer_skill_declares_local_mcp_dependency_for_cli_discovery(self):
         value = load_yaml_subset(
-            PLUGIN / "skills" / "assayer-audit" / "agents" / "openai.yaml"
+            PLUGIN / "skills" / "assayer-plugin" / "agents" / "openai.yaml"
         )
         self.assertEqual(value["dependencies"]["tools"], [{
             "type": "mcp",

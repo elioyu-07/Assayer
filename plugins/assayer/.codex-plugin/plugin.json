@@ -1,26 +1,26 @@
 {
   "name": "assayer",
   "version": "0.1.2+codex.20260915125952",
-  "description": "Evidence-backed audits and deterministic plugin development in Codex",
+  "description": "Evidence-backed compiled plugin runs and deterministic plugin development in Codex",
   "author": {
     "name": "Assayer maintainers"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Assayer",
-    "shortDescription": "Audit interfaces, run plugins, and verify plugin source projects.",
-    "longDescription": "Assayer guides Codex through bounded, evidence-backed audits, installed-plugin lifecycles, and deterministic local plugin verification. It compiles supported authoring formats, validates one exact wheel, and returns traceable findings or release artifacts from natural-language requests.",
+    "shortDescription": "Run installed plugins, manage them, and verify plugin source projects.",
+    "longDescription": "Assayer guides Codex through the platform-owned compiled workflow: it compiles a declarative plugin contract, freezes sources through a capability provider, reviews bounded batches with five-state verdicts, and returns one verified result. It also manages installed plugins in natural language and verifies local plugin source projects deterministically.",
     "developerName": "Assayer maintainers",
     "category": "Productivity",
     "capabilities": [
       "Interactive"
     ],
     "defaultPrompt": [
-      "Audit this web URL for frontend issues: <URL>",
-      "Run the installed plugin for this input and produce an evidence-backed report.",
-      "Install the ass-spec plugin.",
-      "Verify this local Assayer plugin source and build its exact release wheel.",
-      "Continue the Assayer audit and explain the current progress.",
+      "Run the installed plugin on this input and report the verified result.",
+      "List my installed Assayer plugins and their checks.",
+      "Install the example-plugin and tell me its checks.",
+      "Verify this local Assayer plugin source and build its compiled artifact.",
+      "Read the finished Assayer Run and explain each verdict.",
       "Explain the Assayer result and what I should do next."
     ]
   },

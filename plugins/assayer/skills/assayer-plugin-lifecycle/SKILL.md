@@ -1,6 +1,6 @@
 ---
 name: assayer-plugin-lifecycle
-description: "Manage installed Assayer domain plugins in natural language: install, upgrade, downgrade, rollback, uninstall, list, and inspect. Use when the user asks to install, add, update, pin, remove, or look up an Assayer plugin. Do not use for developing or verifying plugin source (see assayer-plugin-development), running a plugin (see assayer-plugin), or auditing a URL (see assayer-audit)."
+description: "Manage installed Assayer domain plugins in natural language: install, upgrade, downgrade, rollback, uninstall, list, and inspect. Use when the user asks to install, add, update, pin, remove, or look up an Assayer plugin. Do not use for developing or verifying plugin source (see assayer-plugin-development) or for running an installed plugin (see assayer-plugin)."
 ---
 
 # Assayer Plugin Lifecycle
@@ -23,8 +23,7 @@ tool-discovery mechanism before reporting the integration as unavailable.
 |---|---|---|
 | Verify a local plugin source or build its compiled artifact | `assayer-plugin-development` | `verify_plugin_source` |
 | Manage an Assayer domain plugin (install/upgrade/remove/look up) | this Skill | `apply_plugin_change` / `list_plugins` / `get_plugin_info` |
-| Run an installed plugin against an input | `assayer-plugin` | `start_plugin_run`, `advance_plugin_run`, … |
-| Audit a web URL | `assayer-audit` | `start_audit`, … |
+| Run an installed plugin against an input | `assayer-plugin` | `start_compiled_run`, `bind_provider`, …, `get_compiled_result` |
 | Install/upgrade Assayer itself (the Codex plugin) | Codex Marketplace / product lifecycle | not an MCP tool |
 
 If "install" or "update" is ambiguous between Assayer itself and a domain

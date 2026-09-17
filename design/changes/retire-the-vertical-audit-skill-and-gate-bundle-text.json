@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-vertical-audit-skill-and-gate-bundle-text",
+  "changeType": "agent_change",
+  "title": "Retire the web-URL audit skill and make bundle text name only live tools",
+  "summary": "The bundled platform plugin still taught a retired capability. plugins/assayer/skills/assayer-audit described auditing a web URL through the browser runtime that this repository already removed, and its premise no longer has a provider: the only installed capability provider is assayer-document-navigation. The same file list also survived as a tracked duplicate under .agents/skills/assayer-audit. Two other user-facing files taught retired protocol names: plugins/assayer/skills/assayer-plugin told the Agent to drive start_plugin_run and advance_plugin_run, which scripts/check_architecture_boundaries.py classifies as removed plugin protocol fields, and assayer-plugin-lifecycle listed start_plugin_run and start_audit as current tools. plugins/assayer/.codex-plugin/plugin.json advertised an exact wheel, frontend issues, and the ass-spec plugin. The host CLI routed an http(s) target to the assayer-audit Skill and the raw transport module while routing every other target to the domain-plugin lifecycle server, so a web target took a second, now dead path. No gate looked at any of this text: check_architecture_boundaries.py scans only Python under src/ and packages/*/src, check_plugin_source_boundaries.py excluded plugins/assayer by design, and check_document_boundaries.py scans only docs/, so a retired tool name in a Skill was invisible while all gates stayed green. This change deletes the audit Skill and its duplicate, rewrites the plugin Skill to the compiled workflow (start_compiled_run through get_compiled_result, with the five-state verdict contract), repoints the lifecycle table and manifest prompts, makes the host CLI route every target through the same domain-plugin lifecycle server, and extends check_plugin_source_boundaries.py to police the platform bundle's authored text: a tool-shaped token must exist in the frozen live MCP tool set and retired protocol or decision vocabulary is rejected outright, with a test that keeps the frozen set equal to the transports' real surface.",
+  "changedPaths": [
+    ".agents/skills/assayer-audit/SKILL.md",
+    ".agents/skills/assayer-audit/agents/openai.yaml",
+    "plugins/assayer/.codex-plugin/plugin.json",
+    "plugins/assayer/skills/assayer-audit/SKILL.md",
+    "plugins/assayer/skills/assayer-audit/agents/openai.yaml",
+    "plugins/assayer/skills/assayer-plugin/SKILL.md",
+    "plugins/assayer/skills/assayer-plugin-lifecycle/SKILL.md",
+    "scripts/check_plugin_source_boundaries.py",
+    "src/assayer_host/cli.py",
+    "tests/test_cli.py",
+    "tests/test_plugin_packaging.py",
+    "tests/test_plugin_source_boundaries.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Owns the host CLI target routing and the plugin-source boundary gate"],
+    "plugin": ["Owns the bundled platform plugin manifest and Agent-facing Skills"],
+    "provider": ["No provider change; the retired Skill is removed because no provider supplies its premise"],
+    "agent": ["Agent guidance now teaches only the platform-owned compiled workflow"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The Skills must not reintroduce a browser, web-URL, or frontend-specific premise",
+    "The Skills must not teach a tool name the compiled Host does not expose",
+    "The gate must not import the runtime to obtain the live tool set; it keeps a frozen set that a test reconciles with the transports",
+    "The gate must not scan generated runtime material or local build state as authored text",
+    "The batch must not touch the frozen v1 contracts, DECISION_STATES, schemas/common.schema.json, or historical records in docs/"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "plugins/assayer/skills/assayer-audit and the tracked duplicate .agents/skills/assayer-audit no longer exist",
+    "every tool-shaped token in plugins/assayer authored text exists in the live MCP tool surface, and the compiled workflow steps in the plugin Skill match the transport: start_compiled_run, bind_provider, discover_sources, collect_evidence, plan_review_batches, submit_review_batch, finalize_compiled_run, get_compiled_result",
+    "scripts/check_plugin_source_boundaries.py returns 1 and names the offending token when a platform bundle Skill quotes a retired tool name such as start_plugin_run, and returns 0 on the current bundle",
+    "tests/test_plugin_source_boundaries.py proves the frozen live tool set still equals the union of the compiled and plugin-lifecycle transports' tools",
+    "the host CLI uses one server configuration for every target: an http(s) target and a markdown target produce the same command prefix and both prompt $assayer-plugin",
+    "no gate regresses: architecture, document, plugin-source, English text, design confirmation, and resilience all return 0, with the fast and full profiles passing"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Product-surface change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 (approval time) and its delegation update: 于旸 stated that the agent and reviewer decide these changes themselves and that the workflow runs at most seven rounds, so no per-change sign-off is requested. The classification is semantic because the batch removes an Agent-facing Skill, repoints the manifest prompts, and changes how the host CLI routes a web target; @assayer_rev independently reviews the batch and proposed retiring the audit Skill instead of rewriting it, on the grounds that its web-URL premise is a removed capability, that assayer-document-navigation is the only provider, and that assayer-plugin already covers running any installed plugin."
+  },
+  "state": "approved"
+}
