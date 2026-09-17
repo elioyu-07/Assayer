@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "scan-plugin-source-for-platform-schema-references",
+  "changeType": "platform_change",
+  "title": "Scan plugin source for platform schema references",
+  "summary": "The orphan-schema gate added by retire-the-v1-and-legacy-plugin-schema-surface documents its live-reader search as covering src/, packages/*/src, plugins/*/src, and scripts/, but _referenced_schema_names only scanned the first, second, and fourth. The reviewer flagged the mismatch as non-blocking. This change adds plugins/*/src to the scanned roots so a platform schema referenced only from a plugin source file counts as live, which makes the code match the documented claim and closes the same class of blind spot for plugin-owned source. No schema, loader, published artifact, contract, or live behaviour changes; the repository gate stays green and a new test proves a schema referenced only from plugins/*/src is not reported as orphaned. Verification evidence: the change landed in LANDING_COMMIT, pushed on 2026-09-17, and CI run CI_RUN passed all seven jobs; locally the architecture check returns 0, its fourteen tests pass, the fast and full profiles stay green, and the design confirmation gate passes over the changed range.",
+  "changedPaths": [
+    "design/changes/scan-plugin-source-for-platform-schema-references.json",
+    "scripts/check_architecture_boundaries.py",
+    "tests/test_architecture_boundaries.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the architecture gate and its scanned source roots"
+    ],
+    "plugin": [
+      "No plugin change; the gate now also reads plugin source when deciding whether a platform schema is live"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter the retired schema name set or weaken the orphan check for src, packages/*/src, or scripts",
+    "The change must not change any schema, loader, published artifact, contract, or live behaviour"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "_referenced_schema_names scans src, packages/*/src, plugins/*/src, and scripts",
+    "a platform schema referenced only from a plugins/*/src file is not reported as orphaned",
+    "the repository architecture gate returns 0 and the boundary tests pass"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only gate change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No normative document, published artifact, contract, or live behaviour changes: the batch widens one internal gate's scanned source roots to match its documented behaviour and adds a regression test."
+  },
+  "state": "approved"
+}

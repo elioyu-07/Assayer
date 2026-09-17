@@ -364,7 +364,9 @@ def _referenced_schema_names(root: Path) -> set[str]:
         return set()
     shipped = {path.name for path in directory.rglob("*.schema.json")}
     referenced: set[str] = set()
-    source_roots = [*_source_roots(root), root / "scripts"]
+    plugins = root / "plugins"
+    plugin_sources = sorted(plugins.glob("*/src")) if plugins.is_dir() else []
+    source_roots = [*_source_roots(root), root / "scripts", *plugin_sources]
     for source_root in source_roots:
         if not source_root.is_dir():
             continue

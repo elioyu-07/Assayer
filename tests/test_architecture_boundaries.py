@@ -161,6 +161,22 @@ class RetiredToolVocabularyTest(unittest.TestCase):
             )
             self.assertEqual((), find_violations(root))
 
+    def test_plugin_source_reference_keeps_a_schema_live(self):
+        from scripts.check_architecture_boundaries import find_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "schemas").mkdir(parents=True)
+            (root / "schemas" / "plugin-visible.schema.json").write_text("{}", encoding="utf-8")
+            reasons = [violation.reason for violation in find_violations(root)]
+            self.assertTrue(any("without a live reader" in reason for reason in reasons), reasons)
+
+            (root / "plugins" / "demo" / "src").mkdir(parents=True)
+            (root / "plugins" / "demo" / "src" / "loader.py").write_text(
+                'SCHEMA = "plugin-visible.schema.json"\n', encoding="utf-8",
+            )
+            self.assertEqual((), find_violations(root))
+
     def test_retired_schema_name_cannot_return_even_with_a_reader(self):
         from scripts.check_architecture_boundaries import find_violations
 
