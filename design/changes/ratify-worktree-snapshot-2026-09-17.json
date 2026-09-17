@@ -3,7 +3,7 @@
   "changeId": "ratify-worktree-snapshot-2026-09-17",
   "changeType": "platform_change",
   "title": "Ratify the existing 2026-09-17 worktree snapshot for commit",
-  "summary": "After-the-fact disposition of 37 changed paths that were produced before a Design Confirmation preflight occurred. This record does not claim that a preflight happened and does not endorse the content of the ratified paths. It only records the business owner's decision to accept the existing worktree snapshot so the repository can be committed. No existing approved record is modified, and no new capability, plugin, provider, or contract behavior is authorized by this record. Document corrections and any further implementation proceed under separate, newly checked Design Confirmations.",
+  "summary": "After-the-fact disposition of 37 changed paths that were produced before a Design Confirmation preflight occurred. This record does not claim that a preflight happened and does not endorse the content of the ratified paths. It only records the business owner's decision to accept the existing worktree snapshot so the repository can be committed. No existing approved record is modified, and no new capability, plugin, provider, or contract behavior is authorized by this record. Document corrections and any further implementation proceed under separate, newly checked Design Confirmations. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "docs/agent-domain-result-boundary-v2.md",
     "docs/agent-first-plugin-lifecycle-design.md",
@@ -75,5 +75,5 @@
     "approvedAt": "2026-09-17T14:13:10+08:00",
     "decision": "User ratified the existing worktree snapshot after explanation that this is an after-the-fact disposition with no preflight, does not endorse content, and does not alter existing approved records."
   },
-  "state": "approved"
+  "state": "implemented"
 }
