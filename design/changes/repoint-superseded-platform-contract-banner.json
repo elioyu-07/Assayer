@@ -37,8 +37,8 @@
     "required": false,
     "status": "approved",
     "approver": "于旸",
-    "approvedAt": "2026-09-17T15:45:00+08:00",
-    "decision": "Documentation-consistency step carried out under the mandate in #assayer-group:4c84ee19; the stale banner was reported to the group on 2026-09-17 as part of step 2, and the file is a non-normative historical reference."
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Documentation-consistency step carried out under the mandate in #assayer-group:4c84ee19; the stale banner was reported to the group on 2026-09-17 as part of step 2, and the file is a non-normative historical reference. This registration cites the standing mandate approval at 2026-09-17T15:29:01+08:00, the same instant recorded by the other records in the batch. An earlier draft of this record carried a timestamp ahead of its own commit time; it was corrected on review, and no approval is claimed at or after that time."
   },
   "state": "approved"
 }
