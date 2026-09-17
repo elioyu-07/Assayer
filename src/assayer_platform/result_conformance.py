@@ -1,4 +1,12 @@
-"""Shared semantic conformance gates for terminal platform results."""
+"""Shared semantic conformance gates for terminal platform results.
+
+Frozen v1 contract.  These gates serve the v1 Decision path (kernel, session,
+canonical_result); a compiled Run derives its terminal view directly from the
+persisted CoverageLedger with five-state review atoms and does not call them.
+The v1 result vocabulary checked here is pinned by
+tests/test_platform_v1_contracts.py and must not be migrated or removed without
+retiring the v1 contract first.
+"""
 
 from __future__ import annotations
 

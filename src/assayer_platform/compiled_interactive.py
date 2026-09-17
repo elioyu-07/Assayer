@@ -79,7 +79,7 @@ def _manifest(contract: CompiledPluginContract) -> PluginManifest:
             ),
             required_evidence_kinds=evidence_kind,
             required_capabilities=required_capability,
-            capability_missing_outcome="needs_review",
+            capability_missing_outcome="blocked",
             invalidation_signals=(
                 "browser_state_digest" if input_value["kind"] == "browser_snapshot"
                 else "source_digest",

@@ -1,4 +1,12 @@
-"""Domain-neutral validation for Agent decision proposals."""
+"""Domain-neutral validation for Agent decision proposals.
+
+Frozen v1 contract.  This validates the v1 DecisionProposal route only: the
+Host and interactive Agent decision path.  A compiled Run does not call it; it
+emits five-state review atoms (satisfied, violated, not_applicable, unknown,
+blocked) through incremental_review.  DECISION_STATES and the gates below are
+pinned by tests/test_platform_v1_contracts.py, so they must not be migrated or
+removed without retiring the v1 contract first.
+"""
 
 from __future__ import annotations
 

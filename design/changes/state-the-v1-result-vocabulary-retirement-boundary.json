@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "state-the-v1-result-vocabulary-retirement-boundary",
+  "changeType": "platform_change",
+  "title": "State the v1 result-vocabulary retirement boundary precisely",
+  "summary": "The document boundary gate described its retired result terms as if the words were forbidden everywhere, but the gate only scans the eight NORMATIVE_DOCUMENTS and never scans code or schemas, and the words stay legitimate in several frozen carriers. This change rewrites the gate comment to state the boundary: what is retired is the v1 review-result vocabulary used as active review-outcome prose, plus the canonical-audit-result contract; the words remain valid in the frozen v1 carriers that are not prose (the assayer_plugin_sdk decision states and common.schema.json, pinned by tests/test_platform_v1_contracts.py) and in a compiled plugin business case's declared expected.final value, where needs_review is a legal expectation value alongside ready, rework and not_applicable. It also marks the v1 decision gates in decision.py, kernel.py and result_conformance.py as frozen v1 contract that the compiled Run path does not call. No forbidden term is removed from the doc gate, no decision state, schema, contract, or runtime behaviour changes: this change only makes the comments match the already-implemented behaviour, and it clarifies that the compiled path fails closed on a missing capability rather than degrading to a v1 state.",
+  "changedPaths": [
+    "scripts/check_document_boundaries.py",
+    "src/assayer_platform/decision.py",
+    "src/assayer_platform/kernel.py",
+    "src/assayer_platform/result_conformance.py",
+    "design/changes/state-the-v1-result-vocabulary-retirement-boundary.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the document boundary gate and the v1 decision gates it describes"
+    ],
+    "plugin": [
+      "No plugin change; a compiled plugin business case still declares expected.final with the business vocabulary"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not remove or weaken any forbidden term in the document boundary gate",
+    "The change must not alter any decision state, schema, contract, or runtime behaviour",
+    "The change must not migrate, remove, or rename the frozen v1 decision gates"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "the document boundary gate comment states that it only governs the normative documents and names the carriers where the words stay valid",
+    "the v1 decision gates in decision.py, kernel.py and result_conformance.py are documented as frozen v1 contract the compiled path does not call",
+    "the document, architecture, plugin-source, English text and resilience gates return 0 and the fast and full profiles stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only comment change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No gate rule, decision state, schema, contract, or runtime behaviour changes: only comments and docstrings that describe the already-implemented retirement boundary."
+  },
+  "state": "approved"
+}

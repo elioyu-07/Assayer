@@ -958,6 +958,8 @@ class PlatformKernel:
 
     @staticmethod
     def _validate_proposals(proposals: Sequence[DecisionProposal], packets: Mapping[str, InvestigationPacket], check: CheckContract) -> None:
+        # Frozen v1 batch gate.  The compiled Run path reaches terminal
+        # decisions through incremental_review and does not call this method.
         seen: set[str] = set()
         for proposal in proposals:
             packet = packets.get(proposal.work_item_id)

@@ -58,6 +58,19 @@ class CompiledInteractiveTests(unittest.TestCase):
             "evidenceRefs": list(atom.payload["evidenceRefs"]),
         } for atom in controller._run(run_id).coverage.atoms_for(batch.batch_id)]
 
+    def test_compiled_manifest_fails_closed_when_a_capability_is_missing(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        compile_plugin_contract(Path("tests/fixtures/plugins/policy-pack"), root / "compiled")
+        controller = CompiledInteractiveController(
+            load_compiled_plugin_contract(root / "compiled"), root / "runs",
+        )
+        check = controller.manifest.checks[0]
+        self.assertEqual(check.capability_missing_outcome, "blocked")
+        self.assertIn("blocked", check.decision_states)
+        self.assertNotIn("needs_review", check.decision_states)
+
     def test_evidence_binding_rejection_leaves_memory_and_disk_unchanged(self):
         controller, run_id = self._markdown_run()
         state = controller._run(run_id)

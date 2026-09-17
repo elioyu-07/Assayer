@@ -53,10 +53,16 @@ FORBIDDEN_RETIRED_PLUGIN_TERMS = (
     re.compile(r"\bassayer\.plugins\b", re.IGNORECASE),
 )
 
-# The v1 result vocabulary is retired: a compiled Run emits the platform
-# ledger and its views, and every terminal review atom is one of satisfied,
-# violated, not_applicable, unknown, or blocked. The retired terms must not
-# reappear in an active contract.
+# The v1 review-result vocabulary is retired as active review-outcome prose,
+# and the canonical-audit-result contract is retired: a compiled Run emits the
+# platform ledger and its views, and every terminal review atom is one of
+# satisfied, violated, not_applicable, unknown, or blocked.  This gate only
+# governs the normative documents listed below, never code or schemas.  The
+# words stay legitimate in frozen-v1 carriers that are not prose: the
+# assayer_plugin_sdk decision states and common.schema.json (pinned by
+# tests/test_platform_v1_contracts.py), and a compiled plugin business case's
+# declared expected.final value (ready, rework, needs_review,
+# not_applicable).  Forbid only their reuse as active review-result prose.
 FORBIDDEN_RETIRED_RESULT_TERMS = (
     re.compile(r"\bissue_found\b"),
     re.compile(r"\bscanned_no_issue\b"),

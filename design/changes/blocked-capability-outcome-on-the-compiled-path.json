@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "blocked-capability-outcome-on-the-compiled-path",
+  "changeType": "platform_change",
+  "title": "Fail closed instead of degrading when a compiled Check lacks a capability",
+  "summary": "The manifest that CompiledInteractiveController derives from a CompiledPluginContract set capability_missing_outcome to needs_review while its decision states were the five compiled terminal states (satisfied, violated, not_applicable, unknown, blocked). needs_review is not a compiled decision state, so this only worked because missing capabilities are normally rejected during provider binding; if the Kernel's missing-capability branch were ever reached it would have emitted a v1 result word on the compiled surface. This change sets capability_missing_outcome to blocked, the fail-closed outcome the plugin-manifest schema reserves for this case and the only value the Kernel turns into a CAPABILITY_MISSING work failure, and adds a test asserting the compiled manifest fails closed. No compiled contract, plugin case, schema, published artifact, or normal-path behaviour changes: the field is internal to the controller's manifest and the missing-capability branch stays unreachable on the normal path.",
+  "changedPaths": [
+    "src/assayer_platform/compiled_interactive.py",
+    "tests/test_compiled_interactive.py",
+    "design/changes/blocked-capability-outcome-on-the-compiled-path.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the compiled interactive manifest and its fail-closed capability outcome"
+    ],
+    "plugin": [
+      "No plugin change; compiled plugins keep declaring capabilities in their contract"
+    ],
+    "provider": [
+      "No provider change; capability binding still fails before this branch"
+    ],
+    "agent": [
+      "No agent change"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not add needs_review or any other v1 result word to the compiled decision states",
+    "The change must not alter the compiled Plugin Contract output or the normal provider-binding path",
+    "The change must not change the frozen v1 SDK decision vocabulary"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "the compiled controller's manifest declares capability_missing_outcome blocked",
+    "blocked is one of the declared decision states and needs_review is not",
+    "the architecture, document, plugin-source, English text and resilience gates return 0 and the fast and full profiles stay green"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only alignment carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No compiled contract, schema, published artifact, or normal-path behaviour changes: the retired v1 word is replaced by the schema-reserved fail-closed outcome on an internal manifest field."
+  },
+  "state": "approved"
+}
