@@ -3,7 +3,7 @@
   "changeId": "align-ci-workflow-with-browser-removal",
   "changeType": "release_change",
   "title": "Align the CI verification workflow with the retired browser runtime",
-  "summary": ".github/workflows/verification.yml still installs -e packages/assayer-provider-browser in the fast and full jobs and runs `python -m playwright install --with-deps chrome` in the full job. The provider-browser package was deleted in b5921f9 and remove-browser-runtime-and-playwright removed Playwright from the dependency graph, so both jobs fail before running any test. No design record covers .github/**, and remove-browser-runtime-and-playwright is implemented and immutable, so this needs its own record. The fix removes the two provider-browser install lines and the Playwright install step, leaving the rest of the workflow unchanged. No public contract, artifact, or test behavior changes; CI is only made consistent with the already-approved browser removal. CI is release behavior, which contract §3/§4 lists as a human-approval trigger, so the record is classified `compatible` rather than `internal_only` and carries an explicit human approval.",
+  "summary": ".github/workflows/verification.yml still installs -e packages/assayer-provider-browser in the fast and full jobs and runs `python -m playwright install --with-deps chrome` in the full job. The provider-browser package was deleted in b5921f9 and remove-browser-runtime-and-playwright removed Playwright from the dependency graph, so both jobs fail before running any test. No design record covers .github/**, and remove-browser-runtime-and-playwright is implemented and immutable, so this needs its own record. The fix removes the two provider-browser install lines and the Playwright install step, leaving the rest of the workflow unchanged. No public contract, artifact, or test behavior changes; CI is only made consistent with the already-approved browser removal. CI is release behavior, which contract §3/§4 lists as a human-approval trigger, so the record is classified `compatible` rather than `internal_only` and carries an explicit human approval. Implementation evidence: this change landed in 944cd16, the commit that added this record, and remains in force at 66e7e45; Verification run 35191511735 on that landing commit concluded failure (Fast and Full red) and the workflow was repaired by later commits, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     ".github/workflows/verification.yml"
   ],
@@ -39,5 +39,5 @@
     "approvedAt": "2026-09-17T14:47:41+08:00",
     "decision": "User replied '删并 push' in #assayer-group:4c84ee19, approving removal of the retired provider-browser install lines and the Playwright install step in the CI workflow and authorizing the push."
   },
-  "state": "approved"
+  "state": "implemented"
 }
