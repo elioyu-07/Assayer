@@ -3,7 +3,7 @@
   "changeId": "mark-the-j02-activation-record-as-historical",
   "changeType": "platform_change",
   "title": "Mark the J02 activation acceptance as a historical record",
-  "summary": "docs/j02-activation-and-discovery.md recorded one real acceptance run on 2026-09-01 in which a fresh Codex CLI session discovered the assayer:assayer-audit Skill and called start_audit. The file carried no historical marker and its leading section was still titled Current Status, so a reader could take a retired capability and a retired tool name as current guidance even though retire-the-vertical-audit-skill-and-gate-bundle-text removed the audit Skill and the compiled Host exposes a different tool set. The acceptance facts themselves are a truthful record of that execution and are kept for traceability; only the framing changes. This change adds a historical acceptance banner that names the retirement, lists the compiled tools that replaced start_audit, and states that the observations are not current guidance or an active gate, and it retitles the leading section to Recorded status at the 2026-09-01 acceptance. No normative document, gate, contract, workflow, or code path changes, and no record is edited or superseded.",
+  "summary": "docs/j02-activation-and-discovery.md recorded one real acceptance run on 2026-09-01 in which a fresh Codex CLI session discovered the assayer:assayer-audit Skill and called start_audit. The file carried no historical marker and its leading section was still titled Current Status, so a reader could take a retired capability and a retired tool name as current guidance even though retire-the-vertical-audit-skill-and-gate-bundle-text removed the audit Skill and the compiled Host exposes a different tool set. The acceptance facts themselves are a truthful record of that execution and are kept for traceability; only the framing changes. This change adds a historical acceptance banner that names the retirement, lists the compiled tools that replaced start_audit, and states that the observations are not current guidance or an active gate, and it retitles the leading section to Recorded status at the 2026-09-01 acceptance. No normative document, gate, contract, workflow, or code path changes, and no record is edited or superseded. Implementation evidence: this change landed in 3e49898, the commit that added this record, and remains in force at 66e7e45; 3e49898 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "docs/j02-activation-and-discovery.md"
   ],
@@ -40,5 +40,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only documentation framing change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. No normative document, contract, gate, or behaviour changes; the batch adds a historical banner and retitles one section of a records-only acceptance file."
   },
-  "state": "approved"
+  "state": "implemented"
 }
