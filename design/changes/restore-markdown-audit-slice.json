@@ -3,7 +3,7 @@
   "changeId": "restore-markdown-audit-slice",
   "changeType": "provider_change",
   "title": "Restore the Markdown audit vertical slice",
-  "summary": "Restore the existing read-only Markdown navigation Provider and its focused tests so the platform can prove one complete document audit path without changing browser, lifecycle, or plugin distribution behavior.",
+  "summary": "Restore the existing read-only Markdown navigation Provider and its focused tests so the platform can prove one complete document audit path without changing browser, lifecycle, or plugin distribution behavior. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_document_navigation/*",
     "packages/assayer-provider-markdown/*",
@@ -49,5 +49,5 @@
     "approvedAt": "2026-09-16T00:00:00+08:00",
     "decision": "Approved by directing work to the Markdown end-to-end vertical slice while preserving prior implementation assets."
   },
-  "state": "approved"
+  "state": "implemented"
 }
