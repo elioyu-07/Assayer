@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "add-compiled-mcp-smoke-test",
+  "changeType": "platform_change",
+  "title": "Prove the compiled MCP server through the real MCP SDK",
+  "summary": "The full verification profile is the release gate and must prove that the optional MCP dependency is usable, but after the compiled-plugin migration it only proved that the mcp module is importable: the sentinel that instantiated a real server was removed with tests/test_transport.py. This change adds tests/test_compiled_mcp_smoke.py, which drives create_compiled_mcp_server through the real FastMCP SDK, asserts the SDK lists the compiled lifecycle tools, and invokes the read-only list_plugins tool through the SDK call path. run_tests.py excludes it from the dependency-light fast profile and includes it in the full profile.",
+  "changedPaths": [
+    "tests/test_compiled_mcp_smoke.py",
+    "scripts/run_tests.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the compiled MCP server and its release-gate coverage"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The smoke test must exercise the real MCP SDK, not a stub or a monkeypatched server",
+    "The change must not weaken the full profile's no-skip rule",
+    "The change must not add a new CI job or change the CI matrix"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "tests/test_compiled_mcp_smoke.py fails when the real MCP SDK server cannot be created or invoked",
+    "run_tests.py full runs the smoke test and stays green with no skips",
+    "run_tests.py fast stays dependency-light and does not run the smoke test",
+    "no new workflow job or matrix entry is added"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only release-gate coverage restored under the mandate in #assayer-group:4c84ee19; the gap and its scope were confirmed with @assayer_rev on 2026-09-17."
+  },
+  "state": "approved"
+}

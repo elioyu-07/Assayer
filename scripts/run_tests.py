@@ -35,6 +35,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
 
 INTEGRATION_TEST_PREFIXES = frozenset({
     "test_cli_plugin_lifecycle.",
+    "test_compiled_mcp_smoke.",
     "test_external_plugin_package.",
     "test_isolated_lifecycle_acceptance.",
     "test_mcp_stdio_integration.",
