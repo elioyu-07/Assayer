@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import re
 from pathlib import Path
 
 
@@ -18,11 +17,6 @@ def scan(root: Path) -> dict:
     inventory = {"goto": 0, "launch": 0, "screenshot": 0, "sleep": 0}
     for path in sorted((root / "src").rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        # Dynamic Playwright methods are intentionally obtained through
-        # getattr() to keep the browser protocol optional; include them in the
-        # external-call inventory even though AST cannot see a direct call.
-        inventory["goto"] += len(re.findall(r'getattr\([^\n]+["\']goto["\']', source))
-        inventory["screenshot"] += len(re.findall(r'getattr\([^\n]+["\']screenshot["\']', source))
         tree = ast.parse(source, filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.ExceptHandler):
@@ -36,7 +30,7 @@ def scan(root: Path) -> dict:
                 name = node.func.attr
                 if name in inventory:
                     inventory[name] += 1
-                    if name in {"goto", "launch"} and path.name != "browser_session.py" and not any(keyword.arg == "timeout" for keyword in node.keywords):
+                    if name in {"goto", "launch"} and not any(keyword.arg == "timeout" for keyword in node.keywords):
                         findings.append({"tier": "block", "rule": "S-MISSING-TIMEOUT", "loc": f"{path}:{node.lineno}", "note": f"{name} lacks explicit timeout"})
     return {"schemaVersion": "1.0.0", "scope": str(root / "src"), "inventory": inventory,
             "findings": findings, "blockingCount": sum(1 for item in findings if item["tier"] == "block"),

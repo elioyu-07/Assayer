@@ -62,7 +62,7 @@ def _audit_prompt(target: str, *, plugin_id: str | None = None) -> str:
         f"{plugin_instruction}Complete exactly one plugin Run for the requested target. "
         "If the required plugin is missing or ambiguous, report that clearly instead of guessing or starting a web audit. "
         "Supply only business inputs exposed by the tools, let Assayer maintain protocol and runtime configuration, "
-        "and do not start Chromium."
+        "and do not start a web browser."
     )
 
 
@@ -81,7 +81,7 @@ def _run_agent_audit(target: str, output_root: Path, *, plugin_id: str | None = 
         args = ["-m", "assayer_host.transport", "--output-root", str(output_root)]
     else:
         # File and directory audits require the domain-plugin lifecycle MCP,
-        # not the browser Runtime Router exposed by ``transport --mcp``.
+        # not the generic runtime transport exposed by ``transport --mcp``.
         # Use the console entry point adjacent to this exact Assayer runtime so
         # a dynamically configured Codex process cannot bind a stale/global
         # installation with the same server name.
@@ -430,7 +430,7 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
         dest="command", required=True, metavar="{audit,doctor}",
     )
     doctor = subparsers.add_parser(
-        "doctor", help="Check Assayer readiness without starting an audit or browser",
+        "doctor", help="Check Assayer readiness without starting an audit",
     )
     doctor.add_argument("--target", default=None, help="Optional URL, file, or directory to check")
     doctor.add_argument("--plugin", default=None, dest="plugin_id", help="Domain plugin required by the target")
@@ -529,7 +529,7 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
         _print_json(result)
         return 0 if result["status"] == "passed" else 1
     raise SystemExit(
-        "The legacy browser smoke entry point was removed; run an installed plugin through the plugin lifecycle."
+        "The legacy smoke entry point was removed; run an installed plugin through the plugin lifecycle."
     )
 
 

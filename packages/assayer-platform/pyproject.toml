@@ -10,7 +10,6 @@ requires-python = ">=3.11"
 dependencies = ["assayer-plugin-sdk==0.1.2", "jsonschema==4.26.0"]
 
 [project.optional-dependencies]
-browser = ["playwright==1.62.0"]
 mcp = ["mcp==1.27.0"]
 
 [project.scripts]

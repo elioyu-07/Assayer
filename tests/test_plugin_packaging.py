@@ -74,7 +74,7 @@ class PluginPackagingContractTests(unittest.TestCase):
     def test_bundle_declares_every_runtime_extra_it_builds(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
         extras = project["optional-dependencies"]
-        self.assertIn("playwright==1.62.0", extras["browser"])
+        self.assertNotIn("browser", extras)
         self.assertIn("mcp==1.27.0", extras["mcp"])
 
     def test_bundle_runtime_preparation_installs_no_concrete_provider(self):

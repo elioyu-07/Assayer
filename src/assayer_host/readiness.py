@@ -2,12 +2,11 @@
 
 Readiness is deliberately separate from the audit Host.  It performs bounded,
 side-effect-free checks so ``assayer doctor`` can explain what is missing
-without starting Chromium, an MCP server, or an audit Run.
+without starting an MCP server or an audit Run.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import shutil
@@ -213,54 +212,6 @@ def _runtime_check(plugin_root: Path | None) -> ReadinessCheck:
     )
 
 
-def _local_chromium_path() -> str | None:
-    candidates: list[Path] = []
-    if sys.platform == "darwin":
-        candidates.extend([
-            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-            Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            Path.home() / "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ])
-    elif os.name == "nt":
-        for root_name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            root = os.environ.get(root_name)
-            if root:
-                candidates.extend([
-                    Path(root) / "Google/Chrome/Application/chrome.exe",
-                    Path(root) / "Microsoft/Edge/Application/msedge.exe",
-                ])
-    else:
-        for name in ("google-chrome", "google-chrome-stable", "microsoft-edge", "microsoft-edge-stable"):
-            executable = shutil.which(name)
-            if executable:
-                return executable
-    return next((str(path) for path in candidates if path.is_file()), None)
-
-
-def _browser_check(required: bool) -> ReadinessCheck:
-    if not required:
-        return ReadinessCheck("chromium", "optional", False, "Chromium is not required for this target.")
-    if importlib.util.find_spec("playwright") is None:
-        return ReadinessCheck(
-            "chromium", "missing", True,
-            "Playwright is not installed; a web audit cannot start Chromium.",
-            "Install the browser-enabled Assayer runtime, then run: assayer doctor --fix",
-        )
-    executable = _local_chromium_path()
-    if executable is None:
-        return ReadinessCheck(
-            "chromium", "missing", True,
-            "Google Chrome or Microsoft Edge was not found; a web audit cannot start.",
-            "Install Google Chrome or Microsoft Edge, then run: assayer doctor",
-        )
-    return ReadinessCheck(
-        "chromium", "deferred", True,
-        "Playwright and a local Chromium browser are installed; launch is deferred until the web audit starts.",
-        details={"path": executable},
-    )
-
-
 def collect_readiness(
     *,
     target: str | None = None,
@@ -269,7 +220,7 @@ def collect_readiness(
     plugin_root: str | Path | None = None,
     codex_executable: str | None = None,
 ) -> ReadinessReport:
-    """Collect bounded checks without starting an audit or browser."""
+    """Collect bounded checks without starting an audit."""
     root = Path(plugin_root).expanduser().resolve() if plugin_root else None
     checks = (
         _python_check(),
@@ -277,7 +228,6 @@ def collect_readiness(
         _bundle_check(root),
         _runtime_check(root),
         _plugin_check(plugin_id, store_root or default_store_root()),
-        _browser_check(target_kind(target) == "web"),
     )
     return ReadinessReport(target, target_kind(target), checks)
 

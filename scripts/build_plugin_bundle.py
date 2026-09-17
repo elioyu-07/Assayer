@@ -97,7 +97,7 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
         ),
     )
     build_root(
-        wheel_dir, python=python, extras="browser,mcp", find_links=wheel_dir,
+        wheel_dir, python=python, extras="mcp", find_links=wheel_dir,
     )
 
 
@@ -163,7 +163,7 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "--no-index",
             "--find-links",
             str(wheel_dir),
-            f"assayer[browser,mcp]=={package_version}",
+            f"assayer[mcp]=={package_version}",
         ])
         _run([
             str(venv_python),
@@ -180,8 +180,7 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
         ])
         # Exercise explicit runtime preparation followed by the lightweight
         # product launcher from a clean private cache. MCP receives EOF
-        # immediately, so this validates both phases without opening a browser
-        # or running an audit.
+        # immediately, so this validates both phases without running an audit.
         launcher_env = os.environ.copy()
         launcher_env["XDG_CACHE_HOME"] = str(Path(tmp) / "launcher-cache")
         subprocess.run(

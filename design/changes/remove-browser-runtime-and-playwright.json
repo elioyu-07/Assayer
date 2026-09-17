@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-browser-runtime-and-playwright",
+  "changeType": "platform_change",
+  "title": "Remove the Playwright browser runtime and its Playwright dependency",
+  "summary": "Hard-cut removal of the Host browser runtime and its Playwright dependency after the concrete providers were retired. Deletes the five browser adapter modules (browser_session, browser_readonly, browser_action, browser_recovery, browser_evidence) and the now-dead adapter layer they exclusively used (page, object_identity, action_safety, recovery, evidence, locale_terms), their public exports, their tests, the browser/test Playwright extras, the raised Chromium readiness check and related build, test-runner, resilience-scan, and English-text allowlist references, and refreshes uv.lock and the release wheelhouse note. This is a continuation of remove-concrete-providers (no browser provider is published and missing capability fails closed); it does not supersede that record. The provider-facing contract is retained: the SDK BrowserSnapshot / BrowserSnapshotSource types and the compiled input.kind browser_snapshot remain valid, so declaration-only plugins such as frontend-audit still compile without runtime code. The persisted operationKind vocabulary (browser_action, recovery) and recovery dimensions are unchanged; this record does not touch schema or ledger migration. Documentation and README wording are deferred to the immediately following Group 1 design confirmation so no committed README contradicts the code.",
+  "changedPaths": [
+    "src/assayer_host/browser_session.py",
+    "src/assayer_host/browser_readonly.py",
+    "src/assayer_host/browser_action.py",
+    "src/assayer_host/browser_recovery.py",
+    "src/assayer_host/browser_evidence.py",
+    "src/assayer_host/page.py",
+    "src/assayer_host/object_identity.py",
+    "src/assayer_host/action_safety.py",
+    "src/assayer_host/recovery.py",
+    "src/assayer_host/evidence.py",
+    "src/assayer_host/locale_terms.py",
+    "src/assayer_host/__init__.py",
+    "src/assayer_host/readiness.py",
+    "src/assayer_host/cli.py",
+    "tests/test_browser_session.py",
+    "tests/test_browser_action.py",
+    "tests/test_browser_evidence.py",
+    "tests/test_action_safety.py",
+    "tests/test_locale_terms.py",
+    "tests/test_readiness.py",
+    "tests/test_cli.py",
+    "tests/test_english_text_contract.py",
+    "tests/test_plugin_packaging.py",
+    "pyproject.toml",
+    "packages/assayer-platform/pyproject.toml",
+    "uv.lock",
+    "scripts/build_plugin_bundle.py",
+    "scripts/run_tests.py",
+    "scripts/resilience_scan.py",
+    "scripts/check_english_text.py",
+    "scripts/check_architecture_boundaries.py",
+    "plugins/assayer/scripts/prepare_assayer_runtime",
+    "plugins/assayer/runtime/wheels/README.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform kernel and Host own the removal of the browser runtime, its Playwright dependency, and the dead adapter layer"],
+    "plugin": ["No plugin change; declaration-only plugins such as frontend-audit remain compile-only and untouched"],
+    "provider": ["No provider change; no browser provider is published, matching remove-concrete-providers"],
+    "agent": ["The Agent performs no runtime capability work under this record"]
+  },
+  "capabilities": {
+    "inputKinds": ["browser_snapshot"],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The removed Host browser runtime must not be reintroduced without a new approved design confirmation",
+    "The SDK BrowserSnapshot / BrowserSnapshotSource contract and the compiled input.kind browser_snapshot must not be removed by this record",
+    "The persisted operationKind vocabulary and recovery dimensions must not be changed by this record",
+    "No existing approved design record may be edited or backdated"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "No module in src/ imports the removed browser runtime or dead adapter modules",
+    "scripts/run_tests.py fast and full both pass with no skips and no required real-browser behaviors",
+    "The three boundary gates, the English-text gate, and check_design_confirmation.py --git-range HEAD pass",
+    "uv.lock regenerates with changes limited to Playwright and its now-unused transitive dependencies",
+    "The SDK BrowserSnapshot contract and browser_snapshot input kind still compile frontend-audit without runtime code"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-17T14:25:30+08:00",
+    "decision": "The user directed removal of the browser capability together with its tests and related code, and the reviewer verified the exact 33-path change list before execution."
+  },
+  "state": "approved"
+}

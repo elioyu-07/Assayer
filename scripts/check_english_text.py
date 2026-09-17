@@ -16,7 +16,6 @@ HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 DEFAULT_EXTENSIONS = {".py", ".md", ".json", ".toml", ".txt", ".yaml", ".yml"}
 DEFAULT_EXCLUDES = {".git", "build", "dist", ".venv", "__pycache__"}
 DEFAULT_ALLOWLIST = {
-    "src/assayer_host/locale_terms.py",
     "tests/fixtures",
     "tests/data",
     "examples/target-pages",

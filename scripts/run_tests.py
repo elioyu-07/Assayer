@@ -1,9 +1,9 @@
 """Run Assayer's explicit fast or full verification profile.
 
 The fast profile is dependency-light and deliberately excludes tests that
-start Chromium or instantiate the optional MCP SDK server.  The full profile
-is the release gate: it proves the optional dependencies and Chromium runtime
-are usable, runs every test, and treats every skip as a failure.
+instantiate the optional MCP SDK server.  The full profile is the release
+gate: it proves the optional dependencies are usable, runs every test, and
+treats every skip as a failure.
 """
 
 from __future__ import annotations
@@ -33,9 +33,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join(
     ) if part
 )
 
-MCP_SDK_TEST_ID = "test_transport.TransportTest.test_optional_fastmcp_server_registers_single_argument_tools"
 INTEGRATION_TEST_PREFIXES = frozenset({
-    "test_browser_playwright.",
     "test_cli_plugin_lifecycle.",
     "test_external_plugin_package.",
     "test_isolated_lifecycle_acceptance.",
@@ -48,20 +46,6 @@ SLOW_TEST_PREFIXES = frozenset({
     "test_plugin_release_gate.PluginReleaseGateTest.test_complete_release_gate_builds_",
     "test_plugin_release_gate.PluginReleaseGateTest.test_strict_",
     "test_provider_release_gate.ProviderReleaseGateTests.test_isolated_install_",
-})
-REQUIRED_BROWSER_TEST_IDS = frozenset({
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_page_flows_through_host_core",
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_failures_invalidate_session",
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_network_policy_blocks_unsafe_requests",
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_recovery_crosses_required_barriers",
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_interaction_evidence_is_bound_to_real_state",
-    "test_browser_playwright.PlaywrightReadonlyIntegrationTest."
-    "test_real_chromium_typed_controls_enforce_readonly_and_restore",
 })
 
 
@@ -89,14 +73,13 @@ def fast_tests(tests: list[unittest.TestCase]) -> unittest.TestSuite:
             test.id().removeprefix("tests.").startswith(prefix)
             for prefix in SLOW_TEST_PREFIXES
         )
-        and test.id().removeprefix("tests.") != MCP_SDK_TEST_ID
     ]
     return unittest.TestSuite(selected)
 
 
-def preflight_full(tests: list[unittest.TestCase]) -> None:
+def preflight_full() -> None:
     missing = []
-    for module in ("jsonschema", "playwright.sync_api", "mcp"):
+    for module in ("jsonschema", "mcp"):
         try:
             available = importlib.util.find_spec(module) is not None
         except ModuleNotFoundError:
@@ -107,19 +90,9 @@ def preflight_full(tests: list[unittest.TestCase]) -> None:
         names = ", ".join(missing)
         raise RuntimeError(
             f"full verification dependencies are missing: {names}; "
-            "install the Python dependencies with: python -m pip install -e '.[test]' "
-            "and Playwright with: pip install playwright"
+            "install the Python dependencies with: python -m pip install -e '.[test]'"
         )
 
-    normalized_ids = [test.id().removeprefix("tests.") for test in tests]
-    missing_browser_behaviors = REQUIRED_BROWSER_TEST_IDS.difference(normalized_ids)
-    if missing_browser_behaviors:
-        raise RuntimeError(
-            "full verification is missing required real-browser behaviors: "
-            + ", ".join(sorted(missing_browser_behaviors))
-        )
-    if MCP_SDK_TEST_ID not in normalized_ids:
-        raise RuntimeError("full verification did not discover the real MCP SDK test")
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Assayer verification profiles")
@@ -130,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
     tests = discover_tests()
     if args.profile == "full":
         try:
-            preflight_full(tests)
+            preflight_full()
         except RuntimeError as error:
             print(f"C07.2 full verification preflight failed: {error}", file=sys.stderr)
             return 2

@@ -19,9 +19,10 @@ class EnglishTextContractTests(unittest.TestCase):
             non_english = "\u4e2d\u6587\u8bf4\u660e"
             reset_label = "\u91cd\u7f6e"
             (root / "bad.md").write_text(non_english + "\n", encoding="utf-8")
-            (root / "src").mkdir()
-            (root / "src" / "assayer_host").mkdir()
-            (root / "src" / "assayer_host" / "locale_terms.py").write_text(f"RESET = '{reset_label}'\n", encoding="utf-8")
+            (root / "tests" / "fixtures").mkdir(parents=True)
+            (root / "tests" / "fixtures" / "locale_sample.py").write_text(
+                f"RESET = '{reset_label}'\n", encoding="utf-8"
+            )
             findings = scan(root)
             self.assertEqual([("bad.md", 1, non_english)], findings)
 

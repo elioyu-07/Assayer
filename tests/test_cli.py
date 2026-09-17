@@ -205,7 +205,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("Select an installed plugin whose declared scope matches the target", prompt)
         self.assertNotIn("ass-spec", prompt)
         self.assertIn(str(target.resolve()), prompt)
-        self.assertIn("do not start Chromium", prompt)
+        self.assertIn("do not start a web browser", prompt)
         self.assertNotIn("$assayer-audit", prompt)
         self.assertNotIn("web URL", prompt)
         command = run.call_args.args[0]

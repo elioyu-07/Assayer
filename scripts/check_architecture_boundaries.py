@@ -52,6 +52,17 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
         "src/assayer_platform/package_conformance.py",
         "src/assayer_plugin_sdk/registration.py",
         "src/assayer_plugin_sdk/agent_contract.py",
+        "src/assayer_host/browser_session.py",
+        "src/assayer_host/browser_readonly.py",
+        "src/assayer_host/browser_action.py",
+        "src/assayer_host/browser_recovery.py",
+        "src/assayer_host/browser_evidence.py",
+        "src/assayer_host/page.py",
+        "src/assayer_host/object_identity.py",
+        "src/assayer_host/action_safety.py",
+        "src/assayer_host/recovery.py",
+        "src/assayer_host/evidence.py",
+        "src/assayer_host/locale_terms.py",
     )
     for relative in retired_modules:
         if (root / relative).exists():

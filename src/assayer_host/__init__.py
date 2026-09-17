@@ -2,22 +2,7 @@ from .errors import HostError
 from .auth import CredentialVault, DeterministicLoginAdapter, LocalCredentialIntake, LoginCoordinator, LoginOutcome, LoginResult, LoginSecret, UnavailableLoginAdapter
 from .store import SQLiteStore
 from .platform_store import SQLitePlatformLedgerStore
-from .page import (CandidateObservation, DeterministicPageAdapter, EntrypointExecution, EntrypointObservation,
-                    PageObservation, UnavailableEntrypointAdapter, UnavailablePageAdapter)
-from .object_identity import DeterministicObjectIdentityAdapter, ObjectMatch, ObjectVerification, UnavailableObjectIdentityAdapter
-from .action_safety import ActionExecution, ActionSafetyPolicy, DeterministicActionAdapter, NetworkRequest, RequestDecision, UnavailableActionAdapter
-from .recovery import DeterministicRecoveryAdapter, RecoveryAttempt, RecoveryCheck, UnavailableRecoveryAdapter
-from .evidence import DeterministicEvidenceAdapter, EvidenceCapture, EvidenceSanitizer, RawVisualCapture, UnavailableEvidenceAdapter
 from .reporting import DerivedReportBuilder
-from .browser_session import BrowserBackend, BrowserProfile, BrowserSession, BrowserSessionFailure, ScanSessionRegistry
-from .browser_readonly import BrowserLocatorRegistry, BrowserObjectIdentityAdapter, BrowserReadOnlyPageAdapter, PlaywrightBrowserBackend, create_readonly_browser_adapters
-from .browser_action import (BrowserEntrypointAdapter, BrowserNetworkGuard, BrowserSafeActionAdapter,
-                              SafeBrowserAdapterBundle,
-                              create_safe_browser_adapter_bundle)
-from .browser_recovery import (BrowserRecoveryAdapter,
-                               RecoverableBrowserAdapterBundle,
-                               create_recoverable_browser_adapter_bundle)
-from .browser_evidence import BrowserEvidenceAdapter, create_browser_evidence_adapter
 from .transport import CompiledPlatformMcpToolTransport, create_compiled_mcp_server
 
-__all__ = ["HostError", "CredentialVault", "DeterministicLoginAdapter", "LocalCredentialIntake", "LoginCoordinator", "LoginOutcome", "LoginResult", "LoginSecret", "UnavailableLoginAdapter", "SQLiteStore", "SQLitePlatformLedgerStore", "CandidateObservation", "DeterministicPageAdapter", "EntrypointExecution", "EntrypointObservation", "PageObservation", "UnavailableEntrypointAdapter", "UnavailablePageAdapter", "DeterministicObjectIdentityAdapter", "ObjectMatch", "ObjectVerification", "UnavailableObjectIdentityAdapter", "ActionExecution", "ActionSafetyPolicy", "DeterministicActionAdapter", "NetworkRequest", "RequestDecision", "UnavailableActionAdapter", "DeterministicRecoveryAdapter", "RecoveryAttempt", "RecoveryCheck", "UnavailableRecoveryAdapter", "DeterministicEvidenceAdapter", "EvidenceCapture", "EvidenceSanitizer", "RawVisualCapture", "UnavailableEvidenceAdapter", "DerivedReportBuilder", "BrowserBackend", "BrowserProfile", "BrowserSession", "BrowserSessionFailure", "ScanSessionRegistry", "BrowserLocatorRegistry", "BrowserObjectIdentityAdapter", "BrowserReadOnlyPageAdapter", "PlaywrightBrowserBackend", "create_readonly_browser_adapters", "BrowserEntrypointAdapter", "BrowserNetworkGuard", "BrowserSafeActionAdapter", "SafeBrowserAdapterBundle", "create_safe_browser_adapter_bundle", "BrowserRecoveryAdapter", "RecoverableBrowserAdapterBundle", "create_recoverable_browser_adapter_bundle", "BrowserEvidenceAdapter", "create_browser_evidence_adapter", "CompiledPlatformMcpToolTransport", "create_compiled_mcp_server"]
+__all__ = ["HostError", "CredentialVault", "DeterministicLoginAdapter", "LocalCredentialIntake", "LoginCoordinator", "LoginOutcome", "LoginResult", "LoginSecret", "UnavailableLoginAdapter", "SQLiteStore", "SQLitePlatformLedgerStore", "DerivedReportBuilder", "CompiledPlatformMcpToolTransport", "create_compiled_mcp_server"]

@@ -22,38 +22,13 @@ class ReadinessTest(unittest.TestCase):
         self.assertFalse(report.ready)
         self.assertIn("Reinstall", bundle.repair_command or "")
 
-    def test_target_kind_does_not_require_browser_for_markdown(self):
+    def test_target_kind_classifies_web_and_markdown_targets(self):
         self.assertEqual(target_kind("https://example.test/a"), "web")
         self.assertEqual(target_kind("./spec.md"), "markdown")
-        report = collect_readiness(target="./spec.md", codex_executable="/usr/bin/codex")
-        browser = next(item for item in report.checks if item.check_id == "chromium")
-        self.assertEqual(browser.status, "optional")
-        self.assertFalse(browser.required)
 
-    def test_web_readiness_checks_browser_presence_without_launching_it(self):
-        with patch("assayer_host.readiness.importlib.util.find_spec", return_value=object()), \
-             patch("assayer_host.readiness._local_chromium_path", return_value="/Applications/Google Chrome"):
-            report = collect_readiness(
-                target="https://example.test/a",
-                codex_executable="/usr/bin/codex",
-            )
-        browser = next(item for item in report.checks if item.check_id == "chromium")
-        self.assertEqual(browser.status, "deferred")
-        self.assertTrue(browser.required)
-        self.assertEqual(browser.details["path"], "/Applications/Google Chrome")
-        self.assertIn("launch is deferred", browser.message)
-
-    def test_web_readiness_reports_missing_local_browser(self):
-        with patch("assayer_host.readiness.importlib.util.find_spec", return_value=object()), \
-             patch("assayer_host.readiness._local_chromium_path", return_value=None):
-            report = collect_readiness(
-                target="https://example.test/a",
-                codex_executable="/usr/bin/codex",
-            )
-        browser = next(item for item in report.checks if item.check_id == "chromium")
-        self.assertEqual(browser.status, "missing")
-        self.assertFalse(report.ready)
-        self.assertIn("Google Chrome", browser.repair_command or "")
+    def test_web_target_has_no_browser_check(self):
+        report = collect_readiness(target="https://example.test/a", codex_executable="/usr/bin/codex")
+        self.assertFalse(any(item.check_id == "chromium" for item in report.checks))
 
     def test_matching_bundle_is_reported_ready_without_starting_runtime(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(
