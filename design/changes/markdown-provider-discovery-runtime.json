@@ -3,7 +3,7 @@
   "changeId": "markdown-provider-discovery-runtime",
   "changeType": "provider_change",
   "title": "Connect Markdown source discovery to the compiled runtime",
-  "summary": "Add Provider-owned Markdown source discovery and align the compiled document Check with the Provider's structured Evidence so the existing controller can create WorkItems and collect frozen source evidence.",
+  "summary": "Add Provider-owned Markdown source discovery and align the compiled document Check with the Provider's structured Evidence so the existing controller can create WorkItems and collect frozen source evidence. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_document_navigation/markdown.py",
     "src/assayer_platform/compiled_interactive.py",
@@ -33,6 +33,6 @@
     "focused Markdown and compiled runtime tests pass"
   ],
   "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-17T00:00:00+08:00", "decision": "Approved as the next narrow step toward the Markdown end-to-end slice."},
-  "state": "approved",
+  "state": "implemented",
   "supersedes": "markdown-provider-baseline-validation"
 }
