@@ -42,6 +42,15 @@ class ArchitectureBoundaryTest(unittest.TestCase):
         self.assertFalse((ROOT / "packages" / "assayer-agent").exists())
         self.assertFalse((ROOT / "schemas" / "protocol").exists())
 
+    def test_retired_v1_report_pipeline_surface_is_absent(self):
+        import assayer_host
+
+        self.assertFalse((ROOT / "src" / "assayer_host" / "reporting.py").exists())
+        self.assertFalse((ROOT / "src" / "assayer_host" / "observability.py").exists())
+        self.assertFalse((ROOT / "tests" / "test_observability_runtime.py").exists())
+        self.assertEqual([], sorted((ROOT / "examples").glob("*-ledger.json")))
+        self.assertNotIn("DerivedReportBuilder", assayer_host.__all__)
+
 
 class RetiredToolVocabularyTest(unittest.TestCase):
     def _repository(self, directory: str) -> Path:
@@ -119,6 +128,17 @@ class RetiredToolVocabularyTest(unittest.TestCase):
             )
             reasons = [violation.reason for violation in find_violations(root)]
             self.assertTrue(any("retired protocol" in reason for reason in reasons), reasons)
+
+    def test_retired_v1_ledger_artifact_name_is_rejected_in_shipped_python(self):
+        from scripts.check_architecture_boundaries import _repository_contract_violations
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src" / "assayer_host").mkdir(parents=True)
+            source = root / "src" / "assayer_host" / "retired.py"
+            source.write_text('LEDGER = "audit-ledger.json"\n', encoding="utf-8")
+            violations = _repository_contract_violations(root)
+            self.assertTrue(any("audit-ledger.json" in item for item in violations), violations)
 
 
 if __name__ == "__main__":

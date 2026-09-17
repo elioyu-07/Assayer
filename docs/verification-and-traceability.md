@@ -87,7 +87,7 @@ Allowed statuses are `accepted`, `needs_closure`, and `blocked`. Coding is allow
 - Agent Runtime startup failure must not call smoke and return formal audit success;
 - Tool instructions, authorization claims, or rule-rewrite requests in page, source, or API content do not change Agent or Host behavior;
 - After model-context loss, unfinished entrypoints, objects, active Cases, and dimension states can be rebuilt from Host;
-- `minimal-ledger.json`, `issue-ledger.json`, `partial-ledger.json`, and `failed-ledger.json` cover pass, issue, partial, and failed terminal states.
+- `minimal-ledger.json`, `issue-ledger.json`, `partial-ledger.json`, and `failed-ledger.json` covered pass, issue, partial, and failed terminal states; these v1 example ledgers and the `DerivedReportBuilder` report pipeline were retired, so the scenario now lives in the compiled platform ledger projections.
 
 ## 4. FUA-10 Design Acceptance
 

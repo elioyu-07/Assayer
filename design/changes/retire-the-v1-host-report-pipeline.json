@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-the-v1-host-report-pipeline",
+  "changeType": "release_change",
+  "title": "Retire the v1 Host report pipeline and its example ledgers",
+  "summary": "The compiled platform owns the run ledger and its own projections (assayer_platform.ledger writes platform-ledger.json, and assayer_platform.observability renders platform-observability.json/markdown from it), but the v1 Host report pipeline that derived issues, page-element judgements, run diagnostics, audit summaries, and a performance bill from a v1 audit-ledger.json was still shipped inside the assayer-platform wheel. src/assayer_host/reporting.py defined DerivedReportBuilder, re-exported as a public assayer_host symbol, and src/assayer_host/observability.py defined render_observability and render_performance_bill; neither module had any importer in src/, packages/, plugins/, or scripts/, and no schema loader anywhere referenced audit-ledger.schema.json, so the pair could not run. The only consumers were the module-level exports, tests/test_observability_runtime.py, and four example ledgers under examples/ (minimal, issue, partial, failed) that nothing else read. This change deletes both modules, drops the DerivedReportBuilder export and __all__ entry, deletes the test that exercised only that pipeline, deletes the four orphaned example ledgers, and adds architecture-gate guards so the retired module paths and the DerivedReportBuilder, render_observability, and render_performance_bill symbols cannot return and no shipped Python can reintroduce the retired audit-ledger.json artifact name. docs/verification-and-traceability.md records that the retired example ledgers were replaced by the compiled platform ledger projections. No compiled contract, ledger, result schema, plugin or provider surface, or live Host behaviour changes: the live result path is assayer_platform.ledger plus canonical_result, actionable_result, and result_delivery, which stay untouched. Verification evidence: the change landed in LANDING_COMMIT, pushed on 2026-09-17, and CI run CI_RUN passed all seven jobs; locally the architecture check returns 0 on the repository, its nine tests pass including a planted audit-ledger.json literal that is rejected, and the fast and full profiles, the design confirmation gate, and the document, plugin-source, English text, and resilience gates all stay green.",
+  "changedPaths": [
+    "docs/verification-and-traceability.md",
+    "examples/failed-ledger.json",
+    "examples/issue-ledger.json",
+    "examples/minimal-ledger.json",
+    "examples/partial-ledger.json",
+    "scripts/check_architecture_boundaries.py",
+    "src/assayer_host/__init__.py",
+    "src/assayer_host/observability.py",
+    "src/assayer_host/reporting.py",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_observability_runtime.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/verification-and-traceability.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Platform governance owns the Host report pipeline, its public exports, and the architecture gate"
+    ],
+    "plugin": [
+      "No plugin change; ordinary plugins never imported the removed Host modules"
+    ],
+    "provider": [
+      "No provider change; provider packages use the SDK and platform ledgers that stay in place"
+    ],
+    "agent": [
+      "No agent change; the retired agent distribution was the only historical caller and is already removed"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The change must not alter any compiled contract, platform ledger, or result schema, or any live Host, plugin, or provider behaviour",
+    "The change must not remove the live platform projections assayer_platform.ledger, canonical_result, actionable_result, or result_delivery",
+    "The change must not reintroduce a v1 audit-ledger.json producer, reader, or the DerivedReportBuilder export",
+    "The gate must not reject the live platform symbols build_platform_observability or render_platform_observability"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "src/assayer_host/reporting.py, src/assayer_host/observability.py, and tests/test_observability_runtime.py do not exist",
+    "assayer_host exposes no DerivedReportBuilder symbol and no module imports assayer_host.reporting or assayer_host.observability",
+    "examples/ contains no v1 *-ledger.json fixture",
+    "scripts/check_architecture_boundaries.py rejects a shipped Python file that names audit-ledger.json or reinstates the DerivedReportBuilder, render_observability, or render_performance_bill symbols while the live platform observability symbols stay accepted",
+    "the fast and full profiles, the design confirmation gate, and the architecture, document, plugin-source, English text, and resilience gates all stay green, and the compiled acceptance still passes"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Release-surface change carried out under the standing authorization of the refactor mandate in #assayer-group:4c84ee19 and its delegation update, under which the agent and reviewer decide these changes themselves within at most seven workflow rounds. The classification is breaking because the assayer-platform wheel stops exporting the DerivedReportBuilder symbol and the assayer_host.reporting and assayer_host.observability modules; the evidence that nothing in the repository consumed them is recorded in the summary. @assayer_rev independently reviews the batch and has previously required that a published-surface removal be classified as a release change."
+  },
+  "state": "approved"
+}
