@@ -3,7 +3,7 @@
   "changeId": "clear-wheelhouse-and-guard-split-build-output",
   "changeType": "platform_change",
   "title": "Clear the install-matrix wheelhouse and guard split build output by name",
-  "summary": "The clean-venv install matrix is the platform's proof that a split installation is reproducible, but its wheelhouse was a persistent directory that was never cleared and its split build only compared wheel counts, and only from build_distributions.main(). Because install_matrix.build_wheelhouse called build() instead of main(), the count guard never ran on the acceptance path: three retired distributions (assayer_plugin_frontend_audit, assayer_plugin_frontend_audit_shadow, assayer_provider_browser) plus a stale assayer_provider_markdown wheel sat in dist/wheelhouse while the matrix still returned 0. This change makes clearing the wheelhouse the default behaviour and moves the guard into build(), where it matches requested distributions by normalized name and count and rejects any unexpected assayer-owned wheel in the output directory.",
+  "summary": "The clean-venv install matrix is the platform's proof that a split installation is reproducible, but its wheelhouse was a persistent directory that was never cleared and its split build only compared wheel counts, and only from build_distributions.main(). Because install_matrix.build_wheelhouse called build() instead of main(), the count guard never ran on the acceptance path: three retired distributions (assayer_plugin_frontend_audit, assayer_plugin_frontend_audit_shadow, assayer_provider_browser) plus a stale assayer_provider_markdown wheel sat in dist/wheelhouse while the matrix still returned 0. This change makes clearing the wheelhouse the default behaviour and moves the guard into build(), where it matches requested distributions by normalized name and count and rejects any unexpected assayer-owned wheel in the output directory. Verification evidence: the change landed in d8bc456, pushed on 2026-09-17 with d8bc456 as the publish point; CI run 35198525867 passed all seven jobs (Fast 3.11, 3.12, 3.13; Full 3.11, 3.13; Install matrix 3.11, 3.13); locally fast reports 421 tests OK and full reports 434 tests OK, with the design confirmation, architecture, document, plugin-source, English text, and resilience gates all returning 0; and @assayer_rev independently re-ran the acceptance path, which removed four planted retired wheels and returned 0, re-ran the negative guards, which rejected missing, duplicated, and unexpected distributions by name, and passed the internal_only classification.",
   "changedPaths": [
     "scripts/build_distributions.py",
     "scripts/install_matrix.py",
@@ -14,10 +14,18 @@
     "docs/ci-support-matrix-v1.md"
   ],
   "ownership": {
-    "platform": ["Repository verification tooling owns the wheelhouse lifecycle and the split-build guard"],
-    "plugin": ["No plugin change"],
-    "provider": ["No provider change"],
-    "agent": ["No agent change"]
+    "platform": [
+      "Repository verification tooling owns the wheelhouse lifecycle and the split-build guard"
+    ],
+    "plugin": [
+      "No plugin change"
+    ],
+    "provider": [
+      "No provider change"
+    ],
+    "agent": [
+      "No agent change"
+    ]
   },
   "capabilities": {
     "inputKinds": [],
@@ -44,5 +52,5 @@
     "approvedAt": "2026-09-17T15:29:01+08:00",
     "decision": "Internal-only strengthening of existing verification tooling, carried out under the mandate in #assayer-group:4c84ee19; @assayer_rev confirmed the classification because docs/ci-support-matrix-v1.md only states that the install-matrix job builds and validates split-distribution installation, so clearing the wheelhouse implements the stated intent instead of changing the contract."
   },
-  "state": "approved"
+  "state": "verified"
 }
