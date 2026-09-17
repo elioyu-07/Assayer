@@ -315,25 +315,7 @@ class DerivedReportBuilder:
             code = cls._text(reason.get("code", "OPERATION_FAILED"))
             message = cls._diary_text(reason.get("message", "The operation did not complete."))
             return f"Blocked or failed: {code} — {message}"
-        descriptions = {
-            "start_audit": "Started the audit and bound the target runtime.",
-            "inspect_page": "Observed the current page and discovered safe entrypoints.",
-            "discover_scope": "Advanced bounded discovery and removed duplicate logical entrypoints.",
-            "explore_entrypoint": "Explored a safe entrypoint and recorded the resulting page state.",
-            "inspect_object": "Verified an audit object and its applicable rules.",
-            "begin_case": "Started a bounded evidence-gathering Case.",
-            "perform_action": "Executed a controlled investigation action.",
-            "observe_page": "Captured aligned page and visual evidence.",
-            "capture_evidence": "Captured Host-verified evidence.",
-            "restore_case": "Restored the original page and object context.",
-            "record_findings": "Recorded Findings for the frozen rule dimensions.",
-            "prepare_decision": "Validated evidence, coverage, and the proposed decision.",
-            "commit_decision": "Committed the evidence-backed decision.",
-            "get_audit_progress": "Rebuilt progress from the durable audit ledger.",
-            "complete_audit": "Validated coverage and published audit artifacts.",
-        }
-        action = descriptions.get(str(operation.get("tool")), "Completed the requested audit operation.")
-        return action
+        return "Completed the requested audit operation."
 
     @staticmethod
     def _result_next_step(status: str, issue_count: int, review_items: list[dict], unfinished: list[dict]) -> str:

@@ -26,7 +26,7 @@ class RuntimeObservabilityStoreTest(unittest.TestCase):
         self.assertIn("Assayer Run Diary", diary)
         self.assertIn("Status: completed (conclusions valid: yes)", diary)
         self.assertIn("Timeline", diary)
-        self.assertIn("Started a bounded evidence-gathering Case.", diary)
+        self.assertIn("SUCCEEDED: begin_case, 0 ms — Completed the requested audit operation.", diary)
         self.assertIn("Coverage", diary)
         self.assertIn("Entrypoints: 0 processed, 0 skipped, 0 remaining", diary)
         self.assertIn("Terminal state: completed", diary)

@@ -605,17 +605,6 @@ class SQLiteStore:
                 "summary": f"{category.replace('_', ' ').title()} operation {phase}: {op.get('tool', 'unknown')}",
             })
             self._append_runtime_event_raw(phase_event)
-        if phase == "finish" and op.get("tool") == "perform_action" and outcome == "succeeded":
-            gate_event = {
-                "eventId": f"event-{uuid.uuid4().hex}", "scanId": scan_id, "runId": scan["run_id"],
-                "sequence": self._next_event_sequence(scan_id), "occurredAt": op.get("endedAt") or self._now(),
-                "monotonicOffsetMs": self._monotonic_offset_ms(scan_id), "source": "host", "category": "safety",
-                "name": "host.gate.passed", "phase": "instant", "severity": "info", "outcome": "succeeded",
-                "summary": "Host safety gate allowed browser action", "correlation": correlation,
-                "privacy": {"classification": "internal", "sanitizationStatus": "not_required"},
-                "attributes": {"tool": op.get("tool", "unknown"), "status": status or "unknown"},
-            }
-            self._append_runtime_event_raw(gate_event)
         if phase == "finish" and outcome in {"rejected", "failed", "unknown"}:
             code = op.get("errorCode") or op.get("error_code") or "OPERATION_FAILED"
             gate_event = {

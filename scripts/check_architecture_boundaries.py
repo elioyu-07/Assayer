@@ -21,6 +21,25 @@ except ModuleNotFoundError:  # direct execution from the scripts directory
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Every retired tool name from both removed protocol generations: the vertical
+# audit protocol (start_audit through complete_audit) and the plugin-run
+# protocol (start_plugin_run through submit_domain_result). A retired name may
+# only reappear as a quoted literal, which is how a protocol field or a
+# tool-name table is written; matching the bare identifier would reject
+# unrelated method names such as get_operation.
+RETIRED_TOOL_NAMES = (
+    "start_audit", "get_rule_contract", "get_audit_progress", "inspect_page",
+    "discover_scope", "explore_entrypoint", "inspect_object", "begin_case",
+    "perform_action", "restore_case", "inspect_source", "observe_page",
+    "capture_evidence", "record_findings", "prepare_decision",
+    "commit_decision", "get_operation", "complete_audit",
+    "start_plugin_run", "advance_plugin_run", "resume_plugin_run",
+    "get_plugin_progress", "submit_common_review", "submit_domain_result",
+)
+RETIRED_TOOL_LITERAL = re.compile(
+    r"[\"'](" + "|".join(re.escape(name) for name in RETIRED_TOOL_NAMES) + r")(?:[\"'])"
+)
+
 
 def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
     violations: list[str] = []
@@ -63,10 +82,13 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
         "src/assayer_host/recovery.py",
         "src/assayer_host/evidence.py",
         "src/assayer_host/locale_terms.py",
+        "src/assayer_agent",
+        "packages/assayer-agent",
+        "schemas/protocol",
     )
     for relative in retired_modules:
         if (root / relative).exists():
-            violations.append(f"retired plugin runtime module exists: {relative}")
+            violations.append(f"retired runtime path exists: {relative}")
     for source_root in _source_roots(root):
         for path in source_root.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
@@ -81,11 +103,14 @@ def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
                     violations.append(
                         f"{path.relative_to(root)} retains removed architecture symbol {name}"
                     )
-            for tool_name in ("start_plugin_run", "advance_plugin_run", "domainResult"):
-                if tool_name in text:
-                    violations.append(
-                        f"{path.relative_to(root)} retains removed plugin protocol field {tool_name}"
-                    )
+            for match in RETIRED_TOOL_LITERAL.finditer(text):
+                violations.append(
+                    f"{path.relative_to(root)} retains retired protocol tool name {match.group(1)}"
+                )
+            if re.search(r"\bdomainResult\b", text):
+                violations.append(
+                    f"{path.relative_to(root)} retains removed plugin protocol field domainResult"
+                )
             if "from .core import" in text or "assayer_host.core" in text:
                 violations.append(f"{path.relative_to(root)} retains a deleted HostCore dependency")
             if "from .runtime_router import" in text or "assayer_host.runtime_router" in text:
@@ -146,8 +171,6 @@ def _role_for(path: Path, *, root: Path = ROOT) -> str | None:
         return "plugin"
     if parts[0] == "assayer_host":
         return "host"
-    if parts[0] == "assayer_agent":
-        return "agent"
     return None
 
 
@@ -196,11 +219,39 @@ def scan_file(path: Path, *, root: Path = ROOT) -> tuple[BoundaryViolation, ...]
     return tuple(violations)
 
 
+def _retired_surface_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
+    """Reject retired protocol vocabulary in the published artifact surface.
+
+    Authored Python already fails through the source scan; this covers what a
+    wheel ships without any Python reader, so a retired schema cannot ride
+    along in a distribution simply because nothing imports it.
+    """
+    violations: list[BoundaryViolation] = []
+    schemas = root / "schemas"
+    if schemas.is_dir():
+        for path in sorted(schemas.rglob("*.json")):
+            text = path.read_text(encoding="utf-8")
+            for match in RETIRED_TOOL_LITERAL.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                violations.append(BoundaryViolation(
+                    path=path, line=line, role="repository", imported_module="",
+                    reason=f"shipped schema retains retired protocol tool name {match.group(1)}",
+                ))
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists() and "schemas/protocol" in pyproject.read_text(encoding="utf-8"):
+        violations.append(BoundaryViolation(
+            path=pyproject, line=1, role="repository", imported_module="",
+            reason="wheel data-files still ship the retired protocol schema directory",
+        ))
+    return tuple(violations)
+
+
 def find_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
     violations: list[BoundaryViolation] = []
     for source_root in _source_roots(root):
         for path in sorted(source_root.rglob("*.py")):
             violations.extend(scan_file(path, root=root))
+    violations.extend(_retired_surface_violations(root))
     return tuple(violations)
 
 
