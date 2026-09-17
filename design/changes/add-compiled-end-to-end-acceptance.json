@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "add-compiled-end-to-end-acceptance",
+  "changeType": "platform_change",
+  "title": "Run one compiled Run end to end in a clean venv and verify its artifact",
+  "summary": "The acceptance baseline requires that a clean environment installs the split distributions with --no-index and then runs one compiled Run end to end, producing and verifying one artifact, but until now the compiled path was only exercised by in-process tests against a development checkout: nothing proved that the installed distributions, the shipped provider entry point, and the published schemas can complete a Run together. This change adds scripts/compiled_acceptance.py, which builds a cleared wheelhouse for exactly four distributions (platform, SDK, agent, and the generic markdown capability provider), creates an isolated venv, installs with --no-index, and drives one compiled Run through the Host transport on the non-business declarative fixture tests/fixtures/plugins/policy-pack. The driver reports every module origin, every installed distribution version, the schema root it validated against, the coverage ledger digest, and the artifact digest, and the caller rejects any origin outside the venv, any distribution that was not installed, and any artifact whose digest or verdict vocabulary does not verify. The provider is discovered from installed entry points, so the run also proves the shipped entry point; a development checkout fails closed with PROVIDER_NOT_FOUND because no entry point is installed there. This change adds the harness only and does not wire it into a CI job or change any normative document.",
+  "changedPaths": [
+    "scripts/compiled_acceptance.py",
+    "tests/test_compiled_acceptance.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/ci-support-matrix-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Repository verification tooling owns the clean-environment end-to-end compiled acceptance"],
+    "plugin": ["No plugin change; the run uses the existing declarative policy-pack fixture"],
+    "provider": ["No provider change; the run installs the existing markdown provider wheel"],
+    "agent": ["No agent change; review batches are submitted directly to the Host transport"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The caller must reject any module origin outside the acceptance venv, so an editable or stale local install cannot satisfy the acceptance",
+    "The caller must reject a distribution that was not installed instead of reporting a version the environment does not have",
+    "The driver must not import from the checkout or add a source root to sys.path",
+    "The driver must not touch a CI job, a workflow file, or a frozen v1 contract",
+    "The run must stay on the compiled five-state surface and must not reintroduce retired v1 decision vocabulary"
+  ],
+  "publicContractImpact": "internal_only",
+  "acceptance": [
+    "scripts/compiled_acceptance.py exits 0 and prints an evidence object with status=passed on a machine with no pre-existing wheelhouse",
+    "the evidence reports moduleOrigins and installed versions for assayer_platform, assayer_host, and assayer_document_navigation, all inside the created venv",
+    "the evidence reports providerRegistry=entry-points, so the capability provider comes from an installed entry point",
+    "the reported coverageDigest equals sha256 over the terminal coverage ledger canonical bytes and the artifact digest is recomputed from the written artifact",
+    "every submitted review atom lands in the five-state vocabulary and the terminal Run status is completed",
+    "tests/test_compiled_acceptance.py fails when a module resolves outside the venv, when the checkout source root is on sys.path, when a distribution is missing, or when the artifact is tampered with",
+    "no CI workflow, matrix entry, or normative document changes in this batch"
+  ],
+  "humanApproval": {
+    "required": false,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T15:29:01+08:00",
+    "decision": "Internal-only addition of verification tooling, carried out under the mandate in #assayer-group:4c84ee19. No normative document, workflow, release surface, contract, or semantic product behaviour changes: the batch adds one acceptance script and its unit test, and wiring the script into the install-matrix job together with the docs/ci-support-matrix-v1.md wording stays for a later batch that requires explicit approval."
+  },
+  "state": "approved"
+}
