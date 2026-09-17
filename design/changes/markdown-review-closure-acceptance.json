@@ -3,7 +3,7 @@
   "changeId": "markdown-review-closure-acceptance",
   "changeType": "platform_change",
   "title": "Close and verify the Markdown compiled review journey",
-  "summary": "Complete the approved Markdown evidence rejection and durable review-to-result acceptance using the existing compiled runtime and CoverageLedger; preserve five-state decisions and Host-issued evidence in terminal results.",
+  "summary": "Complete the approved Markdown evidence rejection and durable review-to-result acceptance using the existing compiled runtime and CoverageLedger; preserve five-state decisions and Host-issued evidence in terminal results. Implementation evidence: this change landed in b5921f9, the commit that added this record, and remains in force at 66e7e45; b5921f9 was pushed without a recorded Verification run, so the record is carried as implemented rather than verified.",
   "changedPaths": [
     "src/assayer_platform/compiled_interactive.py",
     "src/assayer_host/transport.py",
@@ -64,6 +64,6 @@
     "approvedAt": "2026-09-17T03:39:28.647492+00:00",
     "decision": "User approved the proposed evidence tests, complete Markdown review-to-ledger-to-result journey, governance checks and reviewable commits with 好的，继续推进."
   },
-  "state": "approved",
+  "state": "implemented",
   "supersedes": "markdown-evidence-submission-binding"
 }
