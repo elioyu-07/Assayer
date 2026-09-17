@@ -18,10 +18,11 @@ NORMATIVE_DOCUMENTS = (
     "docs/plugin-contract-v1.md",
     "docs/plugin-development-standard-v1.md",
     "docs/capability-provider-contract-v1.md",
-    "docs/canonical-result-contract-v1.md",
     "docs/plugin-development.md",
     "docs/platform-constitution-v2.md",
     "docs/design-confirmation-contract-v1.md",
+    "docs/ci-support-matrix-v1.md",
+    "docs/ws3-distribution-plan.md",
 )
 
 # These are plugin/domain names, not generic platform concepts.  Keep this
@@ -50,6 +51,18 @@ FORBIDDEN_RETIRED_PLUGIN_TERMS = (
     re.compile(r"\brelations\(documents\)\b", re.IGNORECASE),
     re.compile(r"\b(?:isolated|exact)[ -]wheel\b", re.IGNORECASE),
     re.compile(r"\bassayer\.plugins\b", re.IGNORECASE),
+)
+
+# The v1 result vocabulary is retired: a compiled Run emits the platform
+# ledger and its views, and every terminal review atom is one of satisfied,
+# violated, not_applicable, unknown, or blocked. The retired terms must not
+# reappear in an active contract.
+FORBIDDEN_RETIRED_RESULT_TERMS = (
+    re.compile(r"\bissue_found\b"),
+    re.compile(r"\bscanned_no_issue\b"),
+    re.compile(r"\bneeds_review\b"),
+    re.compile(r"\bnoise\b", re.IGNORECASE),
+    re.compile(r"\bcanonical-result\b"),
 )
 
 
@@ -84,6 +97,14 @@ def find_violations(root: Path) -> tuple[DocumentViolation, ...]:
                             DocumentViolation(path, line_number, match.group(0), line.strip())
                         )
                         break
+                else:
+                    for pattern in FORBIDDEN_RETIRED_RESULT_TERMS:
+                        match = pattern.search(line)
+                        if match:
+                            violations.append(
+                                DocumentViolation(path, line_number, match.group(0), line.strip())
+                            )
+                            break
     return tuple(violations)
 
 

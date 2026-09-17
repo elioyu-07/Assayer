@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "add-retired-result-vocabulary-gate",
+  "changeType": "contract_change",
+  "title": "Gate the retired result vocabulary in normative documents",
+  "summary": "scripts/check_document_boundaries.py enforces domain-neutral vocabulary in the normative platform documents, but it does not catch the retired v1 result vocabulary, and it still lists the superseded Canonical Audit Result Contract as a normative document. A compiled Run now emits the platform ledger, events, log, observability, and performance bill, and every terminal review atom is one of satisfied, violated, not_applicable, unknown, or blocked; the legacy issue_found, scanned_no_issue, needs_review, noise, and canonical-result vocabulary must not return to an active contract. This change adds the retired terms to the forbidden list, drops the superseded contract from the normative set, and adds the clean Active release documents ci-support-matrix-v1.md and ws3-distribution-plan.md so the gate covers them. plugin-development-standard-v1.md is corrected in the same change because it still used the retired canonical-result vocabulary.",
+  "changedPaths": [
+    "scripts/check_document_boundaries.py",
+    "docs/plugin-development-standard-v1.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the document boundary gate and the normative document set"],
+    "plugin": ["No plugin change"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The gate must not forbid a term that is still current platform vocabulary",
+    "The change must not weaken the existing domain-neutral and retired-plugin checks",
+    "No normative document may be exempted to make the gate pass"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "check_document_boundaries.py rejects issue_found, scanned_no_issue, needs_review, noise, and canonical-result in a normative document",
+    "the superseded canonical-result-contract-v1.md is no longer in the normative document set",
+    "ci-support-matrix-v1.md and ws3-distribution-plan.md are in the normative document set and pass",
+    "plugin-development-standard-v1.md no longer uses the retired canonical-result vocabulary",
+    "tests/test_platform_v1_contracts.py and scripts/run_tests.py fast and full stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T14:57:28+08:00",
+    "decision": "User replied '修 CI，对齐文档。' in #assayer-group:4c84ee19, authorizing the document alignment work."
+  },
+  "state": "approved"
+}

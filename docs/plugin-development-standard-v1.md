@@ -45,7 +45,7 @@ The Host-owned gate must prove, in order:
 2. semantic guidance and business-case completeness;
 3. supported input and Provider capability availability;
 4. complete element enumeration and one decision per review atom;
-5. digest, identity, replay, recovery, and canonical-result integrity; and
+5. digest, identity, replay, recovery, and terminal result integrity; and
 6. exact compiled-artifact installation readiness.
 
 The only ordinary-plugin release artifact is `compiled-plugin.json`. Installation
