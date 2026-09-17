@@ -86,7 +86,7 @@ The Agent submission contains only the plugin-defined result:
         "candidate_id": "acceptance-missing",
         "status": "CONFIRMED",
         "severity": "P1",
-        "reason": "没有稳定的 AC-* 验收标识",
+        "reason": "no stable acceptance identifier",
         "supportedBy": ["R1"]
       }
     ]

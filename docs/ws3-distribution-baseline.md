@@ -9,7 +9,7 @@
 | Metadata | Value |
 |---|---|
 | Date | 2026-09-10 |
-| Plan | A 方案（发行解耦 + 根包平台-only） |
+| Plan | A — distribution decoupling with a platform-only root package |
 | Starting commit | `8e4d087` |
 | Baseline (M0) commit | `83c9ebd` |
 | Prior starting point | `5971977` |

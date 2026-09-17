@@ -35,7 +35,7 @@ class IncrementalReviewPlanningTests(unittest.TestCase):
             "kind": "candidate",
             "source_anchor": "line:42",
             "rule_id": "PERM-001",
-            "payload": {"message": "权限行为缺少拒绝定义"},
+            "payload": {"message": "permission behavior lacks a denial definition"},
         }
         first = ReviewAtom.create(**values)
         second = ReviewAtom.create(**values)
@@ -338,7 +338,7 @@ class IncrementalReviewSerializationTests(unittest.TestCase):
                 "review-atom:restore",
                 "work:document",
                 "candidate",
-                {"message": "权限行为缺少拒绝定义"},
+                {"message": "permission behavior lacks a denial definition"},
             ),),
         ).offer()
         batch = ledger.batches[0]

@@ -2,7 +2,7 @@
 
 | Metadata | Value |
 |---|---|
-| Plan | A 方案（发行解耦 + 根包平台-only） |
+| Plan | A — distribution decoupling with a platform-only root package |
 | Phase | 3 — root `assayer` is platform-only |
 | Status | Current: three shipped Python distributions; zero concrete Providers |
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check authored repository text for non-English scripts.
 
-Target-page locale samples and recognition resources are intentionally
-allowlisted. Generated output directories are never scanned.
+Platform authored code and contracts are English. Locale belongs to a named
+projection, so intentional non-English text is allowlisted by path rather than
+tolerated globally. Generated output directories are never scanned.
 """
 
 from __future__ import annotations
@@ -14,11 +15,25 @@ from pathlib import Path
 
 HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 DEFAULT_EXTENSIONS = {".py", ".md", ".json", ".toml", ".txt", ".yaml", ".yml"}
-DEFAULT_EXCLUDES = {".git", "build", "dist", ".venv", "__pycache__"}
+# Generated run output is never authored text; assayer-output/ is ignored by
+# git but still lives in a development checkout.
+DEFAULT_EXCLUDES = {".git", "build", "dist", ".venv", "__pycache__", "assayer-output"}
+# Locale belongs to a named projection, never to platform authored code. These
+# paths intentionally contain non-English text and are allowlisted one by one:
+#   - the frozen formal report format, the renderer that emits it, and its test;
+#   - the SDK test that asserts non-ASCII identifiers are rejected;
+#   - the historical Chinese lifecycle plan, retained for traceability only;
+#   - approval records, which quote the approver name and the user's own words.
 DEFAULT_ALLOWLIST = {
     "tests/fixtures",
     "tests/data",
     "examples/target-pages",
+    "docs/audit-report-format-v1.md",
+    "src/assayer_platform/audit_report.py",
+    "tests/test_audit_report.py",
+    "tests/test_plugin_sdk.py",
+    "docs/codex-natural-language-plugin-lifecycle-plan.md",
+    "design/changes",
 }
 
 
