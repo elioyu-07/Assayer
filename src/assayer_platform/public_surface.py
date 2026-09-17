@@ -16,10 +16,8 @@ PUBLIC_SURFACE_VERSION = "1.5.0"
 
 PUBLIC_SURFACE: dict[str, frozenset[str]] = {
     "assayer_platform": frozenset({
-        "DomainResultContract",
         "EvidenceHandle",
         "EvidenceHandleRegistry",
-        "PluginRegistration",
         "PlatformContext",
     }),
     "assayer_platform.contract": frozenset({

@@ -4,9 +4,13 @@
 |---|---|
 | Document version | 1.3.0 |
 | Date | 2026-09-14 |
-| Status | Frozen; simple-authoring and formal-report amendments adopted, migration in progress |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer maintainers |
 | Applies to | Platform kernel, plugins, capability providers, Agent adapters, and report adapters |
+
+> **Superseded.** The v2 Constitution is the active authority. This v1 record
+> is retained only to explain historical decisions and does not authorize an
+> implementation exception.
 
 ## 1. Purpose and authority
 
@@ -20,6 +24,15 @@ before implementation continues.
 The Constitution is intentionally small. It defines trust boundaries, result
 integrity, lifecycle, compatibility, and release laws. It does not define how
 a domain discovers facts or what a domain considers compliant.
+
+### Normative vocabulary boundary
+
+Normative platform documents MUST use domain-neutral concepts only. A concrete
+plugin name, rule family, Check ID, input filename, or domain workflow MUST NOT
+become a platform concept, exception, or acceptance gate. Such names belong in
+the owning plugin package, a plugin-specific document, or a historical record
+that is explicitly marked non-normative. A generic example may be used only
+when it is clearly illustrative and cannot be read as a built-in capability.
 
 ## 2. Ownership boundaries
 

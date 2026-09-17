@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "delete-legacy-registration-execution-modules",
+  "changeType": "platform_change",
+  "title": "Delete the legacy Python registration execution modules",
+  "summary": "Remove the retired PluginRegistry, PlatformRunner, InteractivePluginController, and wheel-backed plugin lifecycle modules after Host transport moved to compiled contracts.",
+  "changedPaths": [
+    "src/assayer_platform/__init__.py",
+    "src/assayer_platform/plugin_registry.py",
+    "src/assayer_platform/plugin_lifecycle.py",
+    "src/assayer_platform/runner.py",
+    "src/assayer_platform/interactive.py",
+    "design/changes/delete-legacy-registration-execution-modules.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract runtime", "provider orchestration", "ReviewBatch lifecycle"],
+    "plugin": ["compiled declaration only"],
+    "provider": ["capability implementation"],
+    "agent": ["five-state ReviewBatch decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_runtime"]
+  },
+  "forbiddenResponsibilities": [
+    "Python plugin registration registry",
+    "registration-based PlatformRunner",
+    "registration-based InteractivePluginController",
+    "wheel-backed plugin lifecycle",
+    "top-level exports of retired runtime types"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "legacy execution modules are absent from the source tree",
+    "assayer_platform imports without any legacy runtime module",
+    "retired runtime symbols are absent from assayer_platform.__all__",
+    "compiled contract/provider/review tests remain green",
+    "no compatibility aliases are introduced"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by the instruction to continue the ordered no-compatibility hard cut."
+  },
+  "state": "verified"
+}

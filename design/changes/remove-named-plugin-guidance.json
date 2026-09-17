@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-named-plugin-guidance",
+  "changeType": "contract_change",
+  "title": "Remove named domain-plugin assumptions from user and Agent guidance",
+  "summary": "Make README, lifecycle Skill, and operator preparation use generic plugin identifiers and installed-scope selection rather than a retired named domain plugin.",
+  "changedPaths": [
+    "README.md",
+    "plugins/assayer/skills/assayer-plugin-lifecycle/SKILL.md",
+    "scripts/prepare_operator_acceptance.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["generic plugin lifecycle routing and scope matching"],
+    "plugin": ["its own declaration identity and business meaning"],
+    "provider": ["source capability implementation"],
+    "agent": ["clarification when plugin selection is ambiguous"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["generic lifecycle guidance", "named-plugin-free operator prompts"]
+  },
+  "forbiddenResponsibilities": [
+    "guidance hardcoded to a retired domain plugin",
+    "platform default domain selection",
+    "plugin-specific business rules in product documentation"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "named-plugin-free-active-guidance",
+    "architecture-boundary",
+    "document-boundary",
+    "full-test-suite"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved as the final removal of named domain-plugin assumptions from current guidance."
+  },
+  "state": "approved"
+}

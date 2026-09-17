@@ -15,6 +15,7 @@ from pathlib import Path
 from assayer_platform import PLATFORM_API_VERSION
 from assayer_platform.contract import DECISION_STATES
 from assayer_platform.registry import schema_path
+from scripts.check_document_boundaries import find_violations
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,9 +29,21 @@ CONTRACTS = (
     ROOT / "docs/canonical-result-contract-v1.md",
     ROOT / "docs/platform-contract-traceability-v1.md",
 )
+V2_AUTHORITY = ROOT / "docs/platform-constitution-v2.md"
 
 
 class PlatformV1ContractTests(unittest.TestCase):
+    def test_v2_constitution_is_the_active_authority(self):
+        text = V2_AUTHORITY.read_text(encoding="utf-8")
+        self.assertIn("| Document version | 2.0.0 |", text)
+        self.assertIn("This Constitution is the highest technical authority", text)
+        self.assertIn("Ordinary plugins contain no Python", text)
+        self.assertIn("element × Check × Dimension", text)
+
+    def test_normative_documents_remain_domain_neutral(self):
+        violations = find_violations(ROOT)
+        self.assertEqual(violations, ())
+
     def test_contract_documents_use_v1_and_have_valid_local_links(self):
         for path in CONTRACTS:
             text = path.read_text(encoding="utf-8")

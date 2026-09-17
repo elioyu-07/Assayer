@@ -13,8 +13,7 @@ import os
 import sys
 from pathlib import Path
 
-from assayer_platform import PluginInstallationStore, PluginRegistry, discover_plugin_registry
-from assayer_platform import installed_plugin_registry
+from assayer_platform import CompiledPluginLifecycleManager, PluginInstallationStore
 
 
 def default_store_root() -> Path:
@@ -37,18 +36,7 @@ def default_store_root() -> Path:
     return base / "assayer" / "plugins"
 
 
-def store_backed_plugin_registry(store_root: str | Path | None) -> PluginRegistry:
-    """Resolve built-ins plus entry-point and store-installed plugins.
-
-    Falls back to the entry-point registry when no store index exists so that
-    read-only callers never create a store directory as a side effect.
-    """
-    if store_root is None:
-        return installed_plugin_registry()
-    store_path = Path(store_root).expanduser().resolve()
-    if not (store_path / "index.json").is_file():
-        return installed_plugin_registry()
-    return discover_plugin_registry(
-        PluginInstallationStore(store_path),
-        builtins=installed_plugin_registry().list(),
-    )
+def store_backed_plugin_registry(store_root: str | Path | None) -> CompiledPluginLifecycleManager:
+    """Resolve compiled contract records without importing plugin code."""
+    root = Path(store_root).expanduser().resolve() if store_root is not None else default_store_root()
+    return CompiledPluginLifecycleManager(PluginInstallationStore(root))

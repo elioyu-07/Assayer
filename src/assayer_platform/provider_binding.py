@@ -13,13 +13,12 @@ from typing import Any, Mapping, Sequence
 
 from .capability_negotiation import CapabilityNegotiator
 from .contract import CapabilityProfile, CheckContract, PlatformContractError
-from .plugin_registry import PluginRegistration
 from .provider_catalog import installed_provider_registry
 from .provider_execution import BoundCapabilityProvider
 
 
 def provider_required_capabilities(
-    registration: PluginRegistration, check: CheckContract,
+    registration: Any, check: CheckContract,
 ) -> tuple[str, ...]:
     declared = frozenset(getattr(registration, "provider_capabilities", ()))
     required = frozenset(check.required_capabilities) & declared
@@ -27,7 +26,7 @@ def provider_required_capabilities(
 
 
 def grant_check_capabilities(
-    registration: PluginRegistration, check: CheckContract,
+    registration: Any, check: CheckContract,
 ) -> CapabilityProfile:
     """Grant exactly the capabilities a Check declares.
 
@@ -41,7 +40,7 @@ def grant_check_capabilities(
 
 
 def bind_capability_provider(
-    registration: PluginRegistration,
+    registration: Any,
     check: CheckContract,
     scope: Mapping[str, Any],
     run_id: str,
@@ -84,7 +83,7 @@ def bind_capability_provider(
 
 
 def check_for(
-    registration: PluginRegistration, check_id: str, check_version: str | None,
+    registration: Any, check_id: str, check_version: str | None,
 ) -> CheckContract | None:
     matches = tuple(
         item for item in registration.manifest.checks

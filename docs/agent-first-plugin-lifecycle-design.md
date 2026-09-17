@@ -59,8 +59,6 @@ the same intent is deterministic, or explains its differences.
 stateDiagram-v2
     [*] --> absent
     absent --> installed: install (gates pass)
-    installed --> upgradable: update available (registry/source check)
-    upgradable --> installed: upgrade / rollback
     installed --> dirty: gate re-check or checksum mismatch
     dirty --> installed: repair / reinstall (gates pass)
     installed --> absent: uninstall (installedCount = 0)
@@ -71,21 +69,16 @@ stateDiagram-v2
 |---|---|---|
 | `absent` | No record and no package in the store. | no |
 | `installed` | An active version exists and its last gate/checksum check passed. | yes |
-| `upgradable` | `installed` plus a newer version is known to exist. | yes (current version) |
 | `dirty` | The package failed a trust gate, failed a checksum check, or was partially materialized. Quarantined: visible but not runnable. | no |
 
 `dirty` is the key addition over the current implementation. A bad plugin must
 be **visible but not runnable** — `info` explains why, `run` refuses — instead of
 silently failing at import time.
 
-`upgradable` is a **derived, read-time state**: it is computed on `list`/`info`
-by comparing the installed active version against the newest version a source
-knows (``PluginLifecycleManager.latest_available``). It is never persisted to the
-store, so a plugin does not become permanently "upgradable" — the marker reflects
-the source at check time. When no source is supplied, an installed plugin simply
-reports `installed`. The source is the remote plugin catalog
-(``plugins.json`` / ``plugin_catalog``), wired through the CLI ``--index`` option
-on `list`/`info` (or a local `plugins.json`).
+Lifecycle read operations are local and deterministic: `list`/`info` report only
+the installed compiled-contract store. A remote `plugins.json` is consulted only
+when an explicit install or upgrade resolves a catalog artifact; it never changes
+the installed state merely because a newer catalog entry exists.
 
 ## 4. Operations, boundaries, and failure states
 
@@ -135,7 +128,7 @@ shape to carry the new `dirty` state.
   "plugins": {
     "assayer.ass-spec": {
       "activeVersion": "1.0.0",
-      "state": "installed",               // persisted: absent | installed | dirty; upgradable is derived at read time
+      "state": "installed",               // persisted: absent | installed | dirty
       "stateReason": null,                // set when state == dirty  (new)
       "history": ["1.0.0"],
       "versions": {
@@ -151,9 +144,8 @@ shape to carry the new `dirty` state.
 ```
 
 `state`/`stateReason` are derived from gate results and checksum verification,
-not from user input; the store never invents them. `upgradable` is the one
-exception: it is derived at read time from a version-source check and is never
-persisted. `index.json` writes remain atomic (write `.tmp` then `replace`).
+not from user input; the store never invents them. `index.json` writes remain
+atomic (write `.tmp` then `replace`).
 
 ## 6. Error codes
 
@@ -186,8 +178,8 @@ pair remains available for advanced clients, CI, and recovery.
 
 ```text
 assayer "…"                                   # NL intent -> Host transaction
-assayer plugins list   [--json] [--index <url|path>]   # installed + upgradable markers
-assayer plugins info   <id> [--index <url|path>]       # version, source, gate results, state
+assayer plugins list   [--json]                       # installed compiled contracts
+assayer plugins info   <id>                           # version, contract digest, state
 assayer plugins run    <id> <check> <scope-file>  # file, not raw --scope-json
 assayer plugins install   <path|name|url> [--yes]
 assayer plugins upgrade   <id> [--yes]

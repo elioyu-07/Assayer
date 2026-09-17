@@ -1,10 +1,10 @@
 """Safe, deterministic handling of local plugin source trees.
 
-Local repositories are authoring inputs, never installation artifacts.  This
-module defines the one source view used both to bind a lifecycle plan and to
-stage an isolated wheel build.  Transient repository and build state is
-excluded from that view, while every potentially release-relevant source file
-remains covered by the digest.
+Local repositories are authoring inputs, never installation artifacts. This
+module defines the one source view used to bind a lifecycle plan and stage the
+compiled-plugin artifact. Transient repository and build state is excluded
+from that view, while every potentially release-relevant declaration remains
+covered by the digest.
 """
 
 from __future__ import annotations

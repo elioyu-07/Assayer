@@ -1,5 +1,10 @@
 # Codex Natural-Language Plugin Lifecycle Acceptance
 
+> **Historical acceptance record.** This evidence predates the hard cut to the
+> single compiled-plugin contract. References to legacy registration, domain
+> result adapters, or ordinary-plugin wheels are historical facts only and do
+> not describe a supported implementation path.
+
 This document records the acceptance evidence for the plugin lifecycle journey
 described in [codex-natural-language-plugin-lifecycle-plan.md](codex-natural-language-plugin-lifecycle-plan.md).
 It deliberately separates repository automation from a clean Codex profile run.

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-tests-to-compiled-plugin-runtime",
+  "changeType": "platform_change",
+  "title": "Migrate retained tests to the compiled plugin runtime",
+  "summary": "Remove registration helpers and legacy adapter assertions from otherwise-current tests, retire old lifecycle MCP journeys, and add focused compiled transport coverage.",
+  "changedPaths": [
+    "tests/helpers/__init__.py",
+    "tests/test_document_source.py",
+    "tests/test_cli.py",
+    "tests/test_cli_plugin_lifecycle.py",
+    "tests/test_incremental_review.py",
+    "tests/test_parallel_execution.py",
+    "tests/test_provider_execution.py",
+    "tests/test_plugin_lifecycle_mcp.py",
+    "tests/test_mcp_stdio_integration.py",
+    "tests/test_compiled_transport.py",
+    "design/changes/migrate-tests-to-compiled-plugin-runtime.json"
+  ],
+  "authorityDocuments": ["docs/platform-constitution-v2.md", "docs/platform-plugin-boundary-contract.md", "docs/design-confirmation-contract-v1.md"],
+  "ownership": {"platform": ["compiled transport and coverage tests"], "plugin": ["compiled fixture"], "provider": ["provider unit tests"], "agent": ["five-state verdict tests"]},
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_runtime", "review_batch_lifecycle"]},
+  "forbiddenResponsibilities": ["PluginRegistration test helpers", "legacy DomainResult adapter tests", "old MCP tool names", "wheel verification assertions"],
+  "publicContractImpact": "breaking",
+  "acceptance": ["retained tests do not import retired APIs", "compiled transport is tested end to end", "full test discovery progresses without retired runtime import errors"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by the no-compatibility requirement and instruction to continue cleanup."},
+  "state": "verified"
+}

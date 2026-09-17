@@ -1,6 +1,6 @@
 {
   "name": "assayer",
-  "version": "0.1.2+codex.20260915014354",
+  "version": "0.1.2+codex.20260915125952",
   "description": "Evidence-backed audits and deterministic plugin development in Codex",
   "author": {
     "name": "Assayer maintainers"

@@ -10,7 +10,7 @@ from assayer_platform.contract import PlatformContractError
 from assayer_platform.document_source import (
     DocumentSnapshot, DocumentSnapshotStore, HostDocumentSource,
 )
-from tests.helpers import config_quality_registration
+from tests.helpers import ConfigQualityPlugin
 
 
 class HostDocumentSourceTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class HostDocumentSourceTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name) / "source.md"
         self.path.write_text("# Frozen\n\npermission", encoding="utf-8")
-        self.check = config_quality_registration().manifest.checks[0]
+        self.check = ConfigQualityPlugin.manifest.checks[0]
         self.store = DocumentSnapshotStore(Path(self.temporary.name) / "run")
         self.source = HostDocumentSource(self.store)
 

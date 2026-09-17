@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-concrete-providers",
+  "changeType": "provider_change",
+  "title": "Remove the shipped Markdown and browser Provider implementations",
+  "summary": "Hard-delete the two concrete Provider packages and their Host runtime adapter. The platform keeps only generic Provider contracts and registries; requests requiring an unavailable capability fail closed.",
+  "changedPaths": [
+    "packages/assayer-provider-markdown/**",
+    "packages/assayer-provider-browser/**",
+    "src/assayer_document_navigation/**",
+    "src/assayer_browser_provider/**",
+    "src/assayer_host/browser_provider_runtime.py",
+    "src/assayer_host/transport.py",
+    "src/assayer_platform/compiled_interactive.py",
+    "scripts/build_distributions.py",
+    "scripts/build_plugin_bundle.py",
+    "scripts/install_matrix.py",
+    "plugins/assayer/scripts/prepare_assayer_runtime",
+    "scripts/check_architecture_boundaries.py",
+    "tests/**",
+    "README.md",
+    "docs/distribution-split-v1.md",
+    "docs/j01-install-delivery.md",
+    "docs/ws3-distribution-plan.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "generic Provider contracts, registry, negotiation, and execution boundary",
+      "fail-closed behavior when no installed Provider supplies a requested capability",
+      "distribution and runtime assembly without concrete Provider packages"
+    ],
+    "plugin": [
+      "input and check declarations in compiled-plugin.json",
+      "business rules and dimensions"
+    ],
+    "provider": [
+      "future independently installed capability implementations conforming to the Provider contract"
+    ],
+    "agent": [
+      "interpret evidence and submit decisions after a Provider is available"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": [
+      "zero_shipped_concrete_providers",
+      "zero_provider_entry_points_in_default_distribution",
+      "provider_required_requests_fail_closed",
+      "no_compatibility_adapter_or_fallback"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "shipping assayer-provider-markdown",
+    "shipping assayer-provider-browser",
+    "importing assayer_document_navigation or assayer_browser_provider from platform code",
+    "Host-owned browser Provider runtime fallback",
+    "built-in Markdown parser or browser snapshot implementation",
+    "compatibility aliases for the removed Provider packages"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "provider-package-absence",
+    "provider-entry-point-count-zero",
+    "bundle-and-runtime-contain-no-provider-wheels",
+    "provider-required-run-fails-closed",
+    "platform-boundary",
+    "document-boundary",
+    "full-test-suite"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved for hard-cut removal of both concrete Providers without compatibility adapters."
+  },
+  "state": "approved"
+}

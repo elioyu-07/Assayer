@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "markdown-review-element-planning",
+  "changeType": "platform_change",
+  "title": "Plan Markdown ReviewAtoms from Provider units",
+  "summary": "Drain bounded Markdown Provider pages and create one Host ReviewAtom per Provider unit, Check, and Dimension so coverage represents the document element model rather than recursive transport JSON.",
+  "changedPaths": [
+    "src/assayer_platform/compiled_interactive.py",
+    "tests/test_compiled_interactive.py",
+    "design/changes/markdown-review-element-planning.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Page draining, ReviewAtom planning, CoverageLedger"],
+    "plugin": ["Check and Dimension meaning"],
+    "provider": ["Bounded unit pages, stable unit IDs and source anchors"],
+    "agent": ["One semantic decision per planned atom"]
+  },
+  "capabilities": {"inputKinds": ["markdown"], "required": ["bounded_review_batch", "exhaustive_coverage"]},
+  "forbiddenResponsibilities": ["recursive JSON traversal as document enumeration", "plugin-owned coverage", "provider business conclusions", "browser changes"],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "collection drains all Markdown Provider pages until nextCursor is null",
+    "each Markdown unit creates exactly one atom per declared Dimension",
+    "atom anchors and evidence references point to the Provider unit and page Evidence",
+    "provider failures remain explicit blocked coverage",
+    "focused compiled runtime tests prove unit count and atom count"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-17T00:00:00+08:00", "decision": "Approved as the next focused Markdown audit step."},
+  "state": "approved",
+  "supersedes": "markdown-provider-discovery-runtime"
+}

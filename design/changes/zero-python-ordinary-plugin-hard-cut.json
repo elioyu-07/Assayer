@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "zero-python-ordinary-plugin-hard-cut",
+  "changeType": "contract_change",
+  "title": "Remove executable ordinary-plugin authoring and legacy plugin paths",
+  "summary": "Make ordinary plugins declaration-only, remove scan/relations author code and legacy DomainResult/Advanced SPI paths from the ordinary lifecycle, and leave source capabilities to the platform.",
+  "changedPaths": [
+    "src/assayer_platform/*",
+    "src/assayer_plugin_sdk/*",
+    "src/assayer_host/plugin_lifecycle_mcp.py",
+    "scripts/check_architecture_boundaries.py",
+    "scripts/check_plugin_source_boundaries.py",
+    "tests/test_plugin_source_boundaries.py",
+    "tests/test_simple_plugin_compiler.py",
+    "tests/test_simple_plugin_sdk.py",
+    "tests/test_common_review_interactive.py",
+    "tests/test_plugin_verify.py",
+    "tests/test_plugin_release_gate.py",
+    "tests/fixtures/plugins/simple-author/*",
+    "docs/plugin-development.md",
+    "docs/simple-plugin-authoring-design.md",
+    "schemas/*"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "declaration compiler",
+      "Provider selection and frozen input",
+      "ReviewBatch and exhaustive Coverage",
+      "common result and release acceptance"
+    ],
+    "plugin": [
+      "plugin.yaml",
+      "checks.yaml",
+      "semantic-review.md",
+      "cases/"
+    ],
+    "provider": [
+      "typed snapshots",
+      "element enumeration",
+      "bounded context navigation"
+    ],
+    "agent": [
+      "clarification",
+      "per-atom semantic review",
+      "rationale"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": ["document"],
+    "required": [
+      "declaration_compilation",
+      "typed_snapshot",
+      "bounded_review_batch",
+      "exhaustive_coverage"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "plugin.py",
+    "scan() and relations()",
+    "DomainResultContract",
+    "PluginRegistration",
+    "plugin-owned Provider or parser",
+    "plugin lifecycle and transport",
+    "plugin Evidence, Ledger, or Result"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "ordinary-source-tree-rejects-python",
+    "declaration-only-compiler",
+    "common-agent-result",
+    "provider-owned-source-boundary",
+    "element-check-dimension-coverage",
+    "legacy-paths-removed",
+    "exact-compiled-artifact-installation"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-15T00:00:00+08:00",
+    "decision": "Approved as the first runtime migration step after the architecture grill."
+  },
+  "state": "approved"
+}

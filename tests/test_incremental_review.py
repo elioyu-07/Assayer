@@ -13,9 +13,6 @@ from assayer_platform.incremental_review import (
     CoverageLedger,
     JsonCoverageLedgerStore,
     ReviewAtom,
-    adapt_legacy_domain_result,
-    append_legacy_domain_result,
-    plan_legacy_domain_results,
 )
 
 
@@ -416,85 +413,6 @@ class IncrementalReviewPersistenceTests(unittest.TestCase):
             self.assertIsNotNone(restored)
             self.assertEqual(restored.canonical_bytes(), ledger.canonical_bytes())
             self.assertIsNone(store.load("run:missing"))
-
-    def test_legacy_domain_result_becomes_one_deterministic_accepted_batch(self):
-        result = {
-            "decisions": [{"candidate_id": "candidate:one", "status": "CONFIRMED"}],
-            "reason": "The candidate is supported.",
-        }
-
-        first = adapt_legacy_domain_result(
-            run_id="run:legacy",
-            work_item_id="work:document",
-            check_id="CFG-001",
-            domain_result=result,
-        )
-        second = adapt_legacy_domain_result(
-            run_id="run:legacy",
-            work_item_id="work:document",
-            check_id="CFG-001",
-            domain_result=result,
-        )
-
-        self.assertEqual(len(first.atoms), 1)
-        self.assertEqual(len(first.batches), 1)
-        self.assertEqual(len(first.entries), 1)
-        self.assertEqual(len(first.verdicts), 1)
-        self.assertEqual(first.batches[0].status, "accepted")
-        self.assertEqual(first.canonical_bytes(), second.canonical_bytes())
-        self.assertEqual(
-            first.verdicts[0].decisions[0]["domainResult"]["reason"],
-            result["reason"],
-        )
-
-    def test_legacy_results_append_one_single_item_batch_per_work_item(self):
-        ledger = append_legacy_domain_result(
-            None,
-            run_id="run:legacy-many",
-            work_item_id="work:one",
-            check_id="CFG-001",
-            domain_result={"reason": "first"},
-        )
-        ledger = append_legacy_domain_result(
-            ledger,
-            run_id="run:legacy-many",
-            work_item_id="work:two",
-            check_id="CFG-001",
-            domain_result={"reason": "second"},
-        )
-        replayed = append_legacy_domain_result(
-            ledger,
-            run_id="run:legacy-many",
-            work_item_id="work:two",
-            check_id="CFG-001",
-            domain_result={"reason": "second"},
-        )
-
-        self.assertEqual(len(ledger.batches), 2)
-        self.assertTrue(all(len(batch.atom_ids) == 1 for batch in ledger.batches))
-        self.assertTrue(all(batch.status == "accepted" for batch in ledger.batches))
-        self.assertEqual(len(ledger.verdicts), 2)
-        self.assertIs(replayed, ledger)
-
-    def test_legacy_plan_exists_before_results_are_submitted(self):
-        ledger = plan_legacy_domain_results(
-            run_id="run:legacy-plan",
-            work_item_ids=("work:one", "work:two"),
-            check_id="CFG-001",
-        )
-
-        self.assertEqual([batch.status for batch in ledger.batches], ["planned", "planned"])
-        ledger = append_legacy_domain_result(
-            ledger,
-            run_id="run:legacy-plan",
-            work_item_id="work:one",
-            check_id="CFG-001",
-            domain_result={"reason": "first"},
-        )
-
-        self.assertEqual([batch.status for batch in ledger.batches], ["accepted", "planned"])
-        self.assertEqual(len(ledger.verdicts), 1)
-
 
 if __name__ == "__main__":
     unittest.main()

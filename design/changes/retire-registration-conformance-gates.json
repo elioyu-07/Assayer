@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-registration-conformance-gates",
+  "changeType": "contract_change",
+  "title": "Retire PluginRegistration and DomainResultContract conformance gates",
+  "summary": "Make legacy registration conformance fail closed so the only accepted ordinary-plugin artifact is the compiled JSON contract.",
+  "changedPaths": [
+    "src/assayer_platform/conformance.py",
+    "src/assayer_platform/__init__.py",
+    "tests/test_compiled_plugin_contract.py",
+    "design/changes/retire-registration-conformance-gates.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract validation", "legacy conformance shutdown"],
+    "plugin": ["declaration-only contract"],
+    "provider": ["capability descriptor validation"],
+    "agent": ["semantic decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["data_only_conformance"]
+  },
+  "forbiddenResponsibilities": [
+    "PluginRegistration conformance",
+    "DomainResultContract conformance",
+    "registration-based package acceptance"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "registration conformance returns one explicit retired-contract error",
+    "PluginRegistry registration cannot pass a legacy gate",
+    "compiled contract verification remains unaffected"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

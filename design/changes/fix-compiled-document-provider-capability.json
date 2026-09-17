@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "fix-compiled-document-provider-capability",
+  "changeType": "platform_change",
+  "title": "Declare the generic document provider capability in compiled Checks",
+  "summary": "Ensure compiled document and markdown Checks negotiate the platform document_navigation provider instead of producing a blocked capability context.",
+  "changedPaths": [
+    "src/assayer_platform/compiled_interactive.py",
+    "design/changes/fix-compiled-document-provider-capability.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["generic document provider capability mapping", "capability negotiation"],
+    "plugin": ["compiled input declaration"],
+    "provider": ["document_navigation implementation"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {"inputKinds": ["document", "markdown"], "required": ["document_navigation"]},
+  "forbiddenResponsibilities": ["plugin-defined provider capability names", "blocked negotiation for a supported compiled input kind"],
+  "publicContractImpact": "semantic",
+  "acceptance": ["compiled document and markdown Checks require document_navigation", "document provider binding reaches ready negotiation", "compiled provider/review tests remain green"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by continuing the no-compatibility hard cut."},
+  "state": "verified"
+}

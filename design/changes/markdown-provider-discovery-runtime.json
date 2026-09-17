@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "markdown-provider-discovery-runtime",
+  "changeType": "provider_change",
+  "title": "Connect Markdown source discovery to the compiled runtime",
+  "summary": "Add Provider-owned Markdown source discovery and align the compiled document Check with the Provider's structured Evidence so the existing controller can create WorkItems and collect frozen source evidence.",
+  "changedPaths": [
+    "src/assayer_document_navigation/markdown.py",
+    "src/assayer_platform/compiled_interactive.py",
+    "tests/test_markdown_navigation.py",
+    "design/changes/markdown-provider-discovery-runtime.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Compiled Check evidence requirements", "WorkItem and Coverage planning"],
+    "plugin": ["Markdown input declaration and semantic Check meaning"],
+    "provider": ["Source discovery, byte digest, bounded Markdown metadata and collection"],
+    "agent": ["Semantic review decisions after Host provides Evidence"]
+  },
+  "capabilities": {"inputKinds": ["markdown"], "required": ["document_navigation", "typed_snapshot"]},
+  "forbiddenResponsibilities": ["Host file parsing fallback", "plugin-owned source discovery", "domain decisions in Provider", "browser or lifecycle changes"],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "Markdown Provider discovers one authorized file as a ProviderSourceSnapshot",
+    "discovery returns a stable source identity and byte digest",
+    "compiled Markdown Run binds, discovers, and collects structured Evidence",
+    "source mutation after discovery returns source_changed without Evidence",
+    "focused Markdown and compiled runtime tests pass"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-17T00:00:00+08:00", "decision": "Approved as the next narrow step toward the Markdown end-to-end slice."},
+  "state": "approved",
+  "supersedes": "markdown-provider-baseline-validation"
+}

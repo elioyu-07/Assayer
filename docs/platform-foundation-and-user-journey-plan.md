@@ -4,9 +4,13 @@
 |---|---|
 | Document version | 1.1.0-draft |
 | Date | 2026-09-13 |
-| Status | Planning proposal; implementation sequencing authority pending review |
+| Status | Historical planning proposal; superseded by Platform Constitution v2 |
 | Owner | Assayer Maintainers |
 | Scope | Minimum platform work required to deliver a reliable Alpha user journey |
+
+> **Superseded.** This plan is retained for product-history traceability. It is
+> not an implementation sequencing authority. Current changes require an
+> approved Design Confirmation and must preserve the compiled-plugin boundary.
 
 ## 1. Purpose
 

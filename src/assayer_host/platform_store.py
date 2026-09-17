@@ -50,8 +50,7 @@ class SQLitePlatformLedgerStore:
         try:
             self._save_open_store(ledger, payload, updated_at)
         except sqlite3.ProgrammingError:
-            # RuntimeRouter releases the BrowserHostRuntime immediately after
-            # Host completion.  The product facade may still need to append
+            # The product facade may still need to append
             # the platform terminal ledger write, so reopen a file-backed Host
             # store for this final write. In-memory test stores deliberately
             # keep the original failure visible.

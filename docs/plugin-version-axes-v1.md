@@ -4,9 +4,14 @@
 |---|---|
 | Document version | 1.1.0 |
 | Date | 2026-09-13 |
-| Status | Frozen; Simple author view and generated compatibility added |
+| Status | Historical versioning record; superseded by compiled-artifact identity |
 | Owner | Assayer maintainers |
 | Authority | Platform Constitution v1 §5, Platform--Plugin Boundary Contract v1 §10 |
+
+> **Superseded.** Ordinary plugins have one business version and one compiled
+> artifact digest. Platform and Provider package versions remain separate
+> implementation metadata; retired ordinary runtime compatibility axes do not
+> authorize a plugin.
 
 ## 1. Why this document exists
 

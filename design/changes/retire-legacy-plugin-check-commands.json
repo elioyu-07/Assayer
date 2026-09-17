@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-legacy-plugin-check-commands",
+  "changeType": "release_change",
+  "title": "Remove legacy Python plugin conformance command surfaces",
+  "summary": "Stop publishing plugin wheel/registration conformance entry points and remove their platform public exports; verification is the compiled contract verifier.",
+  "changedPaths": [
+    "pyproject.toml",
+    "packages/assayer-platform/pyproject.toml",
+    "src/assayer_platform/__init__.py",
+    "design/changes/retire-legacy-plugin-check-commands.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/distribution-split-v1.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract verification", "release surface"],
+    "plugin": ["declaration-only source"],
+    "provider": ["provider release conformance"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_verification"]
+  },
+  "forbiddenResponsibilities": [
+    "wheel plugin check command",
+    "registration package check command",
+    "DomainResultContract public export"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "platform distributions no longer expose legacy plugin check entry points",
+    "assayer_platform public namespace no longer exports legacy plugin conformance functions",
+    "compiled-plugin verification remains the ordinary plugin gate"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

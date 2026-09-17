@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "delete-legacy-plugin-registration-contracts",
+  "changeType": "contract_change",
+  "title": "Delete PluginRegistration and DomainResult compatibility contracts",
+  "summary": "Remove the SDK and platform contracts that enabled Python plugin registration and legacy DomainResult adaptation; compiled ReviewBatches are the only Agent decision path.",
+  "changedPaths": [
+    "src/assayer_plugin_sdk/__init__.py",
+    "src/assayer_plugin_sdk/registration.py",
+    "src/assayer_plugin_sdk/agent_contract.py",
+    "src/assayer_platform/agent_contract.py",
+    "src/assayer_platform/incremental_review.py",
+    "design/changes/delete-legacy-plugin-registration-contracts.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled ReviewAtom and ReviewBatch contracts", "five-state decision validation"],
+    "plugin": ["compiled declaration only"],
+    "provider": ["Evidence collection"],
+    "agent": ["five-state ReviewBatch verdicts"]
+  },
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["review_batch_lifecycle"]},
+  "forbiddenResponsibilities": [
+    "PluginRegistration",
+    "DomainResultContract",
+    "legacy DomainResult adaptation",
+    "Python plugin factory contracts",
+    "compatibility aliases for deleted contracts"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "PluginRegistration and DomainResultContract modules and exports are absent",
+    "incremental review has no legacy DomainResult adapter",
+    "provider registration remains available",
+    "compiled ReviewBatch tests remain green"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by the instruction to continue the ordered no-compatibility hard cut."},
+  "state": "verified"
+}

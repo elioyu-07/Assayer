@@ -1,4 +1,5 @@
 import ast
+import json
 import os
 import tempfile
 import tomllib
@@ -12,19 +13,16 @@ SDK_ROOT = ROOT / "src" / "assayer_plugin_sdk"
 FORBIDDEN_ROOTS = ("assayer_platform", "assayer_host")
 
 
-def _compiled_frontend_project() -> dict:
-    from assayer_platform.simple_plugin_compiler import compile_simple_plugin
+def _compiled_frontend_contract() -> dict:
+    from assayer_platform.declaration_compiler import compile_plugin_contract
 
     with tempfile.TemporaryDirectory() as directory:
         output = Path(directory) / "generated"
-        compile_simple_plugin(
+        compile_plugin_contract(
             ROOT / "plugins" / "frontend-audit",
             output,
-            distribution_name="assayer-plugin-frontend-audit",
         )
-        return tomllib.loads(
-            (output / "pyproject.toml").read_text(encoding="utf-8")
-        )
+        return json.loads((output / "compiled-plugin.json").read_text(encoding="utf-8"))
 
 
 def _imported_roots(path: Path) -> set[str]:
@@ -128,33 +126,18 @@ class PluginSdkDistributionTest(unittest.TestCase):
             sdk["tool"]["setuptools"]["package-data"]["assayer_plugin_sdk"],
         )
 
-        plugin = _compiled_frontend_project()
-        dependencies = plugin["project"]["dependencies"]
-        self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in dependencies))
-        self.assertFalse(
-            any("assayer-platform" in dep or "assayer-host" in dep for dep in dependencies)
-        )
+        plugin = _compiled_frontend_contract()
+        self.assertEqual(plugin["plugin"]["id"], "assayer.frontend-audit")
+        self.assertNotIn("dependencies", plugin)
+        self.assertNotIn("entryPoints", plugin)
 
-        provider = tomllib.loads(
+        markdown = tomllib.loads(
             (ROOT / "packages" / "assayer-provider-markdown" / "pyproject.toml").read_text(encoding="utf-8")
         )
-        provider_dependencies = provider["project"]["dependencies"]
-        self.assertTrue(any(dep.startswith("assayer-plugin-sdk") for dep in provider_dependencies))
-        self.assertFalse(
-            any("assayer-platform" in dep or "assayer-host" in dep for dep in provider_dependencies)
-        )
-
-        browser_provider = tomllib.loads(
-            (ROOT / "packages" / "assayer-provider-browser" / "pyproject.toml").read_text(encoding="utf-8")
-        )
-        browser_dependencies = browser_provider["project"]["dependencies"]
-        self.assertEqual(["assayer-plugin-sdk==0.1.2"], browser_dependencies)
-        self.assertIn(
-            "descriptor.json",
-            browser_provider["tool"]["setuptools"]["package-data"][
-                "assayer_browser_provider"
-            ],
-        )
+        self.assertEqual(markdown["project"]["dependencies"], ["assayer-plugin-sdk==0.1.2"])
+        self.assertEqual(markdown["tool"]["setuptools"]["packages"], ["assayer_document_navigation"])
+        self.assertFalse((ROOT / "packages" / "assayer-provider-browser").exists())
+        self.assertFalse((ROOT / "src" / "assayer_browser_provider").exists())
 
     def test_split_distribution_dag_and_entry_point_ownership(self) -> None:
         def config(name: str) -> dict:
@@ -165,8 +148,6 @@ class PluginSdkDistributionTest(unittest.TestCase):
         expected_packages = {
             "assayer-plugin-sdk": ["assayer_plugin_sdk"],
             "assayer-agent": ["assayer_agent"],
-            "assayer-provider-markdown": ["assayer_document_navigation"],
-            "assayer-provider-browser": ["assayer_browser_provider"],
             "assayer-platform": ["assayer_platform", "assayer_host"],
         }
         for name, packages in expected_packages.items():
@@ -191,18 +172,7 @@ class PluginSdkDistributionTest(unittest.TestCase):
         self.assertNotIn("assayer.plugins", sdk_entry_points)
         self.assertNotIn("assayer.providers", sdk_entry_points)
 
-        self.assertIn(
-            "assayer.frontend-audit",
-            _compiled_frontend_project()["project"]["entry-points"]["assayer.plugins"],
-        )
-        self.assertIn(
-            "markdown",
-            config("assayer-provider-markdown")["project"]["entry-points"]["assayer.providers"],
-        )
-        self.assertIn(
-            "browser",
-            config("assayer-provider-browser")["project"]["entry-points"]["assayer.providers"],
-        )
+        self.assertNotIn("registration", _compiled_frontend_contract())
 
 
 if __name__ == "__main__":

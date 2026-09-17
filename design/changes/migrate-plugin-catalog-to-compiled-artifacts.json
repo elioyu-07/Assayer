@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-plugin-catalog-to-compiled-artifacts",
+  "changeType": "contract_change",
+  "title": "Replace ordinary plugin wheel catalog entries with compiled artifacts",
+  "summary": "Make the optional remote plugin catalog describe downloadable compiled-plugin.json artifacts and verify those artifacts before installation; remove all wheelUrl terminology and wheel materialization from ordinary plugin lifecycle.",
+  "changedPaths": [
+    "src/assayer_platform/plugin_catalog.py",
+    "src/assayer_host/plugin_lifecycle_ops.py",
+    "src/assayer_host/plugin_lifecycle_mcp.py",
+    "src/assayer_host/cli.py",
+    "tests/test_plugin_catalog.py",
+    "design/changes/migrate-plugin-catalog-to-compiled-artifacts.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["catalog transport", "artifact verification", "compiled lifecycle"],
+    "plugin": ["compiled-plugin.json artifact"],
+    "provider": ["independent provider distribution"],
+    "agent": ["lifecycle intent and confirmation"]
+  },
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_lifecycle"]},
+  "forbiddenResponsibilities": [
+    "wheelUrl or wheel_url ordinary plugin catalog fields",
+    "ordinary plugin wheel download or materialization",
+    "catalog conformance based on Python package metadata",
+    "compatibility fallback from compiled artifact to wheel"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "catalog entries require artifactUrl and identify compiled-plugin.json artifacts",
+    "remote artifact bytes are digest checked and validated as CompiledPluginContract before installation",
+    "ordinary lifecycle no longer imports or emits wheel terminology",
+    "local source install and installed-contract lifecycle remain functional",
+    "provider wheel release code is unchanged"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by the requirement that ordinary plugins are data-only and compatibility is not retained."},
+  "state": "verified"
+}

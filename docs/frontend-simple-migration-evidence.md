@@ -3,8 +3,12 @@
 | Metadata | Value |
 |---|---|
 | Date | 2026-09-15 |
-| Status | Policy Pack hard cut complete; operator gate pending |
-| Scope | `assayer.frontend-audit` Policy Pack and split distribution |
+| Status | Historical migration evidence; superseded by the compiled artifact contract |
+| Scope | Earlier domain migration and split distribution |
+
+> **Historical evidence.** Concrete domain names and old distribution mechanics
+> below are retained only to explain a past migration. They are not platform
+> requirements and must not be copied into a new ordinary plugin.
 
 ## Build boundary
 

@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/compiled-plugin-contract.schema.json",
+  "title": "CompiledPluginContract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "contractDigest",
+    "plugin",
+    "input",
+    "checks",
+    "semanticReview",
+    "cases"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "contractVersion": { "const": "1.0.0" },
+    "contractDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "description", "version"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9._:-]{2,255}$" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$" }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "subjectKind", "scopeSchema"],
+      "properties": {
+        "kind": { "enum": ["document", "markdown", "browser_snapshot"] },
+        "subjectKind": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{1,63}$" },
+        "scopeSchema": { "type": "object" }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "title", "description", "applicability", "defaultSeverity",
+          "recommendation", "unknownWhen", "dimensions"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9_-]{1,63}$" },
+          "title": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "applicability": { "type": "string", "minLength": 1 },
+          "defaultSeverity": { "enum": ["P0", "P1", "P2", "P3", "P4"] },
+          "recommendation": { "type": "string", "minLength": 1 },
+          "unknownWhen": { "type": "string", "minLength": 1 },
+          "dimensions": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,63}$" }
+          },
+          "detect": {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "containsAll": { "$ref": "#/$defs/nonemptyStrings" },
+              "containsAny": { "$ref": "#/$defs/nonemptyStrings" },
+              "absentAll": { "$ref": "#/$defs/nonemptyStrings" }
+            }
+          }
+        }
+      }
+    },
+    "semanticReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "text", "sha256"],
+      "properties": {
+        "format": { "const": "markdown" },
+        "text": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "checkId", "inputKind", "input", "expected"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "checkId": { "type": "string", "minLength": 1 },
+          "inputKind": { "type": "string", "minLength": 1 },
+          "input": {},
+          "expected": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["candidateRules", "final"],
+            "properties": {
+              "candidateRules": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+              "final": { "enum": ["ready", "rework", "needs_review", "not_applicable"] }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonemptyStrings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

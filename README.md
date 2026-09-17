@@ -39,13 +39,12 @@ rebuilding the trust model around it.
 The current plugins are built-in implementations. They exercise the same generic
 contracts intended for independently packaged plugins. Independently packaged
 plugins are installed, upgraded, and removed through the agent-first lifecycle
-in natural language ("install ass-spec", "what plugins do i have"); see
+in natural language (for example, "install example-plugin"); see
 [the agent-first plugin lifecycle](docs/agent-first-plugin-lifecycle-design.md).
 
-| Plugin | Status | What it does |
-|---|---|---|
-| `assayer.frontend-audit` | Usable Alpha | Audits anonymous test or staging web interfaces in Chromium with safe interactions and DOM/visual evidence; currently ships the FUA-10 filter-action check. |
-| `ass-spec` | Usable Alpha | Reviews Markdown product and software specifications against the canonical 18-point quality policy with Agent semantic judgment. Lives in its own repository (`ass-spec`) and is installed as an external distribution. |
+First-party domain plugins live under `plugins/` and use the same declaration
+contract as external plugins. The platform does not assign a default domain;
+the Host selects an installed plugin by its declared input scope.
 
 A deterministic, non-browser configuration reference lives in `tests/helpers`
 for exercising the generic kernel in tests; it is not a shipped plugin and never
@@ -67,20 +66,20 @@ Audit http://localhost:8081/#/lease-mock
 or:
 
 ```text
-Audit this project's spec.md
+Audit this project's document.md
 ```
 
 The equivalent explicit CLI entry accepts the same target kinds:
 
 ```bash
 assayer audit https://example.test
-assayer audit ./spec.md
+assayer audit ./document.md
 assayer audit ./policy.yaml --plugin policy-review
 ```
 
 URLs route to the web-audit Skill. Files and directories route to the generic
-installed-plugin workflow; Markdown defaults to `ass-spec` and never starts
-Chromium.
+installed-plugin workflow; the Host selects an installed plugin whose declared
+scope matches the target and never starts Chromium for document-only inputs.
 
 If the first run cannot start, use the read-only readiness check before
 changing any configuration:
@@ -119,9 +118,8 @@ natural language in Codex and resolved by the agent into a deterministic,
 fail-closed plan.
 
 For the current delivery evidence, see [installation](docs/j01-install-delivery.md)
-and [activation and discovery](docs/j02-activation-and-discovery.md). For a
-step-by-step specification review walkthrough, see
-[spec review getting started](docs/spec-review-getting-started.md).
+and [activation and discovery](docs/j02-activation-and-discovery.md). For
+plugin authoring, see the [plugin development guide](docs/plugin-development.md).
 
 ## How it works
 
@@ -218,7 +216,7 @@ journeys.
 |---|---|
 | Frontend and Spec audits | Usable Alpha implementations |
 | Platform contracts | v1 constitution, audit-plugin, capability-provider, and canonical-result contracts documented |
-| Contract enforcement | Registration, package, isolated-installation, result, recovery, provider, and performance conformance implemented |
+| Contract enforcement | Declaration, compiled-artifact, result, recovery, Provider, and performance conformance implemented |
 | Recovery | Durable interruption recovery implemented and accepted in a real Codex CLI trial |
 | Result model | Unified `canonical-result.json` implemented for every current plugin |
 | End-to-end acceptance | J04/J05 implementation complete; deterministic CLI/lifecycle evidence is recorded, while real operator J04/J05 and J08 gates remain open |
@@ -229,19 +227,19 @@ The ordered roadmap is:
 1. finish the exact-contract hard-cut: reject old plugin/protocol paths and
    record clean-CLI and release-lifecycle evidence for the current journey;
 2. complete measured platform-performance evidence;
-3. externalize the ass-spec plugin without changing platform source (done: it now
-   lives in its own repository and installs as an external distribution);
-4. build an Agent-first plugin workbench backed by inspectable packages and
+3. externalize additional domain declarations without changing platform source;
+4. build an Agent-first plugin workbench backed by inspectable declarations and
    mandatory conformance gates;
-5. externalize frontend auditing and reusable capability providers;
+5. expand reusable capability Providers;
 6. expand the ecosystem only after two materially different external plugins
    prove the abstractions.
 
-Deep crawler expansion, new FUA rules, marketplace UI, distributed execution,
+Deep crawler expansion, marketplace UI, distributed execution,
 automatic screenshot redaction, source-version attribution, persistent
 cross-process caching, and plugin-specific micro-optimizations are intentionally
-deferred. See the [project plan](docs/project-plan.md) for the authoritative
-stage gates and sequencing.
+deferred. The historical [project plan](docs/project-plan.md) is retained for
+traceability; current gates are defined by the Constitution and Design
+Confirmation records.
 
 ## Develop Assayer
 
@@ -251,17 +249,11 @@ the browser are user-supplied prerequisites, not bundled dependencies:
 
 ```bash
 python3 -m venv .venv
-# The root `assayer` distribution is platform-only. Frontend is compiled from
-# its Policy Pack; there is no editable compatibility runtime package.
+# The root `assayer` distribution is platform-only. Ordinary plugins compile to
+# data artifacts; this distribution ships no concrete capability Provider.
 uv pip install --python .venv/bin/python -e packages/assayer-plugin-sdk
 uv pip install --python .venv/bin/python -e packages/assayer-agent
-python scripts/build_distributions.py --output /tmp/assayer-wheels
-uv pip install --python .venv/bin/python \
-  /tmp/assayer-wheels/assayer_plugin_frontend_audit-*.whl
-uv pip install --python .venv/bin/python \
-  -e packages/assayer-provider-markdown \
-  -e packages/assayer-provider-browser \
-  -e '.[test]'
+uv pip install --python .venv/bin/python -e '.[test]'
 .venv/bin/python -m pip install playwright
 ```
 
@@ -284,17 +276,16 @@ Build the current Codex Plugin bundle:
 python3 scripts/build_plugin_bundle.py --output ./dist
 ```
 
-The bundle contains the Skill, MCP launcher, version-aligned Python runtime,
-rules, schemas, and plugin resources. The builder verifies offline installation
-and launcher startup in a clean temporary environment.
+The bundle contains the Skill, MCP launcher, version-aligned platform runtime,
+schemas, compiled plugin resources, and Provider bindings. The builder verifies
+offline installation and launcher startup in a clean temporary environment.
 
 ## Build an audit plugin
 
-The target ordinary plugin is a Policy Pack or a Simple SDK package. It
-maintains domain metadata, Checks, semantic instructions, business cases, and
-optional deterministic `scan(document)` logic. The SDK compiler generates the
-manifest, Schemas, registration, compatibility, entry points, release
-descriptor, and platform lifecycle cases.
+An ordinary plugin is a declaration package. It maintains domain metadata,
+Checks, Dimensions, semantic instructions, and business cases. The platform
+compiler generates one `compiled-plugin.json` containing the normalized
+contract, Provider requirements, review plan, digest, and release identity.
 
 The complete author workflow is one command:
 
@@ -302,16 +293,13 @@ The complete author workflow is one command:
 assayer plugin verify
 ```
 
-It compiles the domain source, builds an isolated wheel, validates and installs
-that exact wheel, and runs generated Evidence, incremental-review, coverage,
-resume, replay, pagination, canonical-result, and artifact checks. Local source
-installation never copies a repository into the plugin store.
+It compiles the declarations, validates exhaustive review coverage, and verifies
+the exact compiled artifact. Local source installation never copies a repository
+into the plugin store.
 
-The Simple SDK compiler, Policy Pack path, CLI verification command, and Codex
-`verify_plugin_source` MCP entry are implemented. Existing
-`PluginRegistration` and `DomainResultContract` remain the Advanced SPI
-migration path and should not be used as the starting point for a new ordinary
-plugin. See the [Plugin development guide](docs/plugin-development.md).
+The declaration compiler, CLI verification command, and Codex
+`verify_plugin_source` MCP entry are implemented. There is no alternate
+ordinary-plugin runtime path. See the [Plugin development guide](docs/plugin-development.md).
 
 Capability providers have an independent contract and equivalent gates:
 
@@ -348,9 +336,9 @@ commands are development interfaces, not substitutes for a real user journey.
 plugins/                Codex Plugin source, Skills, launcher, and bundled resources
 src/assayer_platform/   Domain-neutral contracts, kernel, registry, and test references
 src/assayer_host/       Product Host, browser runtime, transport, persistence, and recovery
-src/assayer_agent/      Model-independent Agent orchestration (standalone wheel)
+src/assayer_agent/      Model-independent Agent orchestration
 src/assayer_plugin_sdk/ Public plugin/provider contracts and canonical SDK schemas
-rules/                  Versioned frontend audit rules
+plugins/*/              Declaration packages and the bundled product Skill
 schemas/                Platform-owned protocol, ledger, result, and diagnostic schemas
 docs/                   Product, architecture, journey, and governance documents
 tests/                  Deterministic, browser, MCP, plugin, provider, and conformance tests
@@ -359,16 +347,17 @@ scripts/                Test, release, resilience, and language-governance tooli
 
 ## Documentation
 
-- [Project plan](docs/project-plan.md) — authoritative priorities, stage gates,
-  progress, and deferrals
+- [Project plan](docs/project-plan.md) — historical priorities and delivery evidence
 - [Platform foundation and user-journey plan](docs/platform-foundation-and-user-journey-plan.md)
   — the minimum shared capabilities required before expanding the plugin ecosystem
 - [User journey and Definition of Done](docs/user-journey-and-definition-of-done.md)
   — the release acceptance boundary
-- [Platform Constitution v1](docs/platform-constitution-v1.md) — frozen platform
-  laws and ownership
-- [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — Policy Pack, Simple
-  SDK, common review, and Advanced SPI boundary
+- [Platform Constitution v2](docs/platform-constitution-v2.md) — active platform
+  authority, unified plugin boundary, exhaustive review, and development gate
+- [Design Confirmation Contract v1](docs/design-confirmation-contract-v1.md) —
+  machine-readable preflight required before implementation
+- [Audit Plugin Contract v1](docs/plugin-contract-v1.md) — the single compiled
+  ordinary-plugin boundary
 - [Plugin Development Standard v1](docs/plugin-development-standard-v1.md) —
   author sources, compiler output, incremental review, and release gates
 - [Simple Plugin Authoring Architecture](docs/simple-plugin-authoring-design.md)
@@ -377,8 +366,7 @@ scripts/                Test, release, resilience, and language-governance tooli
   controlled runtime capability contract
 - [Canonical Audit Result Contract v1](docs/canonical-result-contract-v1.md) —
   portable terminal result semantics
-- [Plugin development](docs/plugin-development.md) — ordinary Policy Pack and
-  Simple SDK authoring guide
+- [Plugin development](docs/plugin-development.md) — declaration-only authoring guide
 - [Architecture](docs/architecture.md) — system structure and boundaries
 - [Observability governance](docs/observability-governance.md) — logs, traces,
   diagnostics, and performance evidence

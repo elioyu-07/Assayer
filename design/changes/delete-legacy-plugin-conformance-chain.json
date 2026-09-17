@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "delete-legacy-plugin-conformance-chain",
+  "changeType": "release_change",
+  "title": "Delete wheel and registration plugin conformance modules",
+  "summary": "Remove the obsolete static package, installation, release, surface, distribution, and packaging gates that validate Python plugin registrations and wheels rather than compiled-plugin.json.",
+  "changedPaths": [
+    "src/assayer_platform/conformance.py",
+    "src/assayer_platform/installation_conformance.py",
+    "src/assayer_platform/release_conformance.py",
+    "src/assayer_platform/package_conformance.py",
+    "src/assayer_platform/plugin_distribution.py",
+    "src/assayer_platform/plugin_packaging.py",
+    "src/assayer_platform/surface_conformance.py",
+    "design/changes/delete-legacy-plugin-conformance-chain.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract schema verification", "provider conformance", "result conformance"],
+    "plugin": ["declaration-only source and compiled contract"],
+    "provider": ["provider package and installation conformance"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_verification"]
+  },
+  "forbiddenResponsibilities": [
+    "wheel build as an ordinary plugin release gate",
+    "PluginRegistration conformance",
+    "Python plugin surface inspection",
+    "release descriptor validation for Python plugin packages",
+    "legacy installation fixture runtime"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "legacy plugin conformance modules are absent",
+    "provider conformance modules remain present",
+    "result conformance remains present",
+    "plugin source verification continues through compiled contract verification",
+    "no compatibility wrappers replace the deleted modules"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by the instruction to continue the ordered no-compatibility hard cut."
+  },
+  "state": "verified"
+}

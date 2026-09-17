@@ -1,10 +1,5 @@
 """Domain-neutral contracts and execution kernel for Assayer plugins."""
 
-from .agent_contract import (
-    DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION,
-    DomainResultContract,
-)
-
 from .contract import (
     Artifact,
     CapabilityProfile,
@@ -63,21 +58,20 @@ from .reporting import JsonSummaryPublisher
 from .audit_report import render_audit_report
 from .decision import validate_decision_shape
 from .session import InteractivePlatformRun, InteractivePlatformSession
-from .interactive import (
-    INTERACTIVE_OPERATIONS,
-    INTERACTIVE_PROTOCOL_VERSION,
-    InteractivePluginController,
-)
 from .registry import load_plugin_manifest, validate_plugin_manifest
 from .evaluation import load_evaluation_corpus, validate_evaluation_corpus
-from .plugin_registry import PluginRegistration, PluginRegistry
-from .plugin_discovery import builtin_plugin_registry, installed_plugin_registry
 from .plugin_installation import PluginInstallationStore
-from .plugin_lifecycle import (
-    PluginLifecycleManager,
-    discover_plugin_registry,
-    load_registration,
+from .compiled_plugin_contract import (
+    COMPILED_PLUGIN_CONTRACT,
+    CompiledPluginContract,
+    load_compiled_plugin_contract,
+    validate_compiled_plugin_contract,
 )
+from .compiled_plugin_lifecycle import (
+    CompiledPluginLifecycleManager,
+    load_installed_compiled_plugin,
+)
+from .compiled_interactive import CompiledInteractiveController, CompiledRun
 from .provider_registry import (
     ProviderRegistration,
     ProviderRegistry,
@@ -116,16 +110,6 @@ from .actionable_result import (
     extract_result_delivery_bundle, validate_result_delivery,
 )
 from .evidence_claim import validate_evidence_claims
-from .conformance import (
-    PluginConformanceIssue,
-    PluginConformanceReport,
-    inspect_plugin_registration,
-    inspect_plugin_registrations,
-    inspect_plugin_lifecycle,
-    inspect_plugin_package,
-    require_plugin_registration_conformance,
-)
-from .runner import PlatformRunner
 from .state_machine import (
     RUN_TERMINAL_STATES, RUN_WORKFLOW_STATES, WORK_ITEM_STATES,
     derive_work_item_state, validate_terminal_transition, validate_workflow,
@@ -152,8 +136,6 @@ from .source_chunking import SOURCE_CHUNK_LIMIT, build_source_chunks, source_ref
 from .source_fact_index import build_source_fact_index
 
 __all__ = [
-    "DOMAIN_RESULT_CONTRACT_CANONICALIZATION_VERSION",
-    "DomainResultContract",
     "Artifact",
     "ArtifactPublisher",
     "CapabilityProfile",
@@ -174,11 +156,8 @@ __all__ = [
     "InvestigationPacket",
     "InteractivePlatformSession",
     "InteractivePlatformRun",
-    "InteractivePluginController",
     "EvidenceHandle",
     "EvidenceHandleRegistry",
-    "INTERACTIVE_OPERATIONS",
-    "INTERACTIVE_PROTOCOL_VERSION",
     "Operation",
     "PlatformContext",
     "PlatformContractError",
@@ -217,14 +196,15 @@ __all__ = [
     "validate_plugin_manifest",
     "load_evaluation_corpus",
     "validate_evaluation_corpus",
-    "PluginRegistration",
-    "PluginRegistry",
-    "builtin_plugin_registry",
-    "installed_plugin_registry",
     "PluginInstallationStore",
-    "PluginLifecycleManager",
-    "discover_plugin_registry",
-    "load_registration",
+    "COMPILED_PLUGIN_CONTRACT",
+    "CompiledPluginContract",
+    "load_compiled_plugin_contract",
+    "validate_compiled_plugin_contract",
+    "CompiledPluginLifecycleManager",
+    "load_installed_compiled_plugin",
+    "CompiledInteractiveController",
+    "CompiledRun",
     "ProviderRegistration",
     "ProviderRegistry",
     "builtin_provider_registry",
@@ -260,14 +240,6 @@ __all__ = [
     "validate_result_delivery",
     "build_actionable_result",
     "validate_evidence_claims",
-    "PluginConformanceIssue",
-    "PluginConformanceReport",
-    "inspect_plugin_registration",
-    "inspect_plugin_registrations",
-    "inspect_plugin_lifecycle",
-    "inspect_plugin_package",
-    "require_plugin_registration_conformance",
-    "PlatformRunner",
     "RUN_TERMINAL_STATES",
     "RUN_WORKFLOW_STATES",
     "WORK_ITEM_STATES",

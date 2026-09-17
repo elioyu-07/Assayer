@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def _is_resource_root(path: Path) -> bool:
-    return (path / "schemas").is_dir() and (path / "rules" / "registry.json").is_file()
+    return (path / "schemas").is_dir()
 
 
 def default_resource_root() -> Path:
@@ -18,7 +18,7 @@ def default_resource_root() -> Path:
         candidate = Path(configured).expanduser().resolve()
         if not _is_resource_root(candidate):
             raise RuntimeError(
-                f"ASSAYER_RESOURCE_ROOT does not contain schemas/ and rules/registry.json: {candidate}"
+                f"ASSAYER_RESOURCE_ROOT does not contain schemas/: {candidate}"
             )
         return candidate
 
@@ -37,13 +37,9 @@ def default_resource_root() -> Path:
         return source_root
 
     raise RuntimeError(
-        "Assayer runtime resources are unavailable; install the assayer distribution with bundled rules and schemas"
+        "Assayer runtime schemas are unavailable; install the assayer distribution with bundled schemas"
     )
 
 
 def default_schema_root() -> Path:
     return default_resource_root() / "schemas"
-
-
-def default_rules_root() -> Path:
-    return default_resource_root() / "rules"

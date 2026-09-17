@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-simple-author-surface",
+  "changeType": "contract_change",
+  "title": "Remove the ordinary-plugin Simple author API",
+  "summary": "Delete the policy_plugin, scan, relations, and author-facing Simple SDK surface; retain only a platform-owned internal frozen-document runtime used by generated adapters.",
+  "changedPaths": [
+    "src/assayer_plugin_sdk/simple.py",
+    "src/assayer_plugin_sdk/platform_runtime.py",
+    "src/assayer_plugin_sdk/invariant_program.py",
+    "src/assayer_plugin_sdk/policy_pack.py",
+    "src/assayer_platform/interactive.py",
+    "src/assayer_platform/ordinary_source_conformance.py",
+    "src/assayer_platform/simple_plugin_compiler.py",
+    "scripts/check_plugin_source_boundaries.py",
+    "tests/test_plugin_source_boundaries.py",
+    "tests/test_simple_plugin_compiler.py",
+    "tests/test_simple_plugin_sdk.py",
+    "tests/test_common_review_interactive.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["frozen document runtime", "declaration compiler", "common review"],
+    "plugin": ["declaration files only"],
+    "provider": ["typed snapshots and source boundaries"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document"],
+    "required": ["declaration_compilation", "typed_snapshot", "exhaustive_coverage"]
+  },
+  "forbiddenResponsibilities": [
+    "policy_plugin decorator",
+    "author scan() or relations() methods",
+    "ordinary plugin imports of assayer_plugin_sdk.simple",
+    "compatibility aliases for the deleted author API"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "simple-author-module-is-absent",
+    "platform-runtime-imports-are-internal",
+    "declaration-compiler-does-not-emit-simple-author-imports",
+    "ordinary-plugin-source-remains-python-free"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved as the next hard-cut step of the zero-Python ordinary-plugin migration."
+  },
+  "state": "verified"
+}

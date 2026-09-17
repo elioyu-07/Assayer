@@ -2,7 +2,7 @@
 
 The Agent-facing product surface for plugin management.  Each tool maps one
 deterministic lifecycle operation to the same ``execute_intent_step`` path the
-CLI uses, so a natural-language request ("install ass-spec") and a scripted
+CLI uses, so a natural-language plugin request and a scripted
 tool call land on identical, fail-closed code.
 
 The product-facing ``apply_plugin_change`` tool collapses the normal mutation
@@ -23,7 +23,6 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from assayer_platform import PlatformContractError
-from assayer_platform.plugin_catalog import version_key
 from assayer_platform.plugin_verify import verify_plugin_source as run_plugin_source_verification
 
 from .plugin_intent import IntentStep
@@ -31,7 +30,6 @@ from .plugin_lifecycle_ops import (
     DEFAULT_CATALOG_URL,
     apply_resolved_catalog_change,
     execute_intent_step,
-    latest_available_from,
     plan_plugin_change,
     store_index_digest,
     verify_plan_binding,
@@ -117,36 +115,10 @@ class PluginLifecycleMcpToolTransport:
         return None
 
     def _run(self, step: IntentStep) -> dict:
-        latest_available = (
-            latest_available_from(self._catalog_index)
-            if step.operation in {"list", "info"} else None
-        )
         result = execute_intent_step(
             step, self._store_root, "./assayer-output",
-            latest_available, self._catalog_index,
+            self._catalog_index,
         )
-        if step.operation == "info" and result.get("status") == "completed":
-            latest_version = (
-                latest_available(step.plugin_id)
-                if latest_available is not None else None
-            )
-            active_version = result.get("activeVersion")
-            version_relation = "unknown"
-            if latest_version is not None and active_version is not None:
-                if version_key(latest_version) > version_key(active_version):
-                    version_relation = "update_available"
-                elif version_key(latest_version) < version_key(active_version):
-                    version_relation = "installed_ahead_of_catalog"
-                else:
-                    version_relation = "current"
-            result.update({
-                "catalogStatus": (
-                    "available" if latest_available is not None else "unavailable"
-                ),
-                "latestAvailableVersion": latest_version,
-                "latestVersionKnown": latest_version is not None,
-                "versionRelation": version_relation,
-            })
         return result
 
     def _respond(self, payload: dict) -> dict:
@@ -162,11 +134,10 @@ class PluginLifecycleMcpToolTransport:
             {
                 "name": "verify_plugin_source",
                 "description": (
-                    "Verify a local Assayer plugin authoring directory as one exact wheel. "
-                    "The Host recognizes Policy Pack, Simple SDK, or Advanced SPI source; "
-                    "then compiles when needed, builds in isolation, validates and exercises "
-                    "the exact wheel, and writes a passed artifact under SOURCE/.assayer/verified. "
-                    "This does not install or publish the plugin."
+                    "Verify a local declaration-only Assayer plugin and emit one exact "
+                    "compiled-plugin JSON contract under SOURCE/.assayer/verified. "
+                    "The verifier never imports plugin code and emits only the compiled JSON contract. "
+                    "This does not install the plugin."
                 ),
                 "inputSchema": self._SCHEMAS["verify_plugin_source"],
                 "annotations": {
@@ -178,7 +149,7 @@ class PluginLifecycleMcpToolTransport:
             },
             {
                 "name": "list_plugins",
-                "description": "List installed plugins, their versions and lifecycle state, and mark plugins that have a newer version available in the public catalog as upgradable.",
+                "description": "List installed compiled-plugin contracts, their versions, and lifecycle state.",
                 "inputSchema": self._SCHEMAS["list_plugins"],
                 "annotations": {
                     "readOnlyHint": True,
@@ -189,7 +160,7 @@ class PluginLifecycleMcpToolTransport:
             },
             {
                 "name": "get_plugin_info",
-                "description": "Use this single read-only lookup for an installed plugin's active version, lifecycle state, catalog status, latest available catalog version, and versionRelation. If latestVersionKnown is false, report that the upstream latest version is unknown; do not scan repositories or retry.",
+                "description": "Look up one installed compiled-plugin contract's active version, lifecycle state, and stored contract metadata.",
                 "inputSchema": self._SCHEMAS["get_plugin_info"],
                 "annotations": {
                     "readOnlyHint": True,
@@ -222,7 +193,7 @@ class PluginLifecycleMcpToolTransport:
             },
             {
                 "name": "apply_plugin_change",
-                "description": "Apply one natural-language plugin lifecycle intent. A trusted first-time catalog install completes in one Host transaction; upgrades, downgrades, rollbacks, uninstalls, and local sources return one compact confirmation plan.",
+                "description": "Apply one natural-language compiled-plugin lifecycle intent. First-time catalog installs may complete in one Host transaction; replacements, removals, and local sources return one compact confirmation plan.",
                 "inputSchema": self._SCHEMAS["apply_plugin_change"],
                 "annotations": {
                     "readOnlyHint": False,
@@ -431,6 +402,7 @@ class PluginLifecycleMcpToolTransport:
                     version=plan["targetVersion"],
                     source=plan["source"],
                     checksum=plan["checksum"],
+                    platform_api_version=plan.get("platformApiVersion"),
                     store_root=self._store_root,
                 )
             except PlatformContractError as error:

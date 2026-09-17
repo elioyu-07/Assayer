@@ -1,5 +1,10 @@
 # Assayer Data Schemas
 
+> **Mixed repository schema inventory.** `compiled-plugin-contract.schema.json`,
+> `design-confirmation.schema.json`, Provider schemas, and platform ledger/result
+> schemas are active. Older vertical and executable-plugin schemas remain only
+> for historical fixtures and must not be used to design an ordinary plugin.
+
 These files use JSON Schema Draft 2020-12 to describe platform-owned persistent
 audit entities, runtime contracts, and the rule registry. Public plugin and
 capability schemas are owned by `src/assayer_plugin_sdk/schemas/`. Platform
@@ -45,8 +50,8 @@ it into this directory.
 - `src/assayer_plugin_sdk/schemas/plugin-manifest.schema.json`: SDK-owned,
   domain-neutral plugin checks, evidence requirements, capabilities, and
   performance/recovery constraints.
-- `plugin-conformance.schema.json`: package-time plugin registration results, violated contract identifiers, and required next actions.
-- `plugin-release-acceptance.schema.json`: installed-wheel interactive acceptance evidence for Check coverage, paging, resume, replay, and terminal publication.
+- `plugin-conformance.schema.json`: historical executable-plugin conformance evidence; not an ordinary-plugin author contract.
+- `plugin-release-acceptance.schema.json`: historical runtime acceptance evidence; ordinary plugins now verify the exact compiled artifact.
 - `plugin-release.schema.json`: static, import-free plugin package layout, registration metadata, policy resources, and deterministic fixture declarations.
 - `plugin-fixture.schema.json`: deterministic package fixture input and expected terminal decision or failure outcomes.
 - `plugin-lifecycle-plan.schema.json`: fail-closed upgrade, rollback, and uninstall preconditions, ordered Codex operations, and compensation readiness.

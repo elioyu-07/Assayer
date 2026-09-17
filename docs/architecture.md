@@ -4,10 +4,21 @@
 |---|---|
 | Document version | 1.3.0-draft |
 | Date | 2026-09-13 |
-| Status | Design converging |
+| Status | Historical vertical architecture; superseded by Platform Constitution v2 |
 | Owner | Assayer Maintainers |
 
-[Design Governance](design-governance.md) owns system invariants. [Domain Model](domain-model-and-lifecycle.md), [Identity and Recovery](identity-and-recovery.md), [Action Safety](action-safety-and-credentials.md), and [Evidence Integrity](evidence-and-decision-integrity.md) own domain and algorithm details.
+> **Non-normative vertical implementation record.** This document describes
+> the first source-specific product slice. It is not the platform model or a
+> source of normative vocabulary; the Platform Constitution and v1 contracts
+> govern platform decisions.
+
+> **Do not use as an implementation contract.** New platform or plugin work
+> follows the domain-neutral ownership table and compiled-plugin lifecycle in
+> [Platform Constitution v2](platform-constitution-v2.md).
+
+The [Platform Constitution](platform-constitution-v1.md) owns platform
+invariants. This document is a non-normative vertical implementation record;
+the [Domain Model](domain-model-and-lifecycle.md), [Identity and Recovery](identity-and-recovery.md), [Action Safety](action-safety-and-credentials.md), and [Evidence Integrity](evidence-and-decision-integrity.md) describe source-specific algorithms.
 
 ## 1. Purpose
 

@@ -65,7 +65,7 @@ def render_observability(scan: dict, events: list[dict], operations: list[dict],
         {"name": "assessment_timeline_closed", "status": assessment_status,
          "reason": "The current Scan has no assessments" if not assessments else "An assessment.committed event is unlinked"},
         {"name": "lease_events_accounted", "status": "passed" if lease_events else "not_applicable",
-         "reason": "The run did not pass through the RuntimeRouter lease supervisor" if not lease_events else None},
+         "reason": "The run did not pass through the plugin runtime lease supervisor" if not lease_events else None},
         _check("privacy_gate_passed", privacy_ok, "The event stream contains unsanitized sensitive fields or values"),
     ]
     for item in checks:

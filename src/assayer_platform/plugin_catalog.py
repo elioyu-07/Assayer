@@ -1,17 +1,18 @@
-"""Remote plugin catalog: the ``plugins.json`` distribution index.
+"""Remote plugin catalog: the ``plugins.json`` compiled-artifact index.
 
 The catalog is deliberately dumb: one ``plugins.json`` file in a git repository
 acts as the registry of record for independently distributed audit plugins.  It
 maps a plugin ID to its published versions, each carrying only what a client
-needs to *download and verify* a wheel: a download URL and a SHA-256 digest.
+needs to *download and verify* one data-only ``compiled-plugin.json`` artifact:
+its artifact URL, type, and SHA-256 digest.
 
 Responsibility boundaries:
 
 * The catalog answers "what exists, where do I download it, is it intact".
-  It does **not** answer "is it compliant" — conformance is recomputed locally
-  by :mod:`assayer_platform.plugin_lifecycle` after materialization.
-* The catalog is read-only from the client's perspective.  Publication writes
-  it via a pull request (see the ``plugins publish`` host command).
+  It does **not** answer "is it compliant" — the compiled contract is
+  validated locally after materialization.
+* The catalog is read-only from the client's perspective.  Publication is an
+  external registry workflow; the Host only consumes validated entries.
 
 This module is intentionally free of network and plugin-code imports so it can
 be validated without any side effects.
@@ -31,7 +32,7 @@ from .contract import PlatformContractError
 
 
 CATALOG_FILENAME = "plugins.json"
-CATALOG_SCHEMA_VERSION = "1.0.0"
+CATALOG_SCHEMA_VERSION = "2.0.0"
 
 _ENTITY_ID = re.compile(r"^[A-Za-z][A-Za-z0-9._:-]{2,127}$")
 _SEMVER = re.compile(
@@ -48,7 +49,8 @@ class CatalogVersion:
     plugin_id: str
     version: str
     platform_api_version: str
-    wheel_url: str
+    artifact_url: str
+    artifact_type: str
     sha256: str
     published_at: str | None = None
 
@@ -107,12 +109,12 @@ def _is_mapping(value: Any) -> bool:
 
 def _validate_https_url(value: Any) -> None:
     if not isinstance(value, str):
-        raise _fail("PLUGIN_CATALOG_INVALID", "wheelUrl must be a string.")
+        raise _fail("PLUGIN_CATALOG_INVALID", "artifactUrl must be a string.")
     parsed = urlparse(value)
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
         raise _fail(
             "PLUGIN_CATALOG_INVALID",
-            f"wheelUrl must be an absolute http(s) URL: {value}",
+            f"artifactUrl must be an absolute http(s) URL: {value}",
         )
 
 
@@ -182,6 +184,15 @@ def parse_catalog(text: str) -> PluginCatalog:
                     "PLUGIN_CATALOG_INVALID",
                     f"Plugin {plugin_id}@{version} has a mismatched pluginId field.",
                 )
+            unknown_fields = set(version_value) - {
+                "pluginId", "version", "platformApiVersion", "artifactType",
+                "artifactUrl", "sha256", "publishedAt",
+            }
+            if unknown_fields:
+                raise _fail(
+                    "PLUGIN_CATALOG_INVALID",
+                    f"Plugin {plugin_id}@{version} has unsupported fields: {', '.join(sorted(unknown_fields))}.",
+                )
             platform_api_version = version_value.get("platformApiVersion")
             if not isinstance(platform_api_version, str) or not _SEMVER.fullmatch(platform_api_version):
                 raise _fail(
@@ -194,7 +205,13 @@ def parse_catalog(text: str) -> PluginCatalog:
                     "PLUGIN_CATALOG_INVALID",
                     f"Plugin {plugin_id}@{version} has an invalid sha256 digest.",
                 )
-            _validate_https_url(version_value.get("wheelUrl"))
+            artifact_type = version_value.get("artifactType")
+            if artifact_type != "compiled-plugin-contract":
+                raise _fail(
+                    "PLUGIN_CATALOG_INVALID",
+                    f"Plugin {plugin_id}@{version} must declare artifactType=compiled-plugin-contract.",
+                )
+            _validate_https_url(version_value.get("artifactUrl"))
             published_at = version_value.get("publishedAt")
             if published_at is not None and not isinstance(published_at, str):
                 raise _fail(
@@ -205,7 +222,8 @@ def parse_catalog(text: str) -> PluginCatalog:
                 plugin_id=plugin_id,
                 version=version,
                 platform_api_version=platform_api_version,
-                wheel_url=version_value["wheelUrl"],
+                artifact_url=version_value["artifactUrl"],
+                artifact_type=artifact_type,
                 sha256=sha256.lower(),
                 published_at=published_at,
             )
@@ -240,19 +258,6 @@ def latest_version(catalog: PluginCatalog, plugin_id: str) -> CatalogVersion:
     return max(plugin.versions.values(), key=lambda item: _version_key(item.version))
 
 
-def latest_published(catalog: PluginCatalog, plugin_id: str) -> str | None:
-    """Return the highest published version string, or None when unknown.
-
-    Unlike :func:`latest_version`, this is non-raising and used for the read-only
-    ``upgradable`` check: the client asks "what is the newest version the source
-    knows" and compares it against the installed version locally.
-    """
-    plugin = catalog.plugin(plugin_id)
-    if plugin is None:
-        return None
-    return max(plugin.versions.values(), key=lambda item: _version_key(item.version)).version
-
-
 def resolve_version(catalog: PluginCatalog, plugin_id: str, version: str | None = None) -> CatalogVersion:
     """Resolve an exact version, or the latest when none is requested."""
     if version is None:
@@ -274,16 +279,15 @@ def upsert_catalog_version(
     description: str,
     version: str,
     platform_api_version: str,
-    wheel_url: str,
+    artifact_url: str,
     sha256: str,
     published_at: str,
 ) -> str:
-    """Return catalog JSON text with a plugin version added or updated.
+    """Return catalog JSON text with a compiled artifact version added or updated.
 
     Preserves the existing catalog's plugin metadata and other versions, and
-    validates both the input and the result before returning.  Used by
-    ``plugins publish`` to compose the registry update without network side
-    effects.
+    validates both the input and the result before returning.  Registry
+    publication tooling can use this helper without network side effects.
     """
     parse_catalog(text)
     payload = json.loads(text)
@@ -298,7 +302,8 @@ def upsert_catalog_version(
         "pluginId": plugin_id,
         "version": version,
         "platformApiVersion": platform_api_version,
-        "wheelUrl": wheel_url,
+        "artifactType": "compiled-plugin-contract",
+        "artifactUrl": artifact_url,
         "sha256": sha256.lower(),
         "publishedAt": published_at,
     }

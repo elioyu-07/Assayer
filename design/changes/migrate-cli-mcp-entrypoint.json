@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-cli-mcp-entrypoint",
+  "changeType": "platform_change",
+  "title": "Point CLI MCP launchers at the compiled contract server",
+  "summary": "Remove the retired --mcp compatibility flag from internal CLI launchers and invoke the compiled-contract MCP entrypoint directly.",
+  "changedPaths": [
+    "src/assayer_host/cli.py",
+    "design/changes/migrate-cli-mcp-entrypoint.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["MCP process launch", "compiled runtime selection"],
+    "plugin": ["compiled declaration"],
+    "provider": ["provider implementation"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_runtime"]},
+  "forbiddenResponsibilities": ["retired --mcp compatibility flag", "legacy browser smoke runtime"],
+  "publicContractImpact": "breaking",
+  "acceptance": ["CLI audit and serve launch mcp_main without --mcp", "compiled MCP tool names are the only execution surface"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by continuing the no-compatibility hard cut."},
+  "state": "verified"
+}

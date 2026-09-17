@@ -1,5 +1,9 @@
 # Codex 自然语言插件全生命周期计划
 
+> **历史计划。** 本文记录硬切之前的生命周期设计，仅用于追溯，不能作为
+> 当前实现依据。当前普通插件只有声明源和 `compiled-plugin.json`，Provider
+> 的 Python 发布链另受平台契约约束。
+
 | 元数据 | 内容 |
 |---|---|
 | 文档版本 | 1.0.1 |
@@ -242,7 +246,7 @@ plan token 必须：
 absent
 available
 installed
-upgradable
+catalog-resolvable
 dirty
 blocked
 completed

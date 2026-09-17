@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -21,27 +22,39 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_SOURCE = ROOT / "plugins" / "assayer"
 
 
-def _validate_plugin_releases() -> None:
-    """Compile and validate the Frontend Policy Pack source of truth."""
+def _compiled_first_party_plugins() -> tuple[dict[str, object], ...]:
+    """Compile every first-party declaration plugin into a verified artifact."""
     source_root = str(ROOT / "src")
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from assayer_platform.conformance import inspect_plugin_package
-    from assayer_platform.simple_plugin_compiler import compile_simple_plugin
+    from assayer_platform.compiled_plugin_contract import load_compiled_plugin_contract
+    from assayer_platform.declaration_compiler import compile_plugin_contract
 
-    with tempfile.TemporaryDirectory(prefix="assayer-frontend-gate-") as directory:
-        generated = Path(directory) / "generated"
-        compile_simple_plugin(
-            ROOT / "plugins" / "frontend-audit",
-            generated,
-            distribution_name="assayer-plugin-frontend-audit",
-        )
-        report = inspect_plugin_package(generated)
-        if not report.passed:
-            raise SystemExit(
-                "compiled frontend plugin conformance failed: "
-                + json.dumps(report.as_dict(), sort_keys=True)
-            )
+    plugins_root = ROOT / "plugins"
+    sources = tuple(
+        path for path in sorted(plugins_root.iterdir())
+        if path.is_dir() and (path / "plugin.yaml").is_file()
+    )
+    compiled: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    for source in sources:
+        if re.fullmatch(r"[A-Za-z0-9._-]+", source.name) is None:
+            raise SystemExit(f"invalid first-party plugin directory name: {source.name}")
+        with tempfile.TemporaryDirectory(prefix=f"assayer-{source.name}-gate-") as directory:
+            generated = Path(directory) / "generated"
+            compile_plugin_contract(source, generated)
+            contract = load_compiled_plugin_contract(generated)
+            if contract.plugin_id in seen_ids:
+                raise SystemExit(f"duplicate first-party plugin identity: {contract.plugin_id}")
+            seen_ids.add(contract.plugin_id)
+            payload = (generated / "compiled-plugin.json").read_bytes()
+        compiled.append({
+            "pluginId": contract.plugin_id,
+            "pluginVersion": contract.version,
+            "file": f"{source.name}.compiled-plugin.json",
+            "payload": payload,
+        })
+    return tuple(compiled)
 
 
 def _versions(path: Path) -> tuple[str, str]:
@@ -67,10 +80,9 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
     """Populate the bundle wheelhouse with the split runtime dependencies.
 
     The root ``assayer`` wheel is platform-only and depends on the separately
-    built SDK; the plugins and providers ship as their own wheels.  Build the
-    five split wheels first, then resolve the platform-only root wheel (plus
-    Playwright and the MCP SDK) against them so no unpublished distribution is
-    fetched. The resulting runtime wheelhouse contains six Assayer wheels.
+    built SDK. Build the SDK and Agent first, then resolve the platform-only
+    root wheel (plus Playwright and the MCP SDK). Concrete Providers are not
+    shipped; ordinary plugins are bundled separately as data-only contracts.
     """
     scripts = str(Path(__file__).resolve().parent)
     if scripts not in sys.path:
@@ -82,9 +94,6 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
         distributions=(
             "assayer-plugin-sdk",
             "assayer-agent",
-            "assayer-plugin-frontend-audit",
-            "assayer-provider-markdown",
-            "assayer-provider-browser",
         ),
     )
     build_root(
@@ -93,7 +102,7 @@ def _build_wheelhouse(wheel_dir: Path, *, python: str) -> None:
 
 
 def build(output: Path, *, python: str) -> tuple[Path, Path]:
-    _validate_plugin_releases()
+    compiled_plugins = _compiled_first_party_plugins()
     package_version, plugin_version = _versions(PLUGIN_SOURCE)
     release_root = output / f"assayer-plugin-{plugin_version}"
     archive = output / f"assayer-plugin-{plugin_version}.zip"
@@ -103,6 +112,11 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
         archive.unlink()
     output.mkdir(parents=True, exist_ok=True)
     shutil.copytree(PLUGIN_SOURCE, release_root)
+
+    plugin_contract_dir = release_root / "runtime" / "plugins"
+    plugin_contract_dir.mkdir(parents=True, exist_ok=True)
+    for item in compiled_plugins:
+        (plugin_contract_dir / str(item["file"])).write_bytes(item["payload"])
 
     wheel_dir = release_root / "runtime" / "wheels"
     shutil.rmtree(wheel_dir)
@@ -123,6 +137,15 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "platform": sysconfig.get_platform(),
         },
         "wheels": wheels,
+        "pluginContracts": [
+            {
+                "pluginId": item["pluginId"],
+                "pluginVersion": item["pluginVersion"],
+                "file": item["file"],
+                "sha256": hashlib.sha256(item["payload"]).hexdigest(),
+            }
+            for item in compiled_plugins
+        ],
     }
     (release_root / "runtime" / "bundle-manifest.json").write_text(
         json.dumps(bundle_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -141,9 +164,6 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "--find-links",
             str(wheel_dir),
             f"assayer[browser,mcp]=={package_version}",
-            "assayer-plugin-frontend-audit",
-            "assayer-provider-markdown",
-            "assayer-provider-browser",
         ])
         _run([
             str(venv_python),
@@ -151,13 +171,12 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "from importlib import metadata; "
             "plugins=[e.name for e in metadata.entry_points().select(group='assayer.plugins')]; "
             "providers=[e.name for e in metadata.entry_points().select(group='assayer.providers')]; "
-            "assert plugins==['assayer.frontend-audit'], plugins; "
-            "assert sorted(providers)==['browser', 'markdown'], providers; "
-            "from assayer_platform import installed_plugin_registry, installed_provider_registry; "
-            "installed_plugin_registry().select(plugin_id='assayer.frontend-audit'); "
-            "installed_provider_registry().select(capability='document_navigation'); "
-            "from assayer_host.core import HostCore; from assayer_host.transport import McpToolTransport; "
-            "h=HostCore(); assert len(McpToolTransport(h).list_tools()) == 17",
+            "assert plugins==[], plugins; "
+            "assert providers==[], providers; "
+            "from assayer_platform import installed_provider_registry; "
+            "assert installed_provider_registry().list()==(), installed_provider_registry().list(); "
+            "from assayer_host.transport import create_compiled_mcp_server; "
+            "assert callable(create_compiled_mcp_server)",
         ])
         # Exercise explicit runtime preparation followed by the lightweight
         # product launcher from a clean private cache. MCP receives EOF
@@ -183,7 +202,7 @@ def build(output: Path, *, python: str) -> tuple[Path, Path]:
             "-c",
             "from importlib import metadata; "
             "providers={e.name for e in metadata.entry_points().select(group='assayer.providers')}; "
-            "assert providers == {'browser', 'markdown'}, providers",
+            "assert providers == set(), providers",
         ])
         subprocess.run(
             [str(release_root / "scripts" / "launch_assayer_mcp")],

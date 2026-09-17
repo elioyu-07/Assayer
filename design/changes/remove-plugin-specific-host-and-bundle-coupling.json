@@ -1,0 +1,78 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-plugin-specific-host-and-bundle-coupling",
+  "changeType": "contract_change",
+  "title": "Remove concrete domain-plugin assumptions from Host routing and bundle delivery",
+  "summary": "Make first-party plugin discovery, compilation, bundle manifests, and runtime preparation generic over every declaration-only plugin under plugins/, with no default or required domain plugin.",
+  "changedPaths": [
+    "src/assayer_host/cli.py",
+    "src/assayer_host/plugin_lifecycle_mcp.py",
+    "scripts/build_plugin_bundle.py",
+    "plugins/assayer/scripts/prepare_assayer_runtime",
+    "tests/test_cli.py",
+    "tests/test_compiled_plugin_lifecycle.py",
+    "tests/test_install_matrix.py",
+    "tests/test_plugin_packaging.py",
+    "tests/test_frontend_migration.py",
+    "docs/j01-install-delivery.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "generic plugin discovery and input matching",
+      "compilation of first-party declaration directories",
+      "bundle manifest and artifact integrity",
+      "runtime preparation and installation of listed artifacts"
+    ],
+    "plugin": [
+      "declaration source under its own plugins/<name> directory",
+      "business identity, checks, dimensions, guidance, and cases"
+    ],
+    "provider": [
+      "source capability registration and typed snapshots"
+    ],
+    "agent": [
+      "clarification when multiple installed plugins match a target"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": [
+      "generic_first_party_plugin_discovery",
+      "multi_artifact_bundle_manifest",
+      "manifest_driven_runtime_preparation",
+      "no_domain_default_route"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "Host default selection of a named domain plugin",
+    "bundle builder hardcoded plugin identity",
+    "runtime preparer hardcoded plugin artifact",
+    "platform business rules",
+    "ordinary plugin Python or registration entry point",
+    "compatibility alias for removed concrete-plugin assumptions"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "generic-plugin-discovery",
+    "multi-plugin-bundle-build",
+    "manifest-driven-runtime-preparation",
+    "no-named-domain-default",
+    "architecture-boundary",
+    "document-boundary",
+    "plugin-source-boundary",
+    "install-matrix",
+    "full-test-suite"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved as the hard-cut removal of concrete plugin assumptions from platform routing and product delivery."
+  },
+  "state": "approved"
+}

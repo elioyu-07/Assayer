@@ -60,10 +60,6 @@ def _next_action(value: Any) -> str:
     return {
         "discover_work_items": "Discover the next bounded WorkItem batch.",
         "inspect_work_items": "Inspect the next bounded WorkItem batch.",
-        "advance_plugin_run": "Continue the Run with the requested Agent review or decision.",
-        "advance_plugin_run_or_recover_work_item": (
-            "Continue the Run after resolving the reported WorkItem failure."
-        ),
         "recover_work_item": "Recover or classify the failed WorkItem before continuing.",
         "finish_plugin_run": "Validate coverage and publish the terminal result.",
     }.get(value, "No further action is required." if value is None else _diary_text(value))

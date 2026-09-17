@@ -4,9 +4,13 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-10 |
-| Status | SDK, agent, plugin, provider, and platform split implemented; root `assayer` is platform-only |
+| Status | SDK, agent, platform, and compiled-plugin artifact split implemented; no concrete Provider is shipped |
 | Owner | Assayer maintainers |
 | Authority | Platform--Plugin Boundary Contract v1 §5, plugin-version-axes-v1 |
+
+> **Plugin-specific release inventory.** This document names the concrete
+> distributions currently shipped. It does not add any plugin or provider
+> name to the platform vocabulary or constitution.
 
 ## 1. Target distributions
 
@@ -14,18 +18,14 @@
 |---|---|---|---|---|
 | `assayer-plugin-sdk` | `assayer_plugin_sdk` | `jsonschema` | — | **split** |
 | `assayer-agent` | `assayer_agent` | `assayer-plugin-sdk` | — | **split** |
-| `assayer-plugin-frontend-audit` | `assayer_frontend_audit` | `assayer-plugin-sdk` | `assayer.plugins` → `assayer.frontend-audit` | **compiler-generated Policy Pack** |
 | `assayer-platform` | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | **split** |
-| `assayer-provider-markdown` | `assayer_document_navigation` | `assayer-plugin-sdk` | `assayer.providers` → `markdown` | **split** |
-| `assayer-provider-browser` | `assayer_browser_provider` | `assayer-plugin-sdk` | `assayer.providers` → `browser` | **split + release-gated** |
 | `assayer` (product base) | `assayer_platform`, `assayer_host` | `assayer-plugin-sdk`, `jsonschema` | platform CLIs | platform-only |
 
 ## 2. Layout
 
-Each split distribution except Frontend has a build config under
-`packages/<distribution>/`. The Frontend wheel is compiled exclusively from
-the ordinary author source at `plugins/frontend-audit/`; no hand-written
-runtime package or alternate build descriptor remains.
+Each Python distribution has a build config under `packages/<distribution>/`.
+Ordinary plugins are compiled from declaration sources into a standalone
+`compiled-plugin.json` artifact and do not have a Python distribution.
 
 The other distributions build from the shared `src/` tree:
 
@@ -33,8 +33,6 @@ The other distributions build from the shared `src/` tree:
 packages/
   assayer-plugin-sdk/pyproject.toml
   assayer-agent/pyproject.toml
-  assayer-provider-markdown/pyproject.toml
-  assayer-provider-browser/pyproject.toml
   assayer-platform/pyproject.toml
 ```
 
@@ -50,8 +48,8 @@ Build every distribution and clean the staging metadata in one step:
 python scripts/build_distributions.py
 ```
 
-Build the Frontend wheel through the aggregate command above. The compiler is
-the only supported path and always emits the package metadata and entry point.
+The aggregate command builds only platform, SDK, and Agent wheels.
+Plugin declarations are verified separately and emit only `compiled-plugin.json`.
 
 > Building a split wheel writes a `<package>.egg-info` directory under `src/`.
 > These are gitignored, but they pollute `importlib.metadata.entry_points()` in
@@ -68,12 +66,7 @@ provider distributions alongside the platform root:
 ```bash
 pip install -e packages/assayer-plugin-sdk
 pip install -e packages/assayer-agent
-# Providers may be editable during platform development.  Install the
-# frontend from the compiler-produced wheel emitted by build_distributions.py.
-pip install -e packages/assayer-provider-markdown \
-            -e packages/assayer-provider-browser -e '.[test]'
-python scripts/build_distributions.py --output /tmp/assayer-wheels
-pip install --force-reinstall /tmp/assayer-wheels/assayer_plugin_frontend_audit-*.whl
+pip install -e '.[test]'
 ```
 
 ## 3. Rules
@@ -94,11 +87,10 @@ pip install --force-reinstall /tmp/assayer-wheels/assayer_plugin_frontend_audit-
 - SDK Schema single-sourcing is complete: public contract schemas exist only in
   `assayer_plugin_sdk/schemas`, while the platform wheel ships only
   platform-owned resources and resolves shared references through the SDK.
-- `assayer-provider-browser` exposes the SDK-only snapshot adapter. The Host
-  now supports static or per-Run opaque provider-runtime injection; production
-  browser lifecycle acceptance still belongs to the BrowserHostRuntime/J04-J08
-  operator gate and is not replaced by fixture execution.
-- The aggregate split build compiles the Frontend Policy Pack into the release
-  wheel. The generated wheel carries the common-review registration, browser
-  capability contract, and `frontend_object` subject kind. The former source
-  compatibility adapter has been removed.
+- Concrete capability Providers are intentionally absent from this release.
+  The platform retains only the generic Provider contract, registry, and
+  negotiation boundary; a request requiring an unavailable capability fails
+  closed.
+- The product bundle carries the Frontend compiled contract as data under its
+  runtime plugin directory. It is loaded by the platform lifecycle and does not
+  register a Python entry point.

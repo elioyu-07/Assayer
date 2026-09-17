@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "markdown-review-closure-acceptance",
+  "changeType": "platform_change",
+  "title": "Close and verify the Markdown compiled review journey",
+  "summary": "Complete the approved Markdown evidence rejection and durable review-to-result acceptance using the existing compiled runtime and CoverageLedger; preserve five-state decisions and Host-issued evidence in terminal results.",
+  "changedPaths": [
+    "src/assayer_platform/compiled_interactive.py",
+    "src/assayer_host/transport.py",
+    "tests/test_compiled_interactive.py",
+    "tests/test_compiled_transport.py",
+    "design/changes/markdown-review-closure-acceptance.json",
+    "design/markdown-review-closure-acceptance.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md",
+    "docs/capability-provider-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Evidence validation, durable CoverageLedger, terminal result projection and retrieval"
+    ],
+    "plugin": [
+      "Domain Check and Dimension meaning"
+    ],
+    "provider": [
+      "Frozen source units and source-bound Evidence"
+    ],
+    "agent": [
+      "Bounded semantic decisions referencing Host-issued Evidence"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [
+      "markdown"
+    ],
+    "required": [
+      "document_navigation",
+      "evidence_binding",
+      "bounded_review_batch",
+      "exhaustive_coverage"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "Legacy runtime restoration",
+    "Plugin-owned Evidence or persistence",
+    "Browser implementation changes",
+    "New domain semantics"
+  ],
+  "publicContractImpact": "safety",
+  "acceptance": [
+    "Reject forged, foreign, stale and atom-incompatible evidence without ledger mutation",
+    "Reject incomplete and duplicate batch decisions without mutation",
+    "Prove multi-page Markdown collection and multi-batch review through persisted terminal coverage and result",
+    "Preserve five-state decisions and evidence provenance after finalization",
+    "Prevent review replanning or source recollection from replacing accepted or terminal coverage",
+    "Run architecture, document, plugin source, design confirmation and focused and fast regression checks"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-17T03:39:28.647492+00:00",
+    "decision": "User approved the proposed evidence tests, complete Markdown review-to-ledger-to-result journey, governance checks and reviewable commits with 好的，继续推进."
+  },
+  "state": "approved",
+  "supersedes": "markdown-evidence-submission-binding"
+}

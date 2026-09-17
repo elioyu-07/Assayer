@@ -1,5 +1,5 @@
 checks:
-  - id: FUA-10
+  - id: FUA-01
     title: Frontend filter behavior
     description: The filter interaction must be present, usable, resettable, and bound to the displayed list.
     applicability: Frontend pages that expose a filter over a result list.

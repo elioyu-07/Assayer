@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-kernel-off-plugin-registry",
+  "changeType": "platform_change",
+  "title": "Remove PluginRegistry imports from platform execution modules",
+  "summary": "Keep retired registry-based methods unreachable without importing the deleted registry module; compiled contract execution remains the active path.",
+  "changedPaths": [
+    "src/assayer_platform/kernel.py",
+    "src/assayer_platform/provider_binding.py",
+    "src/assayer_platform/runner.py",
+    "design/changes/migrate-kernel-off-plugin-registry.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled runtime", "kernel invariants", "provider binding"],
+    "plugin": ["compiled declaration"],
+    "provider": ["capability registration"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_runtime"]
+  },
+  "forbiddenResponsibilities": [
+    "kernel import of PluginRegistry",
+    "provider binding import of PluginRegistration",
+    "runner import of legacy registry module"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "kernel and provider binding import without plugin_registry.py",
+    "legacy runner remains fail-closed",
+    "compiled runtime tests remain green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

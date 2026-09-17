@@ -1,7 +1,11 @@
 # Independent Plugin Lifecycle — Design
 
-Status: current source-materialization implementation recorded; wheel-only
-target required by Platform Constitution v1.1 is not implemented
+Status: historical lifecycle design; superseded by compiled-plugin lifecycle
+
+> **Superseded.** This document records the pre-hard-cut source-materialization
+> and executable-plugin design. It is not an implementation guide. Ordinary
+> plugins now install only the exact `compiled-plugin.json` artifact; Python
+> package release remains a platform/Provider concern.
 
 ## Purpose
 

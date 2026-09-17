@@ -1,0 +1,20 @@
+{
+  "visible_text": "Orders\nFilter\nQuery",
+  "entrypoints": [
+    {"kind": "safe_action", "intent": "query"}
+  ],
+  "candidates": [
+    {"kind": "filter_region", "label": "Order filters"},
+    {"kind": "result_list", "label": "Orders"}
+  ],
+  "network_summary": {"status": "not_observed"},
+  "route": "/orders",
+  "state_kind": "page",
+  "structure_summary": {"fields": 1, "tables": 1},
+  "active_tab": null,
+  "dom_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "visual_digest": null,
+  "url": "https://example.test/orders-no-reset",
+  "origin": "https://example.test",
+  "title": "Orders"
+}

@@ -8,9 +8,16 @@
 | Owner | Product Owner / Assayer Maintainers |
 | Baseline | Current design on `main` |
 
+> **Non-normative legacy vertical design record.** The invariants and terms in
+> this document describe the original source-specific implementation. They are
+> retained for migration traceability only. The Platform Constitution and v1
+> contracts are the sole normative authority for platform boundaries.
+
 ## 1. Purpose
 
-This document defines authority order, system invariants, shared terminology, change rules, and open-question handling. It does not own specific tool fields or browser algorithms; downstream specialist documents do.
+This document records the original vertical design's terminology, decisions,
+and open-question handling. It does not define platform authority or own
+specific tool fields or source algorithms; downstream specialist documents do.
 
 ## 2. Document Authority Order
 
@@ -24,7 +31,8 @@ Resolve semantic conflicts in this order:
    Development Standard, and Simple Plugin Authoring Architecture: the
    domain-only author surface, generated contracts, incremental review, and
    Advanced SPI admission;
-5. This document: frontend-product invariants, trust boundaries, and design governance;
+5. Non-normative vertical design records, including this document: historical
+   implementation context only;
 6. The capability-provider and canonical-result contracts;
 7. Top-level architecture: component responsibilities, dependency direction, and transaction boundaries;
 8. LLM investigation orchestration: multi-turn Agent loop, coverage Findings, stopping, and model-failure semantics;

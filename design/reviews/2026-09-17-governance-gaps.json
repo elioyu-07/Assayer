@@ -1,0 +1,245 @@
+{
+  "status": "pending_explicit_disposition",
+  "baseCommit": "42d53cc5da91b6397cb411ceea516b4906d8d120",
+  "note": "Review snapshot only. Not a Design Confirmation or evidence of historical preflight approval.",
+  "paths": [
+    {
+      "path": "docs/agent-domain-result-boundary-v2.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "e287938914c73c526932a82dd6fbfbc1bcb8692e5e6edff4e929105cec057edf",
+      "worktreeSha256": "811bffa581f03ab8f758fc96c87adbb957e6767bcbd51154afae50699630ab92"
+    },
+    {
+      "path": "docs/agent-first-plugin-lifecycle-design.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "a905016ba736b98032e99e26c6069c20791f48814d5c1bc6c151ba9747bf13c6",
+      "worktreeSha256": "a58bbaeb429f9df71610cad27e2065538c346f153810f2ea2c491e60893ab213"
+    },
+    {
+      "path": "docs/architecture.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "406e32e4fbe0c7ed4f4054989552f50f8ed6802d404fed4562653087571189b9",
+      "worktreeSha256": "6b81654d6dded8a396d56f0dede5ad725860f528b85ae1269486ba32c5d59ac0"
+    },
+    {
+      "path": "docs/codex-natural-language-plugin-lifecycle-acceptance.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "6344ac39ec9a6d778d80df49183d10781891aa34fba9009d7509062cb9b9d074",
+      "worktreeSha256": "2f4ca87a96fd0c8bd6ce5be80f473fc86da583b5ff49ca070b7bd959c9fef073"
+    },
+    {
+      "path": "docs/codex-natural-language-plugin-lifecycle-plan.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "ca09807dc5b8bb805b6da42e1b42fa9aeca47773d6b5543b70233e6a1a913d19",
+      "worktreeSha256": "0ef052ff609043383c45788a11159aa1e3ddcfb3a113e29d5c4084d0a8dddf98"
+    },
+    {
+      "path": "docs/design-governance.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "d82bfc2e3da366e770ef5b0f5da172ef5b19f7db0b81b606a1a48424d2126b8d",
+      "worktreeSha256": "28adc1d69e35895518b26e913d7655f344727df2095c76ac50df30c0621058f9"
+    },
+    {
+      "path": "docs/markdown-navigation-capability.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "d66adf180ae3af83f98a30e626aa44681649d1552baf050cfa147b9655ce4e21",
+      "worktreeSha256": "eecf0f6f1dfd3cb9f96b158fb83ed2981499bdfbe283e7990700642fde19c219"
+    },
+    {
+      "path": "docs/operator-release-gate-v1.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "c07a6deeff34f651ab20cd465e52c8bd574f4e04bc891144b303a3f853f92ff7",
+      "worktreeSha256": "dee614a3247212ac66b5dab81aad9cb31111d01848326de06ec5f64e4d015b6f"
+    },
+    {
+      "path": "docs/platform-contract.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "ab80f48090dbfd30a799c8d6e7f4fbfeddb0a2a1cd0980a9c5129331eae7bd62",
+      "worktreeSha256": "f2642a4a73e7289f08a724eabf016134b2bd492d6cd9679432f28850dac107a4"
+    },
+    {
+      "path": "docs/platform-foundation-and-user-journey-plan.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "1f116b0aed281040acde644aac37e9257d5c2a18c0c52ff0ac60a8099b5db5a2",
+      "worktreeSha256": "79657e33bb79785e3207394eb7fa6150454d1462a0cdf46c8062612cf3d30ad2"
+    },
+    {
+      "path": "docs/plugin-lifecycle-design.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "e575be75e27f26c9640b0890c03c06f63a9e9dcd715bcdd2f07388bc79be6abe",
+      "worktreeSha256": "72db8a8a6a6166b7361774f06e0126f74739185c194bcf2769f8c47ecfb9ebfd"
+    },
+    {
+      "path": "docs/plugin-protocol-v1.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "7ed4aef2af13718028d74600d05bc2a993eb237bb8a5e3fef655b0871be2289b",
+      "worktreeSha256": "c22e6e486fc83310cc43f28965288b98beef72b1ec52256eb5a947bd6f9ef492"
+    },
+    {
+      "path": "docs/plugin-sdk-schema-ownership.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "95cd4d9187661c23e005a0c207aa501680fbb2fb508503d0387bc3d617b34ad4",
+      "worktreeSha256": "7450b709dcab65c08922001e4b3a6745ae9dbe408d87ca1e4a209e8da498148b"
+    },
+    {
+      "path": "docs/plugin-version-axes-v1.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "86554ec105d2e1a8895acdaf8302d923991096e25cb26858c98562b2889541d7",
+      "worktreeSha256": "f4a7bd01c253331f2130f383050ba7a1800555d6ce163caf8583b937e5168a2c"
+    },
+    {
+      "path": "docs/product-contract.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "929dfac5d6f798e89552802aa906b2951570528728b4d15344f4149f2764c17a",
+      "worktreeSha256": "f4f6ec319bcc3c340b5c4c72fbfabb794366c9318b71b91a76108a61d83efc55"
+    },
+    {
+      "path": "docs/spec-review-getting-started.md",
+      "category": "documents",
+      "status": "modified",
+      "headSha256": "e93ed06a927242a1d5e7a21d92400fd34da55d25840ef033319f8d7ccc9ca7ff",
+      "worktreeSha256": "0da4cbbe2749c16173558bc47283ffbcac6eb90fcf37c1a47addc9c78c3ad7bd"
+    },
+    {
+      "path": "plugins/assayer/.codex-plugin/plugin.json",
+      "category": "bundle_version",
+      "status": "modified",
+      "headSha256": "65a8448da28fdf38f237d47844db9993d6ce8ef79d2be388cbee7dc624fb4bcf",
+      "worktreeSha256": "105d41f602fce43e11c498d226764b96ad29bf98f353443b5c56fffd0446d110"
+    },
+    {
+      "path": "plugins/frontend-audit/cases/orders-insufficient.json",
+      "category": "frontend_identity_and_cases",
+      "status": "untracked",
+      "headSha256": null,
+      "worktreeSha256": "bd74e8a3a4d733ef98883634bb517e10e59418446c03a677bcb5290f2b5e4cd7"
+    },
+    {
+      "path": "plugins/frontend-audit/cases/orders-insufficient.yaml",
+      "category": "frontend_identity_and_cases",
+      "status": "untracked",
+      "headSha256": null,
+      "worktreeSha256": "4e5c8c402c3e3b803b2e9bfb3f574d88aae240392524536c01a0d29d8a67bd86"
+    },
+    {
+      "path": "plugins/frontend-audit/cases/orders-no-reset.json",
+      "category": "frontend_identity_and_cases",
+      "status": "untracked",
+      "headSha256": null,
+      "worktreeSha256": "69855ef2ce0a1a637b09e473e8532a672327f77bdc39542cb4a83161f7f3a3a4"
+    },
+    {
+      "path": "plugins/frontend-audit/cases/orders-no-reset.yaml",
+      "category": "frontend_identity_and_cases",
+      "status": "untracked",
+      "headSha256": null,
+      "worktreeSha256": "b72413f66ce4733de85db85e2787d29e08ff3693bf9b3651824bff0f75e577e7"
+    },
+    {
+      "path": "plugins/frontend-audit/checks.yaml",
+      "category": "frontend_identity_and_cases",
+      "status": "modified",
+      "headSha256": "3dc77352ce9b28848ce9383ca59ff2e42584d8acd48b1331f2ebad73a85d3b9a",
+      "worktreeSha256": "0248a082d459f3f3ba72c490f3649e1fad4211fa45993f3febc16a30508e4541"
+    },
+    {
+      "path": "rules/FUA-10-v1.1.md",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "a5b9604801b361ae9f756e899c9e7b058deadce9e83c3669127f217173f8c32e",
+      "worktreeSha256": null
+    },
+    {
+      "path": "rules/FUA-10.md",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "670900a79376d791f95b00436a9f28f320d2a5cd9a3e07228114ec760a43d53a",
+      "worktreeSha256": null
+    },
+    {
+      "path": "rules/_template.md",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "ec20cd800919e77e1b3bf993e3d4c68320e55e6be84b593a7bcf7107af10c982",
+      "worktreeSha256": null
+    },
+    {
+      "path": "rules/registry.json",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "ad0c3cf2ce467894176d1744f115d5a8d3ed1da95854a8976a5e54004de45526",
+      "worktreeSha256": null
+    },
+    {
+      "path": "src/assayer_host/__main__.py",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "739ca75b53ee8e1057e6ad56c1a73b69f4e8c89a12d3c1cd5d25b3665108d1c1",
+      "worktreeSha256": null
+    },
+    {
+      "path": "src/assayer_host/browser_runtime.py",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "cebdd31f9af94f9fd2f30688569c1b71813c424798c3179ecab9f4dd525157ad",
+      "worktreeSha256": null
+    },
+    {
+      "path": "src/assayer_host/core.py",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "f11aba888e14da29ccd8005a60b8b12bda90da912346d62409f161cf6d801dc4",
+      "worktreeSha256": null
+    },
+    {
+      "path": "src/assayer_host/harness.py",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "4c9e1ad2fed50e07cdb07cf0203d15389a183e4c4871e171ba9fe504a65821d2",
+      "worktreeSha256": null
+    },
+    {
+      "path": "src/assayer_host/observability.py",
+      "category": "retired_host_and_rules",
+      "status": "modified",
+      "headSha256": "2f065c2e9b4e59bafc2d53af2917d91df51bbe951c20a02b53240d881bec48d4",
+      "worktreeSha256": "2114630b3521ca81e2d45f8dd8e78bb60e5a3ddadd98aa461c78d35036a23ed1"
+    },
+    {
+      "path": "src/assayer_host/platform_store.py",
+      "category": "retired_host_and_rules",
+      "status": "modified",
+      "headSha256": "4d10c53222e532ccf170545e17b9715c40640d176467dd363d54d18e91737a11",
+      "worktreeSha256": "63e119bccaf249b4970c545e2c2eb202b0b82d6bc530f43c4fa669fb95510d15"
+    },
+    {
+      "path": "src/assayer_host/resources.py",
+      "category": "retired_host_and_rules",
+      "status": "modified",
+      "headSha256": "765278cfaa82fe35f534f0881899a165f700254e008ba28b35eab2026f94e4aa",
+      "worktreeSha256": "c6486b8356740b6b7c77e3b5f315fd32ca699596b524608a1cd8ec2f0748c19c"
+    },
+    {
+      "path": "src/assayer_host/runtime_router.py",
+      "category": "retired_host_and_rules",
+      "status": "deleted",
+      "headSha256": "9fdececd214aa31c7dd988afeac847dc6be08fd460da311bae37daca936b3af3",
+      "worktreeSha256": null
+    }
+  ]
+}

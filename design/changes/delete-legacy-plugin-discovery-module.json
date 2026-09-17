@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "delete-legacy-plugin-discovery-module",
+  "changeType": "platform_change",
+  "title": "Delete the empty Python plugin discovery compatibility module",
+  "summary": "Remove the module that exposed empty legacy PluginRegistry discovery functions and make Host readiness resolve compiled contract records directly.",
+  "changedPaths": [
+    "src/assayer_platform/plugin_discovery.py",
+    "src/assayer_platform/__init__.py",
+    "src/assayer_host/plugin_store_registry.py",
+    "src/assayer_host/readiness.py",
+    "design/changes/delete-legacy-plugin-discovery-module.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract discovery", "readiness inspection"],
+    "plugin": ["compiled contract artifact"],
+    "provider": ["capability discovery"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_discovery"]
+  },
+  "forbiddenResponsibilities": [
+    "empty legacy PluginRegistry discovery",
+    "Python entry-point plugin lookup",
+    "readiness based on plugin manifest registration"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "plugin_discovery.py is deleted",
+    "top-level package no longer exports installed_plugin_registry",
+    "readiness checks compiled lifecycle records",
+    "Host imports remain loadable without the deleted module"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

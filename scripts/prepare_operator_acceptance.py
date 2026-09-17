@@ -19,9 +19,11 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE_GATE = "OPR-J04-B01"
+OPERATOR_PLUGIN_ID = os.environ.get("ASSAYER_OPERATOR_PLUGIN_ID", "example-plugin")
+OPERATOR_INPUT = os.environ.get("ASSAYER_OPERATOR_INPUT", "document.md")
 BASELINE_PROMPTS = (
-    "Install ass-spec from the configured Assayer catalog.",
-    "Use ass-spec to review the controlled spec.md input.",
+    f"Install {OPERATOR_PLUGIN_ID} from the configured Assayer catalog.",
+    f"Use {OPERATOR_PLUGIN_ID} to review the controlled {OPERATOR_INPUT} input.",
     "Show the conclusion and the full report location.",
 )
 

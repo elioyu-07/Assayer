@@ -50,7 +50,7 @@ class PluginPackagingContractTests(unittest.TestCase):
         setuptools = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
         data_files = setuptools["data-files"]
         self.assertEqual(data_files["share/assayer/schemas/protocol"], ["schemas/protocol/*.json"])
-        self.assertIn("rules/registry.json", data_files["share/assayer/rules"])
+        self.assertNotIn("share/assayer/rules", data_files)
 
     def test_platform_only_root_ships_no_plugin_packages(self):
         root = tomllib.loads((ROOT / "pyproject.toml").read_text())
@@ -77,9 +77,33 @@ class PluginPackagingContractTests(unittest.TestCase):
         self.assertIn("playwright==1.62.0", extras["browser"])
         self.assertIn("mcp==1.27.0", extras["mcp"])
 
-    def test_bundle_runtime_preparation_installs_browser_provider(self):
+    def test_bundle_runtime_preparation_installs_no_concrete_provider(self):
         preparer = (PLUGIN / "scripts" / "prepare_assayer_runtime").read_text()
-        self.assertIn('"assayer-provider-browser"', preparer)
+        self.assertNotIn("assayer-provider-markdown", preparer)
+        self.assertNotIn("assayer-provider-browser", preparer)
+
+    def test_bundle_and_runtime_paths_are_not_bound_to_a_domain_plugin(self):
+        builder = (ROOT / "scripts" / "build_plugin_bundle.py").read_text()
+        preparer = (PLUGIN / "scripts" / "prepare_assayer_runtime").read_text()
+        for source in (builder, preparer):
+            self.assertNotIn("ass-spec", source)
+            self.assertNotIn("frontend-audit", source)
+            self.assertNotIn("assayer.frontend-audit", source)
+
+    def test_bundle_compiler_discovers_first_party_declaration_plugins(self):
+        from scripts.build_plugin_bundle import _compiled_first_party_plugins
+
+        compiled = _compiled_first_party_plugins()
+        self.assertTrue(compiled)
+        sources = {
+            path.name for path in (ROOT / "plugins").iterdir()
+            if path.is_dir() and (path / "plugin.yaml").is_file()
+        }
+        self.assertEqual(
+            {item["file"] for item in compiled},
+            {f"{name}.compiled-plugin.json" for name in sources},
+        )
+        self.assertEqual(len({item["pluginId"] for item in compiled}), len(compiled))
 
 
 if __name__ == "__main__":

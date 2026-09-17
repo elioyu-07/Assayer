@@ -4,11 +4,11 @@
 |---|---|
 | Document version | 0.1.0 |
 | Date | 2026-09-09 |
-| Status | Superseded for ordinary authoring; retained as the current Advanced SPI migration record |
+| Status | Historical result-boundary record; superseded and not executable |
 | Owner | Assayer maintainers |
 | Scope | Agent-facing interactive plugin submission and Plugin SDK ownership |
 
-> This document records the current SDK v2 DomainResult implementation. The
+> This document records an earlier SDK v2 DomainResult implementation. The
 > ordinary authoring target no longer asks a plugin to declare a complete
 > DomainResult Schema or mapper. Platform Constitution v1.1, the Audit Plugin
 > Contract v1.1, and the

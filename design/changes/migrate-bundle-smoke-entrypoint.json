@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-bundle-smoke-entrypoint",
+  "changeType": "release_change",
+  "title": "Make bundle verification assert the compiled MCP server",
+  "summary": "Update the release bundle smoke check to verify the single compiled-contract MCP factory after the legacy transport names are removed.",
+  "changedPaths": ["scripts/build_plugin_bundle.py", "design/changes/migrate-bundle-smoke-entrypoint.json"],
+  "authorityDocuments": ["docs/platform-constitution-v2.md", "docs/platform-plugin-boundary-contract.md", "docs/design-confirmation-contract-v1.md"],
+  "ownership": {"platform": ["release smoke verification"], "plugin": ["compiled artifact"], "provider": ["provider entry points"], "agent": ["semantic review decisions"]},
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_runtime"]},
+  "forbiddenResponsibilities": ["legacy interactive transport factory assertion", "Python plugin entry-point assertion"],
+  "publicContractImpact": "breaking",
+  "acceptance": ["bundle check asserts create_compiled_mcp_server", "bundle check continues to assert zero plugin entry points"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by continuing the no-compatibility hard cut."},
+  "state": "verified"
+}

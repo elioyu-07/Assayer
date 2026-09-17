@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -14,19 +11,11 @@ from assayer_platform import (
     BoundCapabilityProvider,
     CapabilityNegotiator,
     CapabilityProfile,
-    DecisionProposal,
-    DimensionObservation,
-    Finding,
-    InvestigationPacket,
     PlatformContractError,
-    PlatformRunner,
-    PluginRegistration,
-    PluginRegistry,
     ProviderFact,
     ProviderFailure,
     ProviderRegistration,
     ProviderRuntimeLease,
-    ProviderRegistry,
     ProviderResponse,
     WorkItem,
     load_plugin_manifest,
@@ -188,86 +177,6 @@ CHECK_MANIFEST = load_plugin_manifest({
         "cacheReuse": "allowed",
     },
 })
-
-
-class ProviderPlugin:
-    manifest = CHECK_MANIFEST
-
-    def __init__(self, provider, tamper=None):
-        self.provider = provider
-        self.tamper = tamper
-
-    def discover(self, scope, context):
-        del scope, context
-        return (WorkItem(
-            "fixture-item",
-            "fixture_item",
-            "fixture-source",
-            "fixture-state",
-        ),)
-
-    def inspect(self, work_items, check, context):
-        del context
-        item = work_items[0]
-        result = self.provider.collect(item, check, "structured_read")
-        if result.failure is not None:
-            raise PlatformContractError(
-                "PROVIDER_FACTS_UNAVAILABLE",
-                result.failure.message,
-            )
-        evidence = result.evidence[0]
-        if self.tamper == "version":
-            evidence = replace(evidence, provider_version="9.0.0")
-        elif self.tamper == "algorithm":
-            evidence = replace(evidence, algorithm_versions={"sourceIdentity": "9.0.0"})
-        elif self.tamper == "state":
-            evidence = replace(evidence, source_state_digest="stale-state")
-        observation = DimensionObservation(
-            "present",
-            ("The provider returned the required structured fact.",),
-            (evidence.evidence_id,),
-            "satisfied",
-        )
-        return (InvestigationPacket(
-            item,
-            check.check_id,
-            check.version,
-            (observation,),
-            (evidence,),
-            "not_required",
-        ),)
-
-
-class FixtureDecisionProvider:
-    def __init__(self, runtime=None):
-        del runtime
-
-    def decide(self, packets, check, context):
-        del context
-        packet = packets[0]
-        return (DecisionProposal(
-            packet.work_item.work_item_id,
-            check.check_id,
-            check.version,
-            "scanned_no_issue",
-            (Finding("present", "satisfied", "The required fact is present."),),
-            "The provider Evidence satisfies the Check.",
-        ),)
-
-
-def plugin_registration(*, tamper=None, factory_counter=None):
-    def create(runtime=None):
-        if factory_counter is not None:
-            factory_counter["calls"] += 1
-        return ProviderPlugin(runtime, tamper)
-
-    return PluginRegistration(
-        CHECK_MANIFEST,
-        plugin_factory=create,
-        decision_provider_factory=lambda runtime=None: FixtureDecisionProvider(runtime),
-        capabilities=frozenset({"structured_read"}),
-        scope_schema={"type": "object", "additionalProperties": False},
-    )
 
 
 def negotiate(registration, *, max_bytes=None):
@@ -527,123 +436,6 @@ class ProviderExecutionTests(unittest.TestCase):
         with self.assertRaises(PlatformContractError) as error:
             bound.collect(item, CHECK_MANIFEST.checks[0], "structured_read")
         self.assertEqual(error.exception.code, "PROVIDER_RESPONSE_INVALID")
-
-    def test_blocked_negotiation_constructs_neither_provider_nor_plugin(self):
-        provider_calls = {"calls": 0}
-        plugin_calls = {"calls": 0}
-        descriptor = provider_descriptor()
-
-        def create_provider(runtime=None):
-            del runtime
-            provider_calls["calls"] += 1
-            return RecordingProvider(descriptor)
-
-        with tempfile.TemporaryDirectory() as directory:
-            runner = PlatformRunner(
-                PluginRegistry((plugin_registration(factory_counter=plugin_calls),)),
-                directory,
-            )
-            with self.assertRaises(PlatformContractError) as error:
-                runner.run_with_provider(
-                    plugin_id="fixture.provider-plugin",
-                    check_id="FIX-101",
-                    scope={},
-                    provider_registry=ProviderRegistry((
-                        ProviderRegistration(descriptor, provider_factory=create_provider),
-                    )),
-                    provider_scope={"source": "fixture"},
-                    platform_profile=CapabilityProfile(frozenset()),
-                    user_profile=CapabilityProfile(frozenset({"structured_read"})),
-                )
-            # Denial is fail-fast too: no Run directory or ledger is written, so
-            # no needs_review Decision can be produced (WS8).
-            self.assertEqual(list(Path(directory).iterdir()), [])
-        self.assertEqual(error.exception.code, "CAPABILITY_NEGOTIATION_BLOCKED")
-        self.assertEqual(provider_calls["calls"], 0)
-        self.assertEqual(plugin_calls["calls"], 0)
-
-    def test_missing_provider_fails_fast_without_needs_review(self):
-        """A required capability with no supplying provider is a hard, no-ledger failure.
-
-        This pins the fail-fast semantics decided for WS8: the run raises
-        ``PROVIDER_NOT_FOUND`` before any ledger is written and never degrades
-        to a ``needs_review`` Decision, so manifest ``capabilityMissingOutcome``
-        is unreachable on the provider-backed path.
-        """
-        plugin_calls = {"calls": 0}
-        with tempfile.TemporaryDirectory() as directory:
-            runner = PlatformRunner(
-                PluginRegistry((plugin_registration(factory_counter=plugin_calls),)),
-                directory,
-            )
-            with self.assertRaises(PlatformContractError) as error:
-                runner.run_with_provider(
-                    plugin_id="fixture.provider-plugin",
-                    check_id="FIX-101",
-                    scope={},
-                    provider_registry=ProviderRegistry(()),
-                    provider_scope={"source": "fixture"},
-                    platform_profile=CapabilityProfile(frozenset({"structured_read"})),
-                    user_profile=CapabilityProfile(frozenset({"structured_read"})),
-                    run_id="run-missing-provider",
-                )
-            self.assertEqual(error.exception.code, "PROVIDER_NOT_FOUND")
-            self.assertFalse((Path(directory) / "run-missing-provider").exists())
-        self.assertEqual(plugin_calls["calls"], 0)
-
-    def test_provider_bound_runner_persists_complete_evidence_identity(self):
-        provider = RecordingProvider(provider_descriptor())
-        with tempfile.TemporaryDirectory() as directory:
-            runner = PlatformRunner(
-                PluginRegistry((plugin_registration(),)),
-                directory,
-            )
-            result = runner.run_with_provider(
-                plugin_id="fixture.provider-plugin",
-                check_id="FIX-101",
-                scope={},
-                provider_registry=ProviderRegistry((provider_registration(provider),)),
-                provider_scope={"source": "fixture"},
-                platform_profile=CapabilityProfile(frozenset({"structured_read"})),
-                user_profile=CapabilityProfile(frozenset({"structured_read"})),
-                run_id="run-provider-ledger",
-            )
-
-            self.assertEqual(result.status, "completed")
-            self.assertTrue(provider.closed)
-            evidence = result.ledger.investigations[0].evidence[0]
-            self.assertEqual(evidence.run_id, result.run_id)
-            self.assertEqual(evidence.provider_request_id, provider.requests[0][0].request_id)
-            ledger_path = Path(directory) / result.run_id / f"{result.run_id}.platform-ledger.json"
-            ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-            stored = ledger["investigations"][0]["evidence"][0]
-            self.assertEqual(stored["provider_id"], provider.descriptor.provider_id)
-            self.assertEqual(stored["source_state_digest"], "fixture-state")
-
-    def test_kernel_rejects_tampered_provider_evidence_before_decision(self):
-        for tamper, code in {
-            "version": "PROVIDER_EVIDENCE_IDENTITY_MISMATCH",
-            "algorithm": "PROVIDER_EVIDENCE_ALGORITHM_MISMATCH",
-            "state": "PROVIDER_EVIDENCE_STATE_MISMATCH",
-        }.items():
-            with self.subTest(tamper=tamper), tempfile.TemporaryDirectory() as directory:
-                provider = RecordingProvider(provider_descriptor())
-                runner = PlatformRunner(
-                    PluginRegistry((plugin_registration(tamper=tamper),)),
-                    directory,
-                )
-                result = runner.run_with_provider(
-                    plugin_id="fixture.provider-plugin",
-                    check_id="FIX-101",
-                    scope={},
-                    provider_registry=ProviderRegistry((provider_registration(provider),)),
-                    provider_scope={"source": "fixture"},
-                    platform_profile=CapabilityProfile(frozenset({"structured_read"})),
-                    user_profile=CapabilityProfile(frozenset({"structured_read"})),
-                )
-                self.assertEqual(result.status, "failed")
-                self.assertEqual(result.decisions, ())
-                self.assertEqual(result.failures[0].code, code)
 
     def test_execution_envelopes_satisfy_public_schema(self):
         provider = RecordingProvider(provider_descriptor())

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "restore-markdown-audit-slice",
+  "changeType": "provider_change",
+  "title": "Restore the Markdown audit vertical slice",
+  "summary": "Restore the existing read-only Markdown navigation Provider and its focused tests so the platform can prove one complete document audit path without changing browser, lifecycle, or plugin distribution behavior.",
+  "changedPaths": [
+    "src/assayer_document_navigation/*",
+    "packages/assayer-provider-markdown/*",
+    "tests/test_markdown_navigation.py",
+    "design/changes/restore-markdown-audit-slice.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Provider binding", "Evidence and coverage acceptance", "canonical result"],
+    "plugin": ["Markdown audit meaning and business cases"],
+    "provider": ["Read-only Markdown parsing, source digest, anchors, and bounded pagination"],
+    "agent": ["Bounded semantic decisions for Markdown review atoms"]
+  },
+  "capabilities": {
+    "inputKinds": ["markdown"],
+    "required": ["document_navigation", "typed_snapshot", "bounded_review_batch", "exhaustive_coverage"]
+  },
+  "forbiddenResponsibilities": [
+    "browser runtime changes",
+    "plugin-owned parser or Evidence ledger",
+    "new compatibility entry points",
+    "plugin distribution redesign",
+    "domain conclusions inside the Provider"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "restore deterministic Markdown element parsing and anchors",
+    "restore Provider digest and pagination conformance",
+    "bind Markdown Provider to the existing document_navigation capability",
+    "prove Markdown source failure and stale digest behavior",
+    "prove one end-to-end Markdown ReviewBatch through Ledger and canonical result",
+    "run architecture, document, plugin source, design, and focused tests"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by directing work to the Markdown end-to-end vertical slice while preserving prior implementation assets."
+  },
+  "state": "approved"
+}

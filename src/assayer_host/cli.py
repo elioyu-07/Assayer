@@ -8,17 +8,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 
-from assayer_platform import PlatformContractError, PlatformRunner
-from assayer_platform.conformance import RELEASE_DESCRIPTOR
-from assayer_platform.plugin_catalog import CATALOG_FILENAME, upsert_catalog_version
-from assayer_platform.plugin_packaging import assemble_self_contained_wheel, sha256_hex
-from assayer_platform.plugin_verify import verify_simple_plugin
+from assayer_platform import PlatformContractError
+from assayer_platform.plugin_verify import verify_plugin_source
 
-from .browser_runtime import BrowserHostRuntime
 from .errors import HostError
 from .plugin_intent import IntentResolutionError
 from .plugin_lifecycle_router import route_plugin_request
@@ -26,20 +20,16 @@ from .plugin_lifecycle_ops import (
     DEFAULT_CATALOG_URL,
     add_from_catalog as _add_from_catalog,
     apply_local_source_change as _apply_local_source_change,
-    annotate_upgradable as _annotate_upgradable,
     execute_intent_step as _execute_intent_step,
     known_plugin_ids as _known_plugin_ids,
-    latest_available_from as _latest_available_from,
     lifecycle_manager as _lifecycle_manager,
-    load_scope as _load_scope,
     plugin_catalog as _plugin_catalog,
     store_index_entries as _store_index_entries,
     store_registry as _store_registry,
 )
 from .plugin_store_registry import default_store_root
 from .readiness import ReadinessReport, collect_readiness, target_kind
-from .runtime_router import RuntimeRouter
-from .transport import JsonLineTransport
+from .transport import mcp_main
 
 
 def _error(code: str, message: str) -> dict:
@@ -61,7 +51,7 @@ def _audit_prompt(target: str, *, plugin_id: str | None = None) -> str:
         )
 
     path = Path(target).expanduser().resolve()
-    selected_plugin = plugin_id or ("ass-spec" if kind in {"markdown", "directory"} else None)
+    selected_plugin = plugin_id
     plugin_instruction = (
         f"Use the installed {selected_plugin} plugin. "
         if selected_plugin is not None else
@@ -88,7 +78,7 @@ def _run_agent_audit(target: str, output_root: Path, *, plugin_id: str | None = 
     output_root.mkdir(parents=True, exist_ok=True)
     if target_kind(target) == "web":
         command = sys.executable
-        args = ["-m", "assayer_host.transport", "--mcp", "--output-root", str(output_root)]
+        args = ["-m", "assayer_host.transport", "--output-root", str(output_root)]
     else:
         # File and directory audits require the domain-plugin lifecycle MCP,
         # not the browser Runtime Router exposed by ``transport --mcp``.
@@ -128,146 +118,6 @@ def _report_agent_start_error(code: str, message: str) -> None:
         print("Next step: assayer doctor", file=sys.stderr)
         return
     _print_json(_error(code, message))
-
-
-def _build_plugin(source: str) -> dict:
-    source_path = Path(source).expanduser().resolve()
-    descriptor_path = source_path / RELEASE_DESCRIPTOR
-    if not descriptor_path.is_file():
-        raise PlatformContractError(
-            "PLUGIN_PACKAGE_NOT_FOUND",
-            f"No release descriptor found in {source_path}",
-        )
-    try:
-        source_descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise PlatformContractError(
-            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
-            f"The release descriptor could not be read: {error}",
-        ) from error
-    completed = subprocess.run(
-        ["uv", "build"], cwd=source_path, capture_output=True, text=True,
-    )
-    if completed.returncode != 0:
-        raise PlatformContractError(
-            "PLUGIN_BUILD_FAILED",
-            (completed.stderr or "uv build failed").strip(),
-        )
-    wheels = sorted((source_path / "dist").glob("*.whl"))
-    if not wheels:
-        raise PlatformContractError("PLUGIN_BUILD_FAILED", "uv build produced no wheel")
-    if len(wheels) != 1:
-        raise PlatformContractError("PLUGIN_BUILD_FAILED", "uv build produced multiple wheels")
-    wheel = wheels[0]
-    final_bytes = assemble_self_contained_wheel(
-        wheel.read_bytes(), source_path, source_descriptor,
-    )
-    wheel.write_bytes(final_bytes)
-    return {
-        "wheel": str(wheel),
-        "sha256": sha256_hex(final_bytes),
-        "pluginId": source_descriptor.get("pluginId"),
-        "pluginVersion": source_descriptor.get("pluginVersion"),
-        "platformApiVersion": source_descriptor.get("platformApiVersion"),
-        "name": source_descriptor.get("name") or source_descriptor.get("pluginId"),
-        "description": source_descriptor.get("description") or "",
-    }
-
-
-def _run_captured(args: list[str], *, code: str, cwd: str | None = None) -> str:
-    completed = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "").strip()
-        raise PlatformContractError(code, detail or "command failed")
-    return completed.stdout.strip()
-
-
-def _publish_plugin(source, *, plugin_repo, registry, registry_path, base, yes, confirm) -> dict:
-    built = _build_plugin(source)
-    plugin_id = built["pluginId"]
-    version = built["pluginVersion"]
-    if not plugin_id or not version:
-        raise PlatformContractError(
-            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
-            "The release descriptor must declare pluginId and pluginVersion.",
-        )
-    if not built["platformApiVersion"]:
-        raise PlatformContractError(
-            "PLUGIN_RELEASE_DESCRIPTOR_INVALID",
-            "The release descriptor must declare platformApiVersion.",
-        )
-    wheel_path = Path(built["wheel"])
-    tag = f"v{version}"
-    wheel_url = f"https://github.com/{plugin_repo}/releases/download/{tag}/{wheel_path.name}"
-    published_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    if not yes and not confirm([
-        {"operation": "publish", "plugin": plugin_id, "version": version,
-         "release": f"{plugin_repo}@{tag}", "registry": registry},
-    ]):
-        return {"operation": "publish", "status": "aborted",
-                "reason": "confirmation required"}
-
-    _run_captured(
-        ["gh", "release", "create", tag, str(wheel_path), "--repo", plugin_repo,
-         "--title", tag, "--notes", f"Release {version} of {plugin_id}."],
-        code="PLUGIN_PUBLISH_RELEASE_FAILED",
-    )
-
-    with tempfile.TemporaryDirectory(prefix="assayer-publish-") as tmp:
-        clone_dir = Path(tmp) / "registry"
-        _run_captured(
-            ["gh", "repo", "clone", registry, str(clone_dir)],
-            code="PLUGIN_PUBLISH_CLONE_FAILED",
-        )
-        catalog_path = clone_dir / registry_path
-        if not catalog_path.is_file():
-            raise PlatformContractError(
-                "PLUGIN_PUBLISH_FAILED",
-                f"The registry has no catalog at {registry_path}.",
-            )
-        updated = upsert_catalog_version(
-            catalog_path.read_text(encoding="utf-8"),
-            plugin_id=plugin_id,
-            name=built["name"],
-            description=built["description"],
-            version=version,
-            platform_api_version=built["platformApiVersion"],
-            wheel_url=wheel_url,
-            sha256=built["sha256"],
-            published_at=published_at,
-        )
-        catalog_path.write_text(updated, encoding="utf-8")
-        branch = f"publish/{plugin_id}-{version}"
-        _run_captured(["git", "checkout", "-b", branch], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
-        _run_captured(["git", "add", registry_path], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
-        _run_captured(["git", "commit", "-m", f"Publish {plugin_id} {version}"],
-                      code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
-        _run_captured(["git", "push", "origin", branch], code="PLUGIN_PUBLISH_FAILED", cwd=str(clone_dir))
-        pr_url = _run_captured(
-            ["gh", "pr", "create", "--repo", registry, "--base", base, "--head", branch,
-             "--title", f"Publish {plugin_id} {version}",
-             "--body", f"Adds {plugin_id}@{version} to the plugin catalog."],
-            code="PLUGIN_PUBLISH_PR_FAILED",
-        )
-
-    return {
-        "operation": "publish",
-        "status": "pr_created",
-        "plugin": plugin_id,
-        "version": version,
-        "wheelUrl": wheel_url,
-        "sha256": built["sha256"],
-        "pullRequest": pr_url,
-    }
-
-
-def _resolve_index(index: str | None) -> str | None:
-    """Best-effort resolve a version source: an explicit --index or a local plugins.json."""
-    if index:
-        return index
-    candidate = Path("./plugins.json")
-    return str(candidate) if candidate.is_file() else None
 
 
 def _print_json(value: dict) -> None:
@@ -451,7 +301,6 @@ def _mutation_step(args) -> dict:
 
 
 def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, confirm, index: str | None = None) -> int:
-    latest_available = _latest_available_from(_resolve_index(index))
     catalog_index = index or DEFAULT_CATALOG_URL
     try:
         route = route_plugin_request(
@@ -472,7 +321,7 @@ def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, conf
                          "reason": "confirmation required"})
             return 0
     results = [
-        _execute_intent_step(step, store_root, output_root, latest_available, catalog_index)
+        _execute_intent_step(step, store_root, output_root, catalog_index)
         for step in plan
     ]
     _print_json({"plan": plan_payload, "results": results})
@@ -482,45 +331,13 @@ def _run_intent(text: str, store_root: str, *, yes: bool, output_root: str, conf
 
 def _plugins_command(args, *, confirm) -> int:
     if args.plugin_command == "run":
-        store_path = Path(args.store).expanduser().resolve()
-        if (store_path / "index.json").is_file():
-            entry = _lifecycle_manager(args.store).get(args.plugin_id)
-            if entry is not None and entry.get("state") == "dirty":
-                _print_error(
-                    "PLUGIN_DIRTY",
-                    f"Plugin is quarantined and cannot run: {args.plugin_id} "
-                    f"({entry.get('stateReason')})",
-                )
-                return 2
-        try:
-            scope = _load_scope(args.scope_json, args.scope_file)
-            result = PlatformRunner(
-                _store_registry(args.store), args.output_root,
-            ).run(
-                plugin_id=args.plugin_id, check_id=args.check_id,
-                check_version=args.check_version, scope=scope,
-            )
-        except PlatformContractError as error:
-            _print_error(error.code, error.message)
-            return 2
-        payload = {
-            "runId": result.run_id,
-            "status": result.status,
-            "pluginId": args.plugin_id,
-            "checkId": args.check_id,
-            "decisions": [decision.result for decision in result.decisions],
-            "failures": [
-                {"code": failure.code, "message": failure.message,
-                 "workItemId": failure.work_item_id}
-                for failure in result.failures
-            ],
-            "outputDir": str((Path(args.output_root).expanduser().resolve() / result.run_id)),
-        }
-        _print_json(payload)
-        return 0 if result.status in {"completed", "partial"} else 1
+        _print_error(
+            "COMPILED_RUN_REQUIRED",
+            "The legacy plugin run command is removed; use the compiled contract runtime.",
+        )
+        return 2
     if args.plugin_command == "info":
-        latest_available = _latest_available_from(_resolve_index(getattr(args, "index", None)))
-        manager = _lifecycle_manager(args.store, latest_available)
+        manager = _lifecycle_manager(args.store)
         entry = manager.get(args.plugin_id)
         if entry is None:
             _print_error("UNKNOWN_PLUGIN", f"Plugin is not installed: {args.plugin_id}")
@@ -529,12 +346,15 @@ def _plugins_command(args, *, confirm) -> int:
         return 0
     if args.plugin_command == "build":
         try:
-            result = _build_plugin(args.source)
+            result = verify_plugin_source(
+                args.source,
+                output_dir=Path(args.source).expanduser().resolve() / ".assayer" / "build",
+            )
         except PlatformContractError as error:
             _print_error(error.code, error.message)
             return 2
         _print_json(result)
-        return 0
+        return 0 if result.get("status") == "passed" else 1
     if args.plugin_command == "add":
         if not args.yes and not confirm([
             {"operation": "add", "plugin": args.plugin, "version": args.version},
@@ -551,22 +371,6 @@ def _plugins_command(args, *, confirm) -> int:
             return 2
         _print_json(result)
         return 0 if result.get("status") in {"completed", "quarantined"} else 1
-    if args.plugin_command == "publish":
-        try:
-            result = _publish_plugin(
-                args.source,
-                plugin_repo=args.plugin_repo,
-                registry=args.registry,
-                registry_path=args.registry_path,
-                base=args.base,
-                yes=args.yes,
-                confirm=confirm,
-            )
-        except PlatformContractError as error:
-            _print_error(error.code, error.message)
-            return 2
-        _print_json(result)
-        return 0
     if args.plugin_command in {"install", "upgrade", "downgrade", "rollback", "uninstall"}:
         if not args.yes and not confirm([_mutation_step(args)]):
             _print_json({"operation": args.plugin_command, "status": "aborted",
@@ -594,9 +398,7 @@ def _plugins_command(args, *, confirm) -> int:
         _print_json(result)
         return 0
     catalog = _plugin_catalog(_store_registry(args.store))
-    latest_available = _latest_available_from(_resolve_index(getattr(args, "index", None)))
-    entries = _store_index_entries(args.store, latest_available)
-    _annotate_upgradable(catalog, entries)
+    entries = _store_index_entries(args.store)
     quarantined = [entry for entry in entries if entry.get("state") == "dirty"]
     if args.as_json:
         payload = {"plugins": catalog}
@@ -609,8 +411,6 @@ def _plugins_command(args, *, confirm) -> int:
                 f"{item['checkId']}@{item['version']}" for item in plugin["checks"]
             )
             line = f"{plugin['pluginId']} {plugin['version']} [{checks}]"
-            if plugin.get("state") == "upgradable":
-                line += f" (upgradable -> {plugin['upgradeTo']})"
             print(line)
         for entry in quarantined:
             print(f"{entry['pluginId']} (dirty: {entry.get('stateReason')})")
@@ -658,7 +458,7 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin = subparsers.add_parser("plugin")
     plugin_subparsers = plugin.add_subparsers(dest="plugin_command", required=True)
     plugin_verify = plugin_subparsers.add_parser(
-        "verify", help="Compile and verify an ordinary plugin as one exact wheel",
+        "verify", help="Compile and verify an ordinary plugin as one data-only contract",
     )
     plugin_verify.add_argument("source", help="Ordinary plugin source directory")
     plugin_verify.add_argument("--output-dir", default=".assayer/verified")
@@ -672,13 +472,9 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin_list = plugins_subparsers.add_parser("list", parents=[plugin_common],
                                                 help="List registered plugins and checks")
     plugin_list.add_argument("--json", action="store_true", dest="as_json")
-    plugin_list.add_argument("--index", default=None,
-                             help="Version source (http(s) URL or plugins.json path) to mark upgradable plugins")
     plugin_info = plugins_subparsers.add_parser("info", parents=[plugin_common],
                                                 help="Show one installed plugin's version and state")
     plugin_info.add_argument("plugin_id")
-    plugin_info.add_argument("--index", default=None,
-                             help="Version source (http(s) URL or plugins.json path) to mark an upgradable plugin")
     plugin_run = plugins_subparsers.add_parser("run", parents=[plugin_common],
                                                help="Run one registered plugin Check")
     plugin_run.add_argument("--plugin", required=True, dest="plugin_id")
@@ -692,25 +488,14 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     plugin_mutation_common.add_argument("--yes", action="store_true", dest="yes",
                                         help="Skip the stop-and-confirm prompt for dangerous operations")
     plugin_build = plugins_subparsers.add_parser("build", parents=[plugin_common],
-                                                 help="Build a self-contained distributable plugin wheel")
+                                                 help="Compile a data-only plugin contract")
     plugin_build.add_argument("source", help="Plugin source directory")
     plugin_add = plugins_subparsers.add_parser("add", parents=[plugin_common, plugin_mutation_common],
-                                               help="Download, verify, and install a plugin from the catalog")
+                                               help="Download, verify, and install a compiled-plugin artifact from the catalog")
     plugin_add.add_argument("plugin", help="Plugin ID to resolve from the catalog")
     plugin_add.add_argument("--version", default=None, help="Pin a specific plugin version")
     plugin_add.add_argument("--index", default=DEFAULT_CATALOG_URL,
-                            help="Catalog location: an http(s) URL or a local plugins.json path")
-    plugin_publish = plugins_subparsers.add_parser("publish", parents=[plugin_mutation_common],
-                                                   help="Build, release, and register a plugin via a catalog PR")
-    plugin_publish.add_argument("source", help="Plugin source directory")
-    plugin_publish.add_argument("--plugin-repo", required=True,
-                                help="GitHub owner/name to create the release in")
-    plugin_publish.add_argument("--registry", default="elioyu-07/assayer-registry",
-                                help="GitHub owner/name holding the plugins.json catalog")
-    plugin_publish.add_argument("--registry-path", default=CATALOG_FILENAME,
-                                help="Path to the catalog file within the registry repo")
-    plugin_publish.add_argument("--base", default="main",
-                                help="Registry branch to target with the publish PR")
+                            help="Compiled-artifact catalog location: an http(s) URL or local plugins.json path")
     plugin_install = plugins_subparsers.add_parser("install", parents=[plugin_common, plugin_mutation_common],
                                                    help="Install a plugin package into the store")
     plugin_install.add_argument("package")
@@ -736,34 +521,16 @@ def main(argv: list[str] | None = None, *, confirm=_prompt_confirmation) -> int:
     if args.command == "audit":
         return _run_agent_audit(args.target, Path(args.output_root), plugin_id=args.plugin_id)
     if args.command == "serve":
-        router = RuntimeRouter(args.output_root, max_runtimes=args.max_runtimes,
-                               lease_timeout_seconds=args.lease_timeout)
-        try:
-            JsonLineTransport(router).serve()
-            return 0
-        finally:
-            router.close()
+        return mcp_main(["--output-root", args.output_root])
     if args.command == "plugins":
         return _plugins_command(args, confirm=confirm)
     if args.command == "plugin":
-        result = verify_simple_plugin(
-            args.source, output_dir=args.output_dir,
-            build_timeout_seconds=args.build_timeout_seconds,
-            install_timeout_seconds=args.install_timeout_seconds,
-            fixture_timeout_seconds=args.fixture_timeout_seconds,
-        )
+        result = verify_plugin_source(args.source, output_dir=args.output_dir)
         _print_json(result)
         return 0 if result["status"] == "passed" else 1
-    runtime = BrowserHostRuntime(args.url, Path(args.output_dir))
-    try:
-        try:
-            response = runtime.smoke(args.url)
-        except HostError as error:
-            response = _error(error.code, error.message)
-        print(json.dumps(response, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0 if response.get("status") == "ok" else 1
-    finally:
-        runtime.close()
+    raise SystemExit(
+        "The legacy browser smoke entry point was removed; run an installed plugin through the plugin lifecycle."
+    )
 
 
 if __name__ == "__main__":

@@ -4,10 +4,14 @@
 |---|---|
 | Document version | 0.1.0 |
 | Date | 2026-09-13 |
-| Status | Accepted design; vertical-slice implementation in progress |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer maintainers |
 | Authority | Platform Constitution v1.1 §2/§3.14-18 |
 | Scope | Policy Pack, Simple SDK, SDK compiler, Host review planning, migration, and release workflow |
+
+> **Superseded.** The current target is the zero-Python unified Plugin
+> Contract in Platform Constitution v2. This design is historical migration
+> context and cannot authorize a Python or Advanced SPI exception.
 
 ## 1. Problem
 
@@ -89,13 +93,13 @@ from assayer_plugin_sdk.simple import Candidate, Document, policy_plugin
 
 
 @policy_plugin(
-    id="ass-spec",
+    id="example.policy",
     version="3.1.0",
     input="markdown",
     checks="checks.yaml",
     instructions="semantic-review.md",
 )
-class SpecAudit:
+class ExamplePolicy:
     def scan(self, document: Document):
         if document.contains("permission") and not document.contains_any(
             "denied", "unauthorized", "data scope",
@@ -263,7 +267,8 @@ Implementation proceeds in vertical slices:
 3. implement frozen DocumentSnapshot, anchors, and absence proof;
 4. implement the compiler and Policy Pack loader;
 5. migrate `minimal` and deliver `assayer plugin verify` plus wheel-only install;
-6. migrate `ass-spec` and prove semantic-result equivalence; and
+6. migrate a representative Advanced SPI plugin and prove semantic-result
+   equivalence; and
 7. move current low-level exports into `assayer_plugin_sdk.advanced`, retain a
    versioned adapter, and deprecate their top-level exposure.
 
@@ -287,7 +292,8 @@ The architecture is complete only when:
   resubmission;
 - source mutation and absence-proof behavior fail closed;
 - compatible platform upgrades require no ordinary plugin source change;
-- `ass-spec` platform-mechanical code falls by at least 60 percent; and
+- the representative migrated plugin's platform-mechanical code falls by at
+  least 60 percent; and
 - generated Schema, Agent rules, runtime validation, and tests cannot drift.
 
 ## 13. Non-goals

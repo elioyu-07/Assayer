@@ -111,11 +111,8 @@ def _plugin_check(plugin_id: str | None, store_root: str | Path) -> ReadinessChe
     if not plugin_id:
         return ReadinessCheck("domain_plugin", "not_checked", False, "No domain plugin was required for this check.")
     try:
-        registry = store_backed_plugin_registry(store_root)
-        registration = next(
-            (item for item in registry.list() if item.manifest.plugin_id == plugin_id),
-            None,
-        )
+        lifecycle = store_backed_plugin_registry(store_root)
+        registration = lifecycle.get(plugin_id)
     except Exception as error:
         return ReadinessCheck(
             "domain_plugin", "broken", True,
@@ -133,7 +130,7 @@ def _plugin_check(plugin_id: str | None, store_root: str | Path) -> ReadinessChe
     return ReadinessCheck(
         "domain_plugin", "ok", True,
         f"Required plugin is installed: {plugin_id}.",
-        details={"pluginId": plugin_id, "version": registration.manifest.version},
+        details={"pluginId": plugin_id, "version": registration.get("activeVersion")},
     )
 
 

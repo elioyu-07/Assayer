@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "enforce-deleted-plugin-runtime-boundary",
+  "changeType": "platform_change",
+  "title": "Make the architecture gate forbid legacy plugin runtimes",
+  "summary": "Prevent PluginRegistry, PluginRegistration, DomainResultContract, PlatformRunner, InteractivePluginController, and their deleted modules from returning.",
+  "changedPaths": ["scripts/check_architecture_boundaries.py", "design/changes/enforce-deleted-plugin-runtime-boundary.json"],
+  "authorityDocuments": ["docs/platform-constitution-v2.md", "docs/platform-plugin-boundary-contract.md", "docs/design-confirmation-contract-v1.md"],
+  "ownership": {"platform": ["architecture enforcement"], "plugin": ["compiled declaration only"], "provider": ["provider registration only"], "agent": ["ReviewBatch decisions"]},
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_runtime"]},
+  "forbiddenResponsibilities": ["legacy runtime symbols", "legacy runtime modules", "documented compatibility bridges"],
+  "publicContractImpact": "breaking",
+  "acceptance": ["architecture gate rejects every retired symbol", "architecture gate rejects recreation of deleted runtime or conformance modules", "current source passes the gate"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by the instruction to continue the ordered no-compatibility hard cut."},
+  "state": "verified"
+}

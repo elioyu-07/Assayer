@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "delete-legacy-acceptance-residuals",
+  "changeType": "platform_change",
+  "title": "Delete legacy acceptance templates and Python plugin fixtures",
+  "summary": "Remove the remaining generated acceptance workflow and fixture package that invoke start_plugin_run, advance_plugin_run, PluginRegistration, and DomainResult.",
+  "changedPaths": [
+    "src/assayer_platform/simple_acceptance_template.py",
+    "src/assayer_platform/ledger.py",
+    "tests/fixtures/plugins/minimal/**",
+    "design/changes/delete-legacy-acceptance-residuals.json"
+  ],
+  "authorityDocuments": ["docs/platform-constitution-v2.md", "docs/platform-plugin-boundary-contract.md", "docs/design-confirmation-contract-v1.md"],
+  "ownership": {"platform": ["compiled Run workflow"], "plugin": ["declaration fixtures"], "provider": ["Evidence collection"], "agent": ["ReviewBatch decisions"]},
+  "capabilities": {"inputKinds": ["document", "markdown", "browser_snapshot"], "required": ["compiled_contract_runtime"]},
+  "forbiddenResponsibilities": ["legacy MCP acceptance templates", "Python plugin fixtures", "advance_plugin_run workflow guidance"],
+  "publicContractImpact": "breaking",
+  "acceptance": ["production source contains no legacy plugin Run tool names", "minimal Python plugin fixture is absent", "full test suite remains green"],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-16T00:00:00+08:00", "decision": "Approved by the no-compatibility requirement and instruction to continue cleanup."},
+  "state": "verified"
+}

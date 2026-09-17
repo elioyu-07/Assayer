@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://assayer.dev/schemas/design-confirmation.schema.json",
+  "title": "AssayerDesignConfirmation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "changeId",
+    "changeType",
+    "title",
+    "summary",
+    "changedPaths",
+    "authorityDocuments",
+    "ownership",
+    "capabilities",
+    "forbiddenResponsibilities",
+    "publicContractImpact",
+    "acceptance",
+    "humanApproval",
+    "state"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "changeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"
+    },
+    "changeType": {
+      "enum": [
+        "new_plugin",
+        "plugin_change",
+        "platform_change",
+        "provider_change",
+        "agent_change",
+        "sdk_change",
+        "contract_change",
+        "release_change"
+      ]
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "changedPaths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+      }
+    },
+    "authorityDocuments": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^docs/[A-Za-z0-9._/-]+\\.md$"
+      }
+    },
+    "ownership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "plugin", "provider", "agent"],
+      "properties": {
+        "platform": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "plugin": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "provider": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+        "agent": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputKinds", "required"],
+      "properties": {
+        "inputKinds": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+        "required": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "forbiddenResponsibilities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "publicContractImpact": {
+      "enum": ["internal_only", "compatible", "semantic", "safety", "breaking"]
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "humanApproval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "status"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "status": { "enum": ["pending", "approved", "rejected"] },
+        "approver": { "type": "string", "minLength": 1 },
+        "approvedAt": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "minLength": 1 }
+      }
+    },
+    "state": {
+      "enum": ["proposed", "machine_checked", "approved", "implemented", "verified", "rejected", "superseded"]
+    },
+    "supersedes": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,95}$"
+    }
+  }
+}

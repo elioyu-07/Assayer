@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "remove-registration-discovery-paths",
+  "changeType": "platform_change",
+  "title": "Remove Python plugin registration discovery paths",
+  "summary": "Make PluginRegistry registration and installed-package discovery fail closed so installed ordinary plugins can only be loaded as compiled JSON contracts.",
+  "changedPaths": [
+    "src/assayer_platform/plugin_registry.py",
+    "src/assayer_platform/plugin_lifecycle.py",
+    "src/assayer_platform/plugin_discovery.py",
+    "src/assayer_platform/installation_conformance.py",
+    "src/assayer_platform/release_conformance.py",
+    "tests/test_compiled_plugin_lifecycle.py",
+    "design/changes/remove-registration-discovery-paths.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract discovery", "registration-path shutdown"],
+    "plugin": ["declaration-only artifact"],
+    "provider": ["independent capability registration"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_discovery"]
+  },
+  "forbiddenResponsibilities": [
+    "Python plugin entry points",
+    "PluginRegistration registry",
+    "installed package registration import",
+    "registration compatibility path"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "PluginRegistry.from_entry_points fails with one retired-contract error",
+    "PluginRegistry.register fails with one retired-contract error",
+    "load_registration fails without importing package code",
+    "discover_plugin_registry cannot resurrect installed Python plugins",
+    "compiled lifecycle discovery remains available"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

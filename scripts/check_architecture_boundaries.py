@@ -1,19 +1,85 @@
 """Static dependency-direction checks for the platform/plugin boundary.
 
 This checker is intentionally small and dependency-free.  It protects the
-highest-risk import edges while the repository still contains documented
-compatibility bridges.  It is not a general architectural linter.
+highest-risk import edges and prevents retired compatibility runtimes from
+returning. It is not a general architectural linter.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from scripts.check_plugin_source_boundaries import find_violations as find_plugin_source_violations
+except ModuleNotFoundError:  # direct execution from the scripts directory
+    from check_plugin_source_boundaries import find_violations as find_plugin_source_violations
+
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _repository_contract_violations(root: Path = ROOT) -> tuple[str, ...]:
+    violations: list[str] = []
+    violations.extend(
+        f"{item.path.relative_to(root)}: {item.message}"
+        for item in find_plugin_source_violations(root)
+    )
+    rules = root / "rules"
+    if rules.exists() and any(path.is_file() for path in rules.rglob("*")):
+        violations.append("platform repository contains root rules files; rules must be plugin-owned")
+    pyprojects = [root / "pyproject.toml"]
+    packages = root / "packages"
+    if packages.is_dir():
+        pyprojects.extend(sorted(packages.glob("*/pyproject.toml")))
+    for pyproject in pyprojects:
+        if not pyproject.exists():
+            continue
+        text = pyproject.read_text(encoding="utf-8")
+        if "share/assayer/rules" in text or "assayer_host.harness" in text:
+            violations.append(f"{pyproject.relative_to(root)} exposes removed rules or harness entry points")
+    retired_modules = (
+        "src/assayer_platform/plugin_registry.py",
+        "src/assayer_platform/plugin_lifecycle.py",
+        "src/assayer_platform/runner.py",
+        "src/assayer_platform/interactive.py",
+        "src/assayer_platform/conformance.py",
+        "src/assayer_platform/installation_conformance.py",
+        "src/assayer_platform/release_conformance.py",
+        "src/assayer_platform/package_conformance.py",
+        "src/assayer_plugin_sdk/registration.py",
+        "src/assayer_plugin_sdk/agent_contract.py",
+    )
+    for relative in retired_modules:
+        if (root / relative).exists():
+            violations.append(f"retired plugin runtime module exists: {relative}")
+    for source_root in _source_roots(root):
+        for path in source_root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            removed_names = (
+                "HostCore", "RuntimeRouter", "BrowserHostRuntime",
+                "JsonLineTransport", "McpToolTransport",
+                "PluginRegistry", "PluginRegistration", "PlatformRunner",
+                "InteractivePluginController", "DomainResultContract",
+            )
+            for name in removed_names:
+                if re.search(rf"\b{re.escape(name)}\b", text):
+                    violations.append(
+                        f"{path.relative_to(root)} retains removed architecture symbol {name}"
+                    )
+            for tool_name in ("start_plugin_run", "advance_plugin_run", "domainResult"):
+                if tool_name in text:
+                    violations.append(
+                        f"{path.relative_to(root)} retains removed plugin protocol field {tool_name}"
+                    )
+            if "from .core import" in text or "assayer_host.core" in text:
+                violations.append(f"{path.relative_to(root)} retains a deleted HostCore dependency")
+            if "from .runtime_router import" in text or "assayer_host.runtime_router" in text:
+                violations.append(f"{path.relative_to(root)} retains a deleted RuntimeRouter dependency")
+    return tuple(violations)
 
 
 @dataclass(frozen=True)
@@ -65,14 +131,12 @@ def _role_for(path: Path, *, root: Path = ROOT) -> str | None:
         return None
     if parts[0] == "assayer_platform":
         return "platform"
-    if parts[0] == "assayer_frontend_audit":
+    if parts[0] == "assayer_ordinary_plugin":
         return "plugin"
     if parts[0] == "assayer_host":
         return "host"
     if parts[0] == "assayer_agent":
         return "agent"
-    if parts[0] in {"assayer_document_navigation", "assayer_browser_provider"}:
-        return "capability_provider"
     return None
 
 
@@ -85,10 +149,6 @@ def _reason(role: str, module: str, path: Path) -> str | None:
         return "platform kernel must not depend on browser implementation"
     if role == "platform" and _starts_with(module, "mcp"):
         return "platform kernel must not depend on transport SDK"
-    if role == "platform" and _starts_with(module, "assayer_frontend_audit"):
-        return "platform kernel must not depend on concrete plugin implementation"
-    if role == "platform" and _starts_with(module, "assayer_document_navigation"):
-        return "platform kernel must not depend on concrete capability provider implementation"
     if role == "plugin" and _starts_with(module, "assayer_host"):
         return "plugin must not depend on Host private implementation"
     if role == "plugin" and _starts_with(module, "mcp"):
@@ -101,10 +161,6 @@ def _reason(role: str, module: str, path: Path) -> str | None:
         "assayer_platform.interactive", "assayer_platform.result_delivery",
     )):
         return "plugin must use platform layer interfaces instead of owning delivery or lifecycle"
-    if role == "capability_provider" and _starts_with(module, "assayer_host"):
-        return "capability provider must not depend on Host implementation"
-    if role == "capability_provider" and _starts_with(module, "assayer_frontend_audit"):
-        return "capability provider must not depend on domain plugin"
     if role == "agent" and _starts_with(module, "assayer_host"):
         return "Agent adapter must not mutate or import Host implementation"
     return None
@@ -139,6 +195,12 @@ def find_violations(root: Path = ROOT) -> tuple[BoundaryViolation, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     del argv
+    contract_violations = _repository_contract_violations()
+    if contract_violations:
+        print("Repository contract violations:", file=sys.stderr)
+        for violation in contract_violations:
+            print(f"- {violation}", file=sys.stderr)
+        return 1
     violations = find_violations()
     if violations:
         print("Architecture boundary violations:", file=sys.stderr)

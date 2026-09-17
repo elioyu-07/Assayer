@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from pathlib import Path
+from unittest.mock import patch
 import unittest
 
 from assayer_platform import PlatformContractError
 from assayer_platform.plugin_catalog import (
     CATALOG_FILENAME,
     CATALOG_SCHEMA_VERSION,
-    latest_published,
     load_catalog,
     parse_catalog,
     resolve_version,
@@ -19,7 +21,8 @@ def _version(**overrides):
         "pluginId": "test-minimal",
         "version": "1.2.0",
         "platformApiVersion": "1.0.0",
-        "wheelUrl": "https://github.com/acme/plugins/releases/download/v1.2.0/test_minimal-1.2.0-py3-none-any.whl",
+        "artifactType": "compiled-plugin-contract",
+        "artifactUrl": "https://github.com/acme/plugins/releases/download/v1.2.0/test-minimal-1.2.0.compiled-plugin.json",
         "sha256": "a" * 64,
         "publishedAt": "2026-09-06T00:00:00Z",
     }
@@ -70,18 +73,6 @@ class PluginCatalogParseTests(unittest.TestCase):
             resolve_version(catalog, "nope")
         self.assertEqual(ctx.exception.code, "UNKNOWN_PLUGIN")
 
-    def test_latest_published_returns_newest_version(self):
-        catalog = parse_catalog(_catalog({
-            "1.1.0": _version(version="1.1.0"),
-            "1.2.0": _version(version="1.2.0"),
-            "1.10.0": _version(version="1.10.0"),
-        }))
-        self.assertEqual(latest_published(catalog, "test-minimal"), "1.10.0")
-
-    def test_latest_published_returns_none_for_unknown_plugin(self):
-        catalog = parse_catalog(_catalog())
-        self.assertIsNone(latest_published(catalog, "nope"))
-
     def test_rejects_missing_version(self):
         catalog = parse_catalog(_catalog())
         with self.assertRaises(PlatformContractError) as ctx:
@@ -94,7 +85,9 @@ class PluginCatalogParseTests(unittest.TestCase):
         cases = {
             "schema version": json.dumps(wrong_schema),
             "checksum": _catalog({"1.2.0": _version(sha256="not-a-digest")}),
-            "wheel URL": _catalog({"1.2.0": _version(wheelUrl="ftp://example.com/x.whl")}),
+            "artifact URL": _catalog({"1.2.0": _version(artifactUrl="ftp://example.com/compiled-plugin.json")}),
+            "wheel URL": _catalog({"1.2.0": _version(wheelUrl="https://example.com/legacy.whl", artifactUrl=None)}),
+            "artifact type": _catalog({"1.2.0": _version(artifactType="python-wheel")}),
             "empty versions": _catalog(versions={}),
             "version identity": _catalog({"1.2.0": _version(version="1.3.0")}),
         }
@@ -122,15 +115,15 @@ class PluginCatalogParseTests(unittest.TestCase):
             description="Minimal external plugin",
             version="1.3.0",
             platform_api_version="1.0.0",
-            wheel_url="https://github.com/acme/plugins/releases/download/v1.3.0/test_minimal-1.3.0-py3-none-any.whl",
+            artifact_url="https://github.com/acme/plugins/releases/download/v1.3.0/test-minimal-1.3.0.compiled-plugin.json",
             sha256="b" * 64,
             published_at="2026-09-06T00:00:00Z",
         )
         catalog = parse_catalog(updated)
         self.assertIn("1.3.0", catalog.plugins["test-minimal"].versions)
         self.assertEqual(
-            catalog.plugins["test-minimal"].versions["1.3.0"].wheel_url,
-            "https://github.com/acme/plugins/releases/download/v1.3.0/test_minimal-1.3.0-py3-none-any.whl",
+            catalog.plugins["test-minimal"].versions["1.3.0"].artifact_url,
+            "https://github.com/acme/plugins/releases/download/v1.3.0/test-minimal-1.3.0.compiled-plugin.json",
         )
         # Existing version and metadata are preserved.
         self.assertIn("1.2.0", catalog.plugins["test-minimal"].versions)
@@ -147,10 +140,48 @@ class PluginCatalogParseTests(unittest.TestCase):
                 description="",
                 version="1.3.0",
                 platform_api_version="1.0.0",
-                wheel_url="https://example.com/x.whl",
+                artifact_url="https://example.com/compiled-plugin.json",
                 sha256="b" * 64,
                 published_at="2026-09-06T00:00:00Z",
             )
+
+    def test_catalog_artifact_is_digest_checked_and_installed_as_compiled_contract(self):
+        from assayer_host.plugin_lifecycle_ops import add_from_catalog
+        from assayer_platform.declaration_compiler import compile_plugin_contract
+
+        fixture = Path(__file__).parent / "fixtures" / "plugins" / "policy-pack"
+        with __import__("tempfile").TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact_dir = root / "artifact"
+            compile_plugin_contract(fixture, artifact_dir)
+            payload = (artifact_dir / "compiled-plugin.json").read_bytes()
+            catalog = json.loads(_catalog())
+            catalog["plugins"]["test-minimal"]["versions"]["1.2.0"]["artifactUrl"] = "https://example.test/compiled-plugin.json"
+            catalog["plugins"]["test-minimal"]["versions"]["1.2.0"]["sha256"] = hashlib.sha256(payload).hexdigest()
+            # The downloaded artifact must agree with the catalog identity.
+            contract = json.loads(payload)
+            contract["plugin"]["id"] = "test-minimal"
+            contract["plugin"]["version"] = "1.2.0"
+            from assayer_platform.compiled_plugin_contract import contract_digest
+            contract["contractDigest"] = contract_digest(contract)
+            payload = json.dumps(contract, ensure_ascii=False, separators=(",", ":")).encode()
+            catalog["plugins"]["test-minimal"]["versions"]["1.2.0"]["sha256"] = hashlib.sha256(payload).hexdigest()
+            catalog_path = root / "plugins.json"
+            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+            with patch("assayer_host.plugin_lifecycle_ops.download_bytes", return_value=payload):
+                result = add_from_catalog("test-minimal", version="1.2.0", index=str(catalog_path), store_root=str(root / "store"))
+            self.assertEqual(result["status"], "completed")
+
+    def test_catalog_artifact_digest_mismatch_fails_closed(self):
+        from assayer_host.plugin_lifecycle_ops import add_from_catalog
+        with __import__("tempfile").TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog_path = root / "plugins.json"
+            catalog_path.write_text(_catalog(), encoding="utf-8")
+            with patch("assayer_host.plugin_lifecycle_ops.download_bytes", return_value=b"not-the-artifact"):
+                with self.assertRaises(PlatformContractError) as error:
+                    add_from_catalog("test-minimal", version="1.2.0", index=str(catalog_path), store_root=str(root / "store"))
+            self.assertEqual(error.exception.code, "PLUGIN_ARTIFACT_DIGEST_MISMATCH")
 
 
 if __name__ == "__main__":

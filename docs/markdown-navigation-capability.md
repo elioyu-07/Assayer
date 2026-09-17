@@ -1,5 +1,9 @@
 # Markdown Navigation Capability
 
+> **Provider/plugin-specific capability note.** This document describes a
+> Markdown source adapter and its first consumer. It does not define a
+> platform-wide domain model or normative plugin vocabulary.
+
 ## Purpose
 
 Provide one reusable, evidence-preserving navigation capability for Markdown

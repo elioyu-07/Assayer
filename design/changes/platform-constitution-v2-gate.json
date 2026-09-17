@@ -1,0 +1,92 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "platform-constitution-v2-gate",
+  "changeType": "contract_change",
+  "title": "Adopt the unified platform/plugin boundary and design preflight",
+  "summary": "Replace parallel plugin escape paths with one zero-Python contract, platform-owned providers, exhaustive review coverage, and a mandatory machine-readable design gate.",
+  "changedPaths": [
+    "AGENTS.md",
+    "README.md",
+    "docs/platform-constitution-v1.md",
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md",
+    "docs/plugin-contract-v1.md",
+    "docs/plugin-development-standard-v1.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/simple-plugin-authoring-design.md",
+    "docs/canonical-result-contract-v1.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/platform-contract-traceability-v1.md",
+    "schemas/design-confirmation.schema.json",
+    "scripts/check_design_confirmation.py",
+    "scripts/check_document_boundaries.py",
+    "tests/test_design_confirmation.py",
+    "tests/test_platform_v1_contracts.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "capability providers",
+      "Agent orchestration",
+      "review planning",
+      "Evidence, Coverage, Ledger, and Result",
+      "verification and release"
+    ],
+    "plugin": [
+      "domain declarations",
+      "Check and Dimension meaning",
+      "semantic guidance",
+      "business cases"
+    ],
+    "provider": [
+      "frozen typed snapshots",
+      "complete element enumeration",
+      "source anchors and failure facts"
+    ],
+    "agent": [
+      "clarification",
+      "bounded semantic review",
+      "rationale and user interaction"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": ["document"],
+    "required": [
+      "typed_snapshot",
+      "complete_element_enumeration",
+      "bounded_context_navigation",
+      "exhaustive_review_coverage"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "plugin Python",
+    "plugin Provider or parser",
+    "plugin Agent or Skill",
+    "plugin lifecycle or transport",
+    "plugin Evidence, Ledger, or Result",
+    "plugin external effects",
+    "compatibility escape paths"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "normative-document-boundary",
+    "design-confirmation-schema",
+    "design-confirmation-preflight",
+    "architecture-boundary",
+    "zero-python-plugin-contract",
+    "provider-complete-enumeration",
+    "element-check-dimension-coverage",
+    "exact-compiled-artifact-installation"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-15T00:00:00+08:00",
+    "decision": "Approved during the architecture grill; implementation must follow the confirmed hard boundaries."
+  },
+  "state": "approved"
+}

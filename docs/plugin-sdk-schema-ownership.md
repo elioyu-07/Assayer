@@ -4,8 +4,12 @@
 |---|---|
 | Document version | 1.1.2 |
 | Date | 2026-09-14 |
-| Status | Single-source ownership implemented |
+| Status | Historical SDK ownership record; ordinary plugin path superseded |
 | Owner | Assayer maintainers |
+
+> **Historical record.** The schemas below describe older generated bindings.
+> Current ordinary-plugin source is declaration-only and its release boundary
+> is the compiled contract schema under `schemas/compiled-plugin-contract.schema.json`.
 
 ## 1. Canonical ownership
 

@@ -21,7 +21,7 @@ tool-discovery mechanism before reporting the integration as unavailable.
 
 | User intent | Skill | Tools |
 |---|---|---|
-| Verify a local plugin source or build its verified wheel | `assayer-plugin-development` | `verify_plugin_source` |
+| Verify a local plugin source or build its compiled artifact | `assayer-plugin-development` | `verify_plugin_source` |
 | Manage an Assayer domain plugin (install/upgrade/remove/look up) | this Skill | `apply_plugin_change` / `list_plugins` / `get_plugin_info` |
 | Run an installed plugin against an input | `assayer-plugin` | `start_plugin_run`, `advance_plugin_run`, … |
 | Audit a web URL | `assayer-audit` | `start_audit`, … |
@@ -37,7 +37,7 @@ not installed, tell them it is missing and offer to install it first (see
 | User says (examples) | Tool |
 |---|---|
 | "what plugins do i have", "list plugins" | `list_plugins()` |
-| "tell me about ass-spec", "info ass-spec" | `get_plugin_info(pluginId="ass-spec")` |
+| "tell me about my plugin", "info example-plugin" | `get_plugin_info(pluginId="example-plugin")` |
 
 For "version", "latest version", or "what version is installed" questions,
 call `get_plugin_info` first and only. Do not scan the repository, manifests,
@@ -71,12 +71,12 @@ confirms, call `apply_plugin_change` again with its token and
 
 | User says (examples) | Product call |
 |---|---|
-| "install ass-spec" | `apply_plugin_change(operation="install", plugin="ass-spec")` |
-| "install ass-spec 0.9.0" | `apply_plugin_change(operation="install", plugin="ass-spec", version="0.9.0")` |
-| "upgrade ass-spec" | `apply_plugin_change(operation="upgrade", pluginId="ass-spec")` |
-| "pin ass-spec to 0.9.0" | `apply_plugin_change(operation="downgrade", pluginId="ass-spec", version="0.9.0")` |
-| "rollback ass-spec" | `apply_plugin_change(operation="rollback", pluginId="ass-spec")` |
-| "uninstall ass-spec" | `apply_plugin_change(operation="uninstall", pluginId="ass-spec")` |
+| "install example-plugin" | `apply_plugin_change(operation="install", plugin="example-plugin")` |
+| "install example-plugin 0.9.0" | `apply_plugin_change(operation="install", plugin="example-plugin", version="0.9.0")` |
+| "upgrade example-plugin" | `apply_plugin_change(operation="upgrade", pluginId="example-plugin")` |
+| "pin example-plugin to 0.9.0" | `apply_plugin_change(operation="downgrade", pluginId="example-plugin", version="0.9.0")` |
+| "rollback example-plugin" | `apply_plugin_change(operation="rollback", pluginId="example-plugin")` |
+| "uninstall example-plugin" | `apply_plugin_change(operation="uninstall", pluginId="example-plugin")` |
 
 Resolve the plugin identifier from the user's words. When the identifier is
 ambiguous, use `list_plugins()` or `get_plugin_info` to disambiguate rather than
@@ -111,6 +111,6 @@ After a successful mutation, trust the returned `resultingState`, version, and
 next action; do not call `list_plugins` or `get_plugin_info` just to repeat the
 same confirmation. Query them only when the result is uncertain, dirty, or the
 user explicitly asks for status. Never expose
-credentials, secrets, raw wheel bytes, hidden reasoning, or internal protocol
+credentials, secrets, raw artifact bytes, hidden reasoning, or internal protocol
 details. Keep the answer to the lifecycle facts: what changed, what state it is
 now in, and what the user can do next.

@@ -7,6 +7,10 @@
 | Status | Superseded authority; see [Platform Constitution v1](platform-constitution-v1.md) and the v1 contracts |
 | Owner | Assayer Maintainers |
 
+> **Non-normative historical reference.** This document retains examples from
+> the first vertical implementation. It is not a platform authority; use the
+> Constitution and v1 contracts for normative decisions.
+
 ## Implementation Note
 
 This document is retained as the detailed design reference. The normative M2

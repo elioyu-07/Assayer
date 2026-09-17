@@ -20,6 +20,7 @@ from assayer_plugin_sdk import (
     ProviderFailure,
     ProviderRegistration,
     ProviderResponse,
+    ProviderSourceSnapshot,
     load_provider_descriptor,
 )
 
@@ -269,6 +270,28 @@ class MarkdownNavigationProvider:
     """Provider implementation for one immutable Markdown source."""
 
     descriptor = _descriptor()
+
+    def discover_sources(self, scope: Mapping[str, Any], context: Any) -> tuple[ProviderSourceSnapshot, ...]:
+        """Freeze the authorized Markdown file identity before review planning."""
+        if scope.get("format") != "markdown":
+            raise ValueError("Only Markdown is supported by this provider.")
+        path = Path(str(scope.get("path", ""))).expanduser().resolve()
+        raw = path.read_bytes()
+        limits = getattr(context, "limits", {}) or {}
+        max_bytes = int(limits.get("maxBytes", self.descriptor.limits["maxBytes"]))
+        if len(raw) > max_bytes:
+            raise ValueError("Markdown source exceeds the negotiated byte limit.")
+        return (ProviderSourceSnapshot(
+            source_identity=str(path),
+            state_digest=_digest(raw),
+            metadata={
+                "format": "markdown",
+                "path": str(path),
+                "byteCount": len(raw),
+                "lineCount": len(raw.decode("utf-8-sig").splitlines()),
+                "parserVersion": self.descriptor.algorithm_versions["markdownParser"],
+            },
+        ),)
 
     def collect(self, request: Any, context: Any) -> ProviderResponse:
         del context

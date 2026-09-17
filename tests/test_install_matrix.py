@@ -29,21 +29,17 @@ matrix = _load_matrix_module()
 
 
 class InstallMatrixAssertionsTest(unittest.TestCase):
-    def test_matrix_covers_the_split_shapes_and_the_conflict(self):
+    def test_matrix_covers_split_runtime_shapes_without_python_plugins(self):
         names = {case.name for case in matrix.CASES}
         self.assertIn("all-split", names)
-        self.assertIn("duplicate-plugin-conflict", names)
-        conflict = next(case for case in matrix.CASES if case.name == "duplicate-plugin-conflict")
-        self.assertEqual("PLUGIN_CONFLICT", conflict.conflict)
-        self.assertEqual((2, 0), (conflict.plugins, conflict.providers))
         split = next(case for case in matrix.CASES if case.name == "all-split")
-        self.assertEqual((1, 2), (split.plugins, split.providers))
+        self.assertEqual((0, 0), (split.ordinary_plugins, split.providers))
         self.assertTrue(split.agent)
         self.assertIn("agent-only", names)
         agent_only = next(case for case in matrix.CASES if case.name == "agent-only")
         self.assertFalse(agent_only.platform)
         root = next(case for case in matrix.CASES if case.name == "root-meta")
-        self.assertEqual((0, 0), (root.plugins, root.providers))
+        self.assertEqual((0, 0), (root.ordinary_plugins, root.providers))
 
     def test_root_wheel_guard_rejects_module_and_sdk_schema_leaks(self):
         import tempfile

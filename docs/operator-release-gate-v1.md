@@ -7,6 +7,10 @@
 | Status | Active release-gate profile |
 | Owner | Product Owner / Release Engineering |
 
+> **Plugin-specific acceptance profile.** This gate exercises one installed
+> plugin and its controlled fixture. It is not a generic platform contract;
+> generic release laws live in the Platform Constitution and v1 contracts.
+
 ## 1. Authority and scope
 
 This document is the executable operator-acceptance profile for J04, J05, and

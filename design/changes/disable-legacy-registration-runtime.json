@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "disable-legacy-registration-runtime",
+  "changeType": "platform_change",
+  "title": "Disable legacy registration-based execution paths",
+  "summary": "Prevent retired PluginRegistration, DomainResultContract, and wheel lifecycle runtimes from being instantiated while the compiled contract runtime is authoritative.",
+  "changedPaths": [
+    "src/assayer_platform/runner.py",
+    "src/assayer_platform/interactive.py",
+    "src/assayer_platform/plugin_lifecycle.py",
+    "tests/test_compiled_interactive.py",
+    "design/changes/disable-legacy-registration-runtime.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract execution", "legacy runtime shutdown", "fail-closed lifecycle"],
+    "plugin": ["declaration-only requirements"],
+    "provider": ["typed capability collection"],
+    "agent": ["semantic review decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_runtime_only"]
+  },
+  "forbiddenResponsibilities": [
+    "PluginRegistration execution",
+    "DomainResultContract execution",
+    "wheel-backed plugin runtime",
+    "legacy compatibility adapter"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "PlatformRunner cannot execute a PluginRegistry",
+    "InteractivePluginController cannot start a registration-based Run",
+    "PluginLifecycleManager cannot install wheel packages",
+    "all retired paths fail with one explicit contract error"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

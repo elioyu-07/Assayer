@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "markdown-evidence-submission-binding",
+  "changeType": "platform_change",
+  "title": "Bind Markdown decisions to Host-issued Evidence",
+  "summary": "Reject fabricated, foreign, stale, and atom-incompatible Evidence references when a compiled Markdown ReviewBatch is submitted.",
+  "changedPaths": [
+    "src/assayer_platform/compiled_interactive.py",
+    "tests/test_compiled_interactive.py",
+    "design/changes/markdown-evidence-submission-binding.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/evidence-and-decision-integrity.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Evidence identity, lineage, and decision acceptance"],
+    "plugin": ["Check and Dimension semantics"],
+    "provider": ["Issued source-bound Evidence records"],
+    "agent": ["Decision state, rationale, and selection of opaque Evidence refs"]
+  },
+  "capabilities": {"inputKinds": ["markdown"], "required": ["evidence_binding", "exhaustive_coverage"]},
+  "forbiddenResponsibilities": ["Agent-created Evidence", "plugin Evidence namespaces", "accepting arbitrary nonempty refs", "browser changes"],
+  "publicContractImpact": "safety",
+  "acceptance": [
+    "fabricated Evidence references are rejected",
+    "Evidence from another WorkItem or Run is rejected",
+    "Evidence not declared for the atom is rejected",
+    "source digest and Check identity are validated before acceptance",
+    "valid Markdown decisions with Host-issued Evidence remain accepted",
+    "focused compiled runtime tests and fast verification pass"
+  ],
+  "humanApproval": {"required": true, "status": "approved", "approver": "user", "approvedAt": "2026-09-17T00:00:00+08:00", "decision": "Approved as the next Markdown audit trust-boundary step."},
+  "state": "approved",
+  "supersedes": "markdown-review-element-planning"
+}

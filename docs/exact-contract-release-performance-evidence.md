@@ -2,6 +2,11 @@
 
 Date: 2026-09-11
 
+> **Historical evidence.** This record describes an earlier runtime and release
+> path. It cannot authorize ordinary-plugin implementation. The active path is
+> the zero-Python declaration contract and exact `compiled-plugin.json` artifact
+> governed by Platform Constitution v2.
+
 This record separates deterministic repository evidence from operator-level
 acceptance. A passing deterministic gate does not claim that a real Codex
 natural-language session or browser journey was executed.

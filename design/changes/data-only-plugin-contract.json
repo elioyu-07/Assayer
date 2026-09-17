@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "data-only-plugin-contract",
+  "changeType": "contract_change",
+  "title": "Make the ordinary plugin artifact a data-only compiled contract",
+  "summary": "Compile ordinary plugin declarations into one immutable JSON contract and remove generated Python registration, runtime, acceptance, and entry-point code.",
+  "changedPaths": [
+    "schemas/compiled-plugin-contract.schema.json",
+    "src/assayer_platform/compiled_plugin_contract.py",
+    "src/assayer_platform/declaration_compiler.py",
+    "src/assayer_platform/plugin_verify.py",
+    "src/assayer_host/cli.py",
+    "tests/test_compiled_plugin_contract.py",
+    "tests/test_declaration_compiler.py",
+    "tests/test_plugin_verify.py",
+    "tests/test_frontend_migration.py",
+    "tests/test_plugin_sdk_distribution.py",
+    "tests/test_cli.py",
+    "tests/test_browser_playwright.py",
+    "src/assayer_host/plugin_lifecycle_ops.py",
+    "src/assayer_platform/compiled_plugin_lifecycle.py",
+    "src/assayer_platform/__init__.py",
+    "src/assayer_platform/plugin_discovery.py",
+    "src/assayer_platform/public_surface.py",
+    "src/assayer_platform/compiled_interactive.py",
+    "scripts/build_plugin_bundle.py",
+    "scripts/build_distributions.py",
+    "plugins/assayer/scripts/prepare_assayer_runtime",
+    "tests/test_compiled_plugin_lifecycle.py",
+    "tests/test_compiled_interactive.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["contract compilation", "contract validation", "runtime orchestration", "release acceptance"],
+    "plugin": ["identity", "checks", "dimensions", "semantic requirements", "business cases"],
+    "provider": ["typed snapshots", "complete element enumeration"],
+    "agent": ["semantic decisions over platform-created review atoms"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract", "typed_snapshot", "exhaustive_coverage"]
+  },
+  "forbiddenResponsibilities": [
+    "generated registration.py",
+    "generated __init__.py",
+    "Python entry points",
+    "PluginRegistration",
+    "DomainResultContract",
+    "plugin-owned runtime or acceptance code"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "one-compiled-contract-json",
+    "data-only-generated-tree",
+    "no-python-files",
+    "no-python-entry-points",
+    "contract-digest-is-deterministic",
+    "compiled-contract-loads-without-importing-plugin-code"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved when the user instructed the platform to begin the data-only ordinary-plugin hard cut."
+  },
+  "state": "verified"
+}

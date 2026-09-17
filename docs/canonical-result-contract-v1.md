@@ -4,8 +4,11 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-03 |
-| Status | Frozen for M2; schema/install enforcement tracked by M3 |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer maintainers |
+
+> **Superseded.** Result semantics remain platform-owned, but current work is
+> governed by the unified v2 review and coverage model.
 
 The canonical result is the portable, domain-neutral result of one platform
 Run. It is derived from the immutable ledger and is the only input permitted
@@ -56,11 +59,11 @@ Public Decision, Finding, failure, and extension text is sanitized.
 Secret-like assignments, environment values, and absolute local paths cannot
 be copied from a plugin or exception into the portable result.
 
-The compiler-generated Frontend plugin follows the same generic interactive
-path as other ordinary plugins. Its common-review Decisions become canonical
-outcomes, retain Host-bound Evidence references, and are rendered by the
-platform report projector. Browser diagnostics remain provider-owned and do
-not add Frontend vocabulary to the canonical schema.
+Every compiler-generated ordinary plugin follows the same generic interactive
+path. Its common-review Decisions become canonical outcomes, retain Host-bound
+Evidence references, and are rendered by the platform report projector.
+Provider diagnostics remain provider-owned and do not add source-specific
+vocabulary to the canonical schema.
 
 Plugin summaries remain separate derived views. A namespaced
 `domainExtension` is optional and cannot replace or override status, validity,

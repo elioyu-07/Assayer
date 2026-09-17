@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "migrate-host-transport-to-compiled-runtime",
+  "changeType": "platform_change",
+  "title": "Replace legacy Host MCP execution with compiled contract runtime",
+  "summary": "Make Host MCP transport consume only installed compiled-plugin.json contracts and expose the platform-owned provider, evidence, ReviewBatch, and finalization lifecycle.",
+  "changedPaths": [
+    "src/assayer_host/transport.py",
+    "src/assayer_host/__init__.py",
+    "design/changes/migrate-host-transport-to-compiled-runtime.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/platform-plugin-boundary-contract.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["compiled contract selection", "provider binding", "source discovery", "evidence collection", "ReviewBatch planning and finalization", "MCP protocol envelope"],
+    "plugin": ["compiled declaration of input, checks, dimensions, and semantic instructions"],
+    "provider": ["capability implementation and evidence collection"],
+    "agent": ["five-state ReviewBatch decisions"]
+  },
+  "capabilities": {
+    "inputKinds": ["document", "markdown", "browser_snapshot"],
+    "required": ["compiled_contract_runtime", "provider_binding", "review_batch_lifecycle"]
+  },
+  "forbiddenResponsibilities": [
+    "transport import or construction of PluginRegistry",
+    "transport import or construction of PlatformRunner",
+    "transport import or construction of InteractivePluginController",
+    "domainResult or InvestigationPacket submission",
+    "wheel/package materialization for execution",
+    "plugin-provided platform identity fields"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "MCP transport lists and runs installed compiled contracts without Python plugin registration",
+    "MCP tools accept only pluginId, checkId, scope, provider selection, and ReviewBatch decisions",
+    "provider binding, discovery, collection, planning, submission, and finalization are delegated to CompiledInteractiveController",
+    "legacy run_plugin/start_plugin_run/advance_plugin_run/domainResult paths are absent",
+    "transport fails closed when a compiled contract or provider is unavailable",
+    "compiled lifecycle and boundary checks remain green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved by continuing the no-compatibility hard cut."
+  },
+  "state": "verified"
+}

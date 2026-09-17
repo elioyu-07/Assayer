@@ -4,8 +4,11 @@
 |---|---|
 | Document version | 1.0.0 |
 | Date | 2026-09-03 |
-| Status | Frozen for M2; provider conformance tracked by M3 |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Owner | Assayer maintainers |
+
+> **Superseded.** Provider responsibilities are now governed by Platform
+> Constitution v2 and the design-confirmation gate.
 
 ## 1. Purpose
 

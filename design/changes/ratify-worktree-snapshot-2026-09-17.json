@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "ratify-worktree-snapshot-2026-09-17",
+  "changeType": "platform_change",
+  "title": "Ratify the existing 2026-09-17 worktree snapshot for commit",
+  "summary": "After-the-fact disposition of 37 changed paths that were produced before a Design Confirmation preflight occurred. This record does not claim that a preflight happened and does not endorse the content of the ratified paths. It only records the business owner's decision to accept the existing worktree snapshot so the repository can be committed. No existing approved record is modified, and no new capability, plugin, provider, or contract behavior is authorized by this record. Document corrections and any further implementation proceed under separate, newly checked Design Confirmations.",
+  "changedPaths": [
+    "docs/agent-domain-result-boundary-v2.md",
+    "docs/agent-first-plugin-lifecycle-design.md",
+    "docs/architecture.md",
+    "docs/codex-natural-language-plugin-lifecycle-acceptance.md",
+    "docs/codex-natural-language-plugin-lifecycle-plan.md",
+    "docs/design-governance.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/operator-release-gate-v1.md",
+    "docs/platform-contract.md",
+    "docs/platform-foundation-and-user-journey-plan.md",
+    "docs/plugin-lifecycle-design.md",
+    "docs/plugin-protocol-v1.md",
+    "docs/plugin-sdk-schema-ownership.md",
+    "docs/plugin-version-axes-v1.md",
+    "docs/product-contract.md",
+    "docs/spec-review-getting-started.md",
+    "plugins/assayer/.codex-plugin/plugin.json",
+    "plugins/frontend-audit/checks.yaml",
+    "plugins/frontend-audit/cases/orders-insufficient.json",
+    "plugins/frontend-audit/cases/orders-insufficient.yaml",
+    "plugins/frontend-audit/cases/orders-no-reset.json",
+    "plugins/frontend-audit/cases/orders-no-reset.yaml",
+    "rules/FUA-10-v1.1.md",
+    "rules/FUA-10.md",
+    "rules/_template.md",
+    "rules/registry.json",
+    "src/assayer_host/__main__.py",
+    "src/assayer_host/browser_runtime.py",
+    "src/assayer_host/core.py",
+    "src/assayer_host/harness.py",
+    "src/assayer_host/observability.py",
+    "src/assayer_host/platform_store.py",
+    "src/assayer_host/resources.py",
+    "src/assayer_host/runtime_router.py",
+    "design/reviews/2026-09-17-governance-gaps.json",
+    "design/reviews/2026-09-17-governance-gaps.md",
+    "design/reviews/2026-09-17-governance-gaps.patch"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["Assayer maintainers ratify the existing worktree snapshot; the platform kernel owns no new behavior under this record"],
+    "plugin": ["No plugin ownership change; ordinary plugins remain declaration-only"],
+    "provider": ["No provider ownership change; providers remain under the separate Provider contract"],
+    "agent": ["The Agent performs no implementation under this record"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "This record must not be used to authorize new implementation work",
+    "This record must not be treated as endorsement of the content of the ratified paths",
+    "No existing approved Design Confirmation record may be edited or backdated"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "check_design_confirmation.py --git-range HEAD returns zero after all changed paths are staged",
+    "Entry and exit gate outputs are retained as evidence",
+    "No existing approved design record is modified"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T14:13:10+08:00",
+    "decision": "User ratified the existing worktree snapshot after explanation that this is an after-the-fact disposition with no preflight, does not endorse content, and does not alter existing approved records."
+  },
+  "state": "approved"
+}

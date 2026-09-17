@@ -1,7 +1,7 @@
 """Validation of compiler-generated Simple review items at the Host boundary.
 
-This is generated adapter IR, not an authoring API.  Ordinary plugin code
-returns Simple SDK values; the SDK compiler emits this exact typed projection.
+This is generated adapter IR, not an authoring API. Ordinary plugin declarations
+are compiled by the platform into this exact typed projection.
 The Host validates it against the frozen InvestigationPacket before creating
 internal ReviewAtoms.
 """

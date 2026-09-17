@@ -5,10 +5,11 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PLUGIN_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MANIFEST="$PLUGIN_ROOT/.codex-plugin/plugin.json"
 WHEEL_DIR="$PLUGIN_ROOT/runtime/wheels"
+PLUGIN_CONTRACT_DIR="$PLUGIN_ROOT/runtime/plugins"
 BUNDLE_MANIFEST="$PLUGIN_ROOT/runtime/bundle-manifest.json"
 
-if [ ! -f "$BUNDLE_MANIFEST" ] || [ ! -d "$WHEEL_DIR" ] || ! find "$WHEEL_DIR" -maxdepth 1 -name 'assayer-*.whl' -print -quit | grep -q .; then
-  echo "ASSAYER_BUNDLE_INCOMPLETE: the plugin does not contain its Assayer wheelhouse; reinstall a release bundle." >&2
+if [ ! -f "$BUNDLE_MANIFEST" ] || [ ! -d "$WHEEL_DIR" ] || [ ! -d "$PLUGIN_CONTRACT_DIR" ] || ! find "$WHEEL_DIR" -maxdepth 1 -name 'assayer-*.whl' -print -quit | grep -q .; then
+  echo "ASSAYER_BUNDLE_INCOMPLETE: the product bundle does not contain its runtime package wheelhouse; reinstall a release bundle." >&2
   exit 78
 fi
 
@@ -47,7 +48,7 @@ PLUGIN_VERSION=$(
 )
 BASE_VERSION=${PLUGIN_VERSION%%+*}
 
-if ! "$PYTHON_BIN" - "$BUNDLE_MANIFEST" "$WHEEL_DIR" "$PLUGIN_VERSION" <<'PY'
+if ! "$PYTHON_BIN" - "$BUNDLE_MANIFEST" "$WHEEL_DIR" "$PLUGIN_CONTRACT_DIR" "$PLUGIN_VERSION" <<'PY'
 import hashlib
 import json
 import platform
@@ -55,7 +56,7 @@ import sys
 import sysconfig
 from pathlib import Path
 
-manifest_path, wheel_dir, expected_version = map(Path, sys.argv[1:])
+manifest_path, wheel_dir, plugin_contract_dir, expected_version = map(Path, sys.argv[1:])
 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 runtime = manifest["runtime"]
 actual_python = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -69,6 +70,14 @@ for item in manifest["wheels"]:
     wheel = wheel_dir / item["file"]
     if not wheel.is_file() or hashlib.sha256(wheel.read_bytes()).hexdigest() != item["sha256"]:
         raise SystemExit(f"wheel verification failed: {wheel.name}")
+declared_contracts = {Path(item["file"]).name for item in manifest["pluginContracts"]}
+actual_contracts = {path.name for path in plugin_contract_dir.glob("*.compiled-plugin.json")}
+if actual_contracts != declared_contracts:
+    raise SystemExit("compiled plugin artifact set does not match bundle manifest")
+for item in manifest["pluginContracts"]:
+    contract = plugin_contract_dir / item["file"]
+    if not contract.is_file() or hashlib.sha256(contract.read_bytes()).hexdigest() != item["sha256"]:
+        raise SystemExit(f"plugin contract verification failed: {contract.name}")
 PY
 then
   echo "ASSAYER_BUNDLE_INCOMPATIBLE: this release bundle does not match the selected Python/platform or failed integrity verification." >&2
@@ -101,10 +110,7 @@ if [ ! -x "$VENV_ROOT/bin/assayer-mcp" ] || [ ! -f "$STAMP" ]; then
     --no-index \
     --find-links "$WHEEL_DIR" \
     "assayer[browser,mcp]==$BASE_VERSION" \
-    "assayer-agent==$BASE_VERSION" \
-    "assayer-plugin-frontend-audit" \
-    "assayer-provider-markdown" \
-    "assayer-provider-browser" 1>&2 || {
+    "assayer-agent==$BASE_VERSION" 1>&2 || {
       echo "ASSAYER_RUNTIME_INSTALL_FAILED: bundled Python dependencies could not be installed." >&2
       exit 78
     }
@@ -113,6 +119,12 @@ if [ ! -x "$VENV_ROOT/bin/assayer-mcp" ] || [ ! -f "$STAMP" ]; then
     exit 78
   }
 fi
+
+mkdir -p "$RUNTIME_ROOT/plugins"
+for contract in "$PLUGIN_CONTRACT_DIR"/*.compiled-plugin.json; do
+  [ -f "$contract" ] || continue
+  cp "$contract" "$RUNTIME_ROOT/plugins/"
+done
 
 RUNTIME_VERSION=$(
   "$VENV_ROOT/bin/python" -c 'from importlib.metadata import version; print(version("assayer"))'

@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "markdown-provider-baseline-validation",
+  "changeType": "provider_change",
+  "title": "Validate the restored optional Markdown Provider baseline",
+  "summary": "Complete the user-approved restoration baseline, replace obsolete Markdown package absence assertions with independent-package boundary checks, and record observed compiled-runtime integration gaps without claiming end-to-end completion.",
+  "changedPaths": [
+    "src/assayer_document_navigation/*",
+    "packages/assayer-provider-markdown/*",
+    "tests/test_markdown_navigation.py",
+    "design/changes/restore-markdown-audit-slice.json",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_plugin_sdk_distribution.py",
+    "design/changes/markdown-provider-baseline-validation.json"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/capability-provider-contract-v1.md",
+    "docs/markdown-navigation-capability.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "Provider binding",
+      "Evidence and coverage acceptance",
+      "canonical result"
+    ],
+    "plugin": [
+      "Markdown audit meaning and business cases"
+    ],
+    "provider": [
+      "Read-only Markdown parsing, source digest, anchors, and bounded pagination"
+    ],
+    "agent": [
+      "Bounded semantic decisions for Markdown review atoms"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": [
+      "markdown"
+    ],
+    "required": [
+      "document_navigation",
+      "typed_snapshot",
+      "bounded_review_batch",
+      "exhaustive_coverage"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "browser runtime changes",
+    "plugin-owned parser or Evidence ledger",
+    "new compatibility entry points",
+    "plugin distribution redesign",
+    "domain conclusions inside the Provider"
+  ],
+  "publicContractImpact": "compatible",
+  "acceptance": [
+    "Markdown parsing, pagination, digest and provider conformance tests pass",
+    "Host collection binds Markdown Evidence and safely replays a request",
+    "Changed and missing source requests fail without Evidence",
+    "Optional Markdown package builds and discovers its entry point in isolation",
+    "Architecture, document, plugin source, design-record and fast test gates are run",
+    "Observed compiled-runtime blockers are documented and end-to-end acceptance remains explicitly pending"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "User approved restoring existing Markdown assets and establishing the baseline; updating tests that require their deletion is necessary to that approved scope. No legacy plugin runtime is restored."
+  },
+  "state": "approved",
+  "supersedes": "restore-markdown-audit-slice"
+}

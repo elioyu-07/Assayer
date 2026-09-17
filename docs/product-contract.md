@@ -10,7 +10,7 @@
 | Baseline | B12 Host smoke completed; C01 LLM investigation design baseline |
 | Blocking open questions | Governed by [Verification and Traceability](verification-and-traceability.md) |
 
-This document owns only product goals, scope, user-visible commitments, and first-version completion conditions. [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md) owns the current Alpha end-to-end journey and sole completion gate. System invariants, lifecycle, action safety, evidence transactions, and rule files are owned by [Design Governance](design-governance.md), [Domain Model](domain-model-and-lifecycle.md), [Action Safety](action-safety-and-credentials.md), [Evidence Integrity](evidence-and-decision-integrity.md), and [Rule Contract](rule-contract.md), respectively.
+This document owns only product goals, scope, user-visible commitments, and first-version completion conditions. [Alpha User Journey and End-to-End Definition of Done](user-journey-and-definition-of-done.md) owns the current Alpha end-to-end journey and sole completion gate. Platform invariants and generic lifecycle laws are owned by the [Platform Constitution](platform-constitution-v1.md) and v1 contracts; source-specific algorithms and rule files are owned by [Domain Model](domain-model-and-lifecycle.md), [Action Safety](action-safety-and-credentials.md), [Evidence Integrity](evidence-and-decision-integrity.md), and [Rule Contract](rule-contract.md), respectively.
 
 ## 1. Product Definition
 

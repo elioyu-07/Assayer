@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "deep-clean-legacy-plugin-documentation-and-gates",
+  "changeType": "contract_change",
+  "title": "Remove stale ordinary-plugin runtime and authoring semantics",
+  "summary": "Align current guidance and repository gates with the single zero-Python compiled-plugin contract, while explicitly retaining Provider terminology and negative rejection fixtures.",
+  "changedPaths": [
+    "README.md",
+    "docs/platform-constitution-v2.md",
+    "docs/plugin-development.md",
+    "docs/plugin-contract-v1.md",
+    "docs/plugin-development-standard-v1.md",
+    "docs/architecture-governance-baseline.md",
+    "docs/project-plan.md",
+    "docs/exact-contract-release-performance-evidence.md",
+    "docs/frontend-simple-migration-evidence.md",
+    "docs/platform-boundary-map.md",
+    "plugins/assayer/skills/assayer-plugin-development/SKILL.md",
+    "plugins/assayer/skills/assayer-plugin-lifecycle/SKILL.md",
+    "scripts/check_document_boundaries.py",
+    "scripts/check_plugin_source_boundaries.py",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_plugin_source_boundaries.py"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": [
+      "compiled artifact generation",
+      "artifact installation and lifecycle",
+      "all parser and enumeration providers",
+      "document vocabulary and conformance gates"
+    ],
+    "plugin": [
+      "domain declarations",
+      "checks and dimensions",
+      "semantic guidance",
+      "business cases"
+    ],
+    "provider": [
+      "typed snapshots",
+      "complete element enumeration",
+      "source anchors and failure facts"
+    ],
+    "agent": [
+      "semantic review",
+      "clarification",
+      "rationale and user interaction"
+    ]
+  },
+  "capabilities": {
+    "inputKinds": ["document"],
+    "required": [
+      "compiled_plugin_artifact",
+      "complete_element_enumeration",
+      "document_vocabulary_gate",
+      "negative_source_boundary_fixtures"
+    ]
+  },
+  "forbiddenResponsibilities": [
+    "ordinary plugin Python",
+    "ordinary plugin wheel",
+    "ordinary plugin registration entry point",
+    "ordinary plugin parser or provider",
+    "ordinary plugin lifecycle or transport",
+    "ordinary plugin Evidence, Ledger, or Result",
+    "compatibility aliases for retired ordinary-plugin paths"
+  ],
+  "publicContractImpact": "breaking",
+  "acceptance": [
+    "normative-document-boundary",
+    "agent-skill-current-guidance",
+    "zero-python-plugin-contract",
+    "compiled-artifact-only-lifecycle",
+    "provider-registration-preserved",
+    "negative-fixture-coverage-preserved",
+    "full-test-suite"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "user",
+    "approvedAt": "2026-09-16T00:00:00+08:00",
+    "decision": "Approved as the deep-clean phase of the hard-cut unified platform/plugin contract."
+  },
+  "state": "approved"
+}

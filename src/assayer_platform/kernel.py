@@ -37,7 +37,6 @@ from .contract import (
     WorkItem,
 )
 from .ledger import PlatformLedgerStore
-from .plugin_registry import PluginRegistry
 from .parallel_execution import ParallelExecutionPlanner
 
 
@@ -114,7 +113,7 @@ class PlatformKernel:
 
     def run_registered(
         self,
-        registry: PluginRegistry,
+        registry: Any,
         scope: Any,
         check_id: str,
         context: PlatformContext,

@@ -12,9 +12,6 @@ from assayer_platform.provider_package_conformance import main as package_main
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BROWSER_PROVIDER_ROOT = ROOT / "packages" / "assayer-provider-browser"
-
-
 FAILURES = (
     "capability_unavailable",
     "authorization_denied",
@@ -28,14 +25,6 @@ FAILURES = (
 
 
 class ProviderReleaseGateTests(unittest.TestCase):
-    def test_shipped_browser_provider_passes_static_release_gate(self):
-        report = inspect_provider_package(BROWSER_PROVIDER_ROOT)
-        self.assertTrue(report.passed, report.as_dict())
-
-    def test_isolated_install_shipped_browser_provider_passes_release_gate(self):
-        report = inspect_provider_installation(BROWSER_PROVIDER_ROOT)
-        self.assertTrue(report.passed, report.as_dict())
-
     def write_package(self, root: Path, **release_overrides) -> Path:
         package = root / "provider-release"
         (package / "provider" / "fixtures").mkdir(parents=True)

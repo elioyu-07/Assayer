@@ -4,10 +4,14 @@
 |---|---|
 | Document version | 1.1.0 |
 | Date | 2026-09-13 |
-| Status | Frozen Advanced SPI/generated binding protocol; not an ordinary author contract |
+| Status | Historical generated-binding protocol; superseded for ordinary plugins |
 | Owner | Assayer maintainers |
 | Authority | Platform Constitution v1 §3.13, Platform--Plugin Boundary Contract v1 §1/§4/§5 |
-| Applies to | Platform kernel, compiler-generated bindings, Advanced SPI plugins, and capability-provider bindings |
+| Applies to | Historical platform bindings and capability-provider evidence only |
+
+> **Superseded.** Ordinary plugins do not implement this protocol. They provide
+> declarations and are installed only as `compiled-plugin.json`; Provider
+> runtime bindings are governed by the Provider contract.
 
 ## 1. Purpose
 

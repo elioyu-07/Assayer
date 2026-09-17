@@ -4,17 +4,21 @@
 |---|---|
 | Document version | 1.2.0 |
 | Date | 2026-09-13 |
-| Status | Execution baseline |
+| Status | Historical execution baseline; superseded by Platform Constitution v2 |
 | Owner | Assayer maintainers |
 | Primary client | Codex CLI |
 
+> **Superseded.** This plan records an earlier product sequence and is retained
+> for traceability. New work follows Platform Constitution v2, the compiled
+> ordinary-plugin contract, and an approved Design Confirmation. The platform
+> does not embed a domain rule set.
+
 ## 1. Purpose
 
-Assayer is being developed as a stable, domain-neutral audit platform with an
-independently installable plugin ecosystem. The first product journey is the
-anonymous URL frontend audit, but the platform must also support non-browser
-domains such as specifications, configuration, repositories, APIs, databases,
-and logs.
+Assayer is a domain-neutral capability platform. The platform owns lifecycle,
+source access, review planning, evidence, coverage, recovery, persistence,
+result projection, and release. Plugins provide only domain declarations and
+business examples; Providers supply source capabilities.
 
 This plan turns the earlier C03-C08 implementation work and the J00-J08 user
 journey into one delivery sequence. It is the planning authority for priority

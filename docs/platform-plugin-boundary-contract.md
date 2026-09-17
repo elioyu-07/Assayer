@@ -4,9 +4,13 @@
 |---|---|
 | Document version | 1.4.0 |
 | Date | 2026-09-13 |
-| Status | Simple author boundary frozen; implementation migration pending |
+| Status | Superseded by Platform Constitution v2; retained as historical migration reference |
 | Authority | Derived from Platform Constitution v1.1 and Audit Plugin Contract v1.1 |
 | Scope | Ownership, dependency direction, Simple SDK, Advanced SPI, and migration gates |
+
+> **Superseded.** Advanced SPI and parallel ordinary-plugin paths described in
+> this historical record are no longer permitted. Platform Constitution v2 is
+> the active boundary.
 
 ## 1. Decision
 
@@ -178,7 +182,8 @@ Migration order is:
 2. add frozen typed source snapshots and Support resolution;
 3. add the compiler and Simple public surface;
 4. migrate `minimal` with result equivalence;
-5. migrate `ass-spec` with result equivalence and mechanical-code reduction;
+5. migrate the next Advanced SPI plugin with result equivalence and
+   mechanical-code reduction;
 6. move low-level exports to the advanced namespace; and
 7. deprecate the top-level Advanced SPI only after adapter and installed-wheel
    acceptance are green.
