@@ -84,8 +84,8 @@ another's resource limit; global admission remains future work.
 | Host A owns Run A; Host B starts | B may restore Run A and replace A's `ownerEpoch` |
 | Host A submits after B takes over | A receives `STALE_RUN_OWNER` and cannot write |
 | Host B is intended for a new target | B may see Run A as its active Run and return `RUN_CONFLICT` |
-| A frontend Host starts while a Spec Run exists | Frontend process construction can still restore and re-own the Spec Run |
-| Several windows run frontend audits | Random Scan directories usually isolate artifacts, but browser and CPU limits are per process, not global |
+| A Host for one plugin starts while another plugin's Run exists | Host construction can still restore and re-own the unrelated Run |
+| Several windows run independent audits | Per-Run output directories usually isolate artifacts, but browser and CPU limits are per process, not global |
 | Codex task exits unexpectedly | The MCP process may remain alive; the Run remains recoverable, but no clear owner handoff exists |
 
 The existing fencing and idempotency rules are valuable: they normally prevent
@@ -385,7 +385,7 @@ These are not user-facing fields. The Skill and Host assemble protocol
 identifiers internally. Users should continue to provide only intent and
 business input.
 
-The legacy frontend names remain compatibility aliases. They must bind to the
+The legacy vertical names remain compatibility aliases. They must bind to the
 Run associated with their current session and may not discover or mutate a
 different active Run.
 
@@ -426,10 +426,10 @@ The importer must never assign a new Owner solely because a Host started.
 
 ### 11.2 Existing outputs
 
-Current Run directories, `platform-ledger.json`, checkpoints, professional
-frontend artifacts, and `canonical-result.json` remain readable. Registry rows
-refer to contained relative paths and source-ledger digests. Historical Runs
-are never reinterpreted by a newer plugin or Check version.
+Current Run directories, `platform-ledger.json` and its views, and checkpoints
+remain readable. Registry rows refer to contained relative paths and
+source-ledger digests. Historical Runs are never reinterpreted by a newer
+plugin or Check version.
 
 ### 11.3 Compatibility failure
 
@@ -574,7 +574,7 @@ crash/restart, duplicate replay, stale revision, and ambiguous selection.
 - Add cross-process browser/resource reservations.
 - Import valid legacy pointers without automatic ownership transfer.
 - Add capacity queue/retry behavior and machine-level observability.
-- Validate frontend compatibility aliases and generic plugin lifecycle together.
+- Validate legacy compatibility aliases and generic plugin lifecycle together.
 
 **Exit gate:** multiple independent CLI Runs complete concurrently within a
 bounded resource budget, and pre-upgrade artifacts remain recoverable.
@@ -583,8 +583,8 @@ bounded resource budget, and pre-upgrade artifacts remain recoverable.
 
 | ID | Scenario | Required evidence |
 |---|---|---|
-| MW-UAT-01 | Two CLI windows start different Spec files | Both create independent Runs and proceed without `RUN_CONFLICT` |
-| MW-UAT-02 | CLI window A runs Spec while window B starts frontend audit | Neither Run changes the other's Owner or semantic task |
+| MW-UAT-01 | Two CLI windows start different plugin Runs | Both create independent Runs and proceed without `RUN_CONFLICT` |
+| MW-UAT-02 | CLI window A runs one plugin while window B starts another | Neither Run changes the other's Owner or semantic task |
 | MW-UAT-03 | Two Hosts attempt the same Run resume | Exactly one lease claim succeeds; the loser receives actionable state |
 | MW-UAT-04 | Host A is interrupted after a checkpoint | Host B explicitly resumes the same Run without duplicate checkpoint or Decision |
 | MW-UAT-05 | Old Host submits after B takes over | Mutation is rejected before persistence; ledger digest is unchanged |
@@ -595,7 +595,7 @@ bounded resource budget, and pre-upgrade artifacts remain recoverable.
 | MW-UAT-10 | Terminal Run is replayed from another window | Result is read-only and cannot be reopened or mutated |
 
 The full user-journey gate must still prove `completed`, `partial`, and
-`failed` behavior, valid `canonical-result.json`, no duplicate Evidence or
+`failed` behavior, a valid ledger state, no duplicate Evidence or
 Decision records, and no secrets in artifacts. Multi-window success cannot
 replace the existing clean CLI and release-lifecycle gates.
 

@@ -88,7 +88,8 @@ operator-acceptance/<timestamp>-<execution-id>/
     ├── platform-ledger.json
     ├── platform-events.jsonl
     ├── platform-run.log
-    ├── canonical-result.json
+    ├── platform-observability.json
+    ├── platform-performance-bill.json
     └── audit-report.md
 ```
 
@@ -122,7 +123,7 @@ input. The output root MUST be outside the source checkout:
 python scripts/prepare_operator_acceptance.py \
   --output-root /absolute/operator-evidence-root \
   --release-artifact /absolute/release/assayer.whl \
-  --controlled-input /absolute/fixtures/spec.md
+  --controlled-input /absolute/fixtures/controlled-input.md
 ```
 
 The command creates a path-safe evidence skeleton plus a private launch
@@ -130,8 +131,8 @@ environment. `gate-results.json` is deliberately absent until the real product
 journey produces an operator verdict; preparation is not acceptance evidence.
 
 ```text
-Install ass-spec from the configured Assayer catalog.
-Use ass-spec to review the controlled spec.md input.
+Install the release-candidate plugin from the configured Assayer catalog.
+Use it to review the controlled input file.
 Show the conclusion and the full report location.
 ```
 

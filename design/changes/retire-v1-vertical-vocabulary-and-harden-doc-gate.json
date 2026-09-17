@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "changeId": "retire-v1-vertical-vocabulary-and-harden-doc-gate",
+  "changeType": "contract_change",
+  "title": "Retire the remaining v1 vertical vocabulary and harden the document gate",
+  "summary": "The document alignment left two kept documents teaching retired v1 vertical and result vocabulary: docs/operator-release-gate-v1.md still listed canonical-result.json in the acceptance bundle and used concrete ass-spec/spec.md examples, and docs/multi-window-run-isolation-and-host-lifecycle-design.md still said frontend/Spec/canonical-result. A compiled Run emits platform-ledger.json, platform-events.jsonl, platform-run.log, platform-observability.*, and platform-performance-bill.*, and a terminal review atom is one of satisfied, violated, not_applicable, unknown, or blocked; canonical-result.json is not produced. This change makes operator-release-gate-v1.md domain-neutral, makes the multi-window design domain-neutral, adds operator-release-gate-v1.md to NORMATIVE_DOCUMENTS so it cannot regress, removes the superseded capability-provider-contract-v1.md from that set, and repoints the superseded host-agent-protocol.md banner at the v2 authority instead of the retired llm-agent-orchestration.md. Follow-up note: the earlier align-readme-and-retire-legacy-vertical-docs.json acceptance claimed check_english_text.py stays green; that script is in fact rc=1 with 1788 lines identical to origin/main, so the red is pre-existing and not introduced by that change.",
+  "changedPaths": [
+    "scripts/check_document_boundaries.py",
+    "docs/operator-release-gate-v1.md",
+    "docs/multi-window-run-isolation-and-host-lifecycle-design.md",
+    "docs/host-agent-protocol.md"
+  ],
+  "authorityDocuments": [
+    "docs/platform-constitution-v2.md",
+    "docs/design-confirmation-contract-v1.md"
+  ],
+  "ownership": {
+    "platform": ["The platform owns the document boundary gate and the normative document set"],
+    "plugin": ["No plugin runtime change; plugin-facing documentation only"],
+    "provider": ["No provider change"],
+    "agent": ["No agent change"]
+  },
+  "capabilities": {
+    "inputKinds": [],
+    "required": []
+  },
+  "forbiddenResponsibilities": [
+    "The gate must not forbid a term that is still current platform vocabulary",
+    "No document may be exempted from the gate to make it pass",
+    "The change must not alter the emitted Run artifact set or the terminal result vocabulary"
+  ],
+  "publicContractImpact": "semantic",
+  "acceptance": [
+    "docs/operator-release-gate-v1.md lists the emitted platform views (platform-observability.json, platform-performance-bill.json) and no canonical-result.json",
+    "docs/operator-release-gate-v1.md and docs/multi-window-run-isolation-and-host-lifecycle-design.md carry no forbidden domain or retired result term",
+    "docs/operator-release-gate-v1.md is in NORMATIVE_DOCUMENTS and the boundary check passes",
+    "the superseded docs/capability-provider-contract-v1.md is no longer in NORMATIVE_DOCUMENTS",
+    "docs/host-agent-protocol.md no longer names the retired llm-agent-orchestration.md as the authoritative runtime model",
+    "scripts/check_document_boundaries.py returns 0 and scripts/run_tests.py fast and full stay green"
+  ],
+  "humanApproval": {
+    "required": true,
+    "status": "approved",
+    "approver": "于旸",
+    "approvedAt": "2026-09-17T14:57:28+08:00",
+    "decision": "Covered by the standing authorization in #assayer-group:4c84ee19 ('修 CI，对齐文档。') for the documentation-alignment refactor; @assayer_rev independently reviewed and scoped this cleanup on 2026-09-17."
+  },
+  "state": "approved"
+}

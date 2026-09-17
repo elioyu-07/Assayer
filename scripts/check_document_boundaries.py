@@ -17,7 +17,7 @@ from pathlib import Path
 NORMATIVE_DOCUMENTS = (
     "docs/plugin-contract-v1.md",
     "docs/plugin-development-standard-v1.md",
-    "docs/capability-provider-contract-v1.md",
+    "docs/operator-release-gate-v1.md",
     "docs/plugin-development.md",
     "docs/platform-constitution-v2.md",
     "docs/design-confirmation-contract-v1.md",

@@ -6,7 +6,7 @@
 > current implementation guidance.
 
 
-> C05 status: dynamic Runtime Router, fixed output root, per-Scan isolation, Agent lease supervision, project MCP configuration, and formal `audit`/deterministic `smoke` separation are implemented. The authoritative loop is [LLM Investigation Orchestration](llm-agent-orchestration.md).
+> C05 status: dynamic Runtime Router, fixed output root, per-Scan isolation, Agent lease supervision, project MCP configuration, and formal `audit`/deterministic `smoke` separation are implemented. The authoritative runtime model is [Platform Constitution v2](platform-constitution-v2.md).
 
 ## 1. Scope
 
